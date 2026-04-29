@@ -69,19 +69,124 @@ For coordination with other agents (clarification, broadcasts, peer questions),
 load the `inter-agent-channels` skill when blocked, broadcasting, or seeking peer input.
 ```
 
-### Try the examples
+### Try the scripted examples
 
-Two end-to-end scenarios in the repo:
+Two end-to-end scenarios in the repo (no Claude API key required):
 
 ```bash
-cd examples/two-agent-clarification
-bash run.sh  # two agents collaborate; Agent A posts a question, Agent B answers
-
-cd ../group-broadcast
-bash run.sh  # Agent A broadcasts status; all agents in the channel see it
+make demo           # two-agent clarification + reconcile
+make demo-broadcast # three-agent status broadcast
 ```
 
-See each example's `README.md` for the agent prompts and walkthrough.
+### Try it live: two Claude shells collaborating
+
+This demo runs two real Claude Code sessions side-by-side. Each agent
+reads a different half of your codebase and they coordinate findings
+via SOX channels — you watch the messages arrive in each terminal.
+
+**Prerequisites:** SOX installed in your project (`pip install sox-protocol &&
+python -m sox_protocol.adapters.runtimes.claude_code install`), then restart
+Claude Code so the MCP server is picked up.
+
+**Step 1 — open two terminals, both in your project root**
+
+**Step 2 — watch the message stream in a third terminal (optional but satisfying)**
+
+```bash
+watch -n2 'sqlite3 .sox/messages.db \
+  "select datetime(sent_at, \"unixepoch\", \"localtime\"), sender, \
+   json_extract(body, \"$.type\"), \
+   substr(coalesce(json_extract(body, \"$.subject\"), json_extract(body, \"$.text\")), 1, 60) \
+   from messages order by sent_at"'
+```
+
+**Step 3 — terminal 1: launch Claude as `product-agent`**
+
+```bash
+SOX_AGENT_ID=product-agent claude
+```
+
+Paste this prompt:
+
+```
+You are a product analyst doing a first-pass review of this codebase.
+Your job: understand what this project does, who it's for, and what
+the most valuable next feature would be.
+
+Read the README, any docs/ folder, existing tests (to understand
+what's already built), and any FUTURE or ROADMAP files if they exist.
+Do NOT read implementation source yet — that's your peer's job.
+
+Your peer is "engineer-agent" on channel "ticket:REVIEW-001". They
+are reading the implementation in parallel.
+
+COMMUNICATION RULES:
+- Start by subscribing to ticket:REVIEW-001.
+- WHENEVER YOU DRAIN: print "📬 INBOX DRAIN" followed by every
+  message received, quoted exactly:
+    [from: <sender>] <type> — <subject>
+    "<full answer or context field>"
+  If empty, print "📭 inbox empty".
+- When you send a question, print:
+    📤 SENT TO PEER: <subject> — <question>
+- After each received message, write one sentence on how it changes
+  your thinking before continuing.
+
+As you form hypotheses — "I think X would be valuable, but I don't
+know if the architecture supports it" — send a clarification_request
+and keep going. Don't wait. Drain at each major checkpoint.
+
+When done, send a final status_update. Do a last drain and incorporate
+any answers into your conclusion.
+
+Deliver: a one-page feature proposal with a confidence rating on each
+assumption, noting which were confirmed or denied by engineer-agent.
+```
+
+**Step 4 — terminal 2: launch Claude as `engineer-agent`**
+
+```bash
+SOX_AGENT_ID=engineer-agent claude
+```
+
+Paste this prompt:
+
+```
+You are a senior engineer doing a first-pass review of this codebase.
+Your job: understand the architecture, the quality of the
+implementation, and what would be easy vs hard to change.
+
+Read the source code — structure, key modules, tests, any CI config.
+Do NOT read docs or README yet — that's your peer's job.
+
+Your peer is "product-agent" on channel "ticket:REVIEW-001". They
+are reading the docs and forming a feature proposal in parallel.
+
+COMMUNICATION RULES:
+- Start by subscribing to ticket:REVIEW-001.
+- WHENEVER YOU DRAIN: print "📬 INBOX DRAIN" followed by every
+  message received, quoted exactly:
+    [from: <sender>] <type> — <subject>
+    "<full question or context field>"
+  If empty, print "📭 inbox empty".
+- When you reply to a question, print:
+    📤 REPLIED TO PEER: <subject> — <your answer in one sentence>
+- After each received message, write one sentence on how it affects
+  your code review before continuing.
+
+Drain at each major checkpoint. When a clarification_request arrives,
+answer with a clarification_reply (same correlation_id) and keep going.
+
+When done, send a status_update with your architectural assessment.
+
+Deliver: a short technical brief — key architectural facts, one risk
+area, and your verdict on the feature proposal once you've seen it.
+```
+
+**What you'll see:** product-agent prints `📭 inbox empty` on early drains while
+engineer-agent is still reading code. Later drains print `📬 INBOX DRAIN` with
+engineer-agent's answers arriving mid-analysis. Neither agent ever stalled —
+that's the speculative-then-reconcile pattern working as designed.
 
 ---
 
