@@ -4,7 +4,7 @@
 PYTHON_PKG := packages/python
 SPEC_SCHEMAS := spec/schemas
 
-.PHONY: codegen test lint typecheck import-lint ci
+.PHONY: codegen test lint typecheck import-lint ci demo demo-broadcast test-integration
 
 # ---------------------------------------------------------------------------
 # codegen — regenerate Python types from spec/schemas/
@@ -61,6 +61,36 @@ import-lint:
 	cd $(PYTHON_PKG) && python -m lint-imports
 
 # ---------------------------------------------------------------------------
+# demo — run the two-agent-clarification demo end-to-end
+#
+# Requires: pip install -e packages/python[dev]   (or: pip install sox-protocol)
+# No Claude API key needed: runs entirely in-process with SQLite.
+# ---------------------------------------------------------------------------
+demo:
+	@echo "==> Running DEMO-001: two-agent-clarification ..."
+	python examples/two-agent-clarification/run_demo.py
+
+# ---------------------------------------------------------------------------
+# demo-broadcast — run the group-broadcast demo end-to-end
+# ---------------------------------------------------------------------------
+demo-broadcast:
+	@echo "==> Running DEMO-002: group-broadcast ..."
+	python examples/group-broadcast/run_demo.py
+
+# ---------------------------------------------------------------------------
+# test-integration — run M7 integration tests (CI-safe, no LLM API needed)
+#
+# Uses recorded/in-process responses via FastMCP's in-process Client harness.
+# No network access required. Runs on Python 3.11+ (Linux and macOS).
+# ---------------------------------------------------------------------------
+test-integration:
+	@echo "==> Running M7 integration tests ..."
+	cd $(PYTHON_PKG) && \
+		python -m pytest tests/integration/test_two_agent_exchange.py \
+			-v \
+			--tb=short
+
+# ---------------------------------------------------------------------------
 # ci — run all checks
 # ---------------------------------------------------------------------------
-ci: lint typecheck import-lint test
+ci: lint typecheck import-lint test test-integration

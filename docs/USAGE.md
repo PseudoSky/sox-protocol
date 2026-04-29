@@ -317,6 +317,49 @@ By design, the stop hook (when `SOX_FORCE_DRAIN_ON_STOP=true`) blocks agent exit
 
 Run `python -m sox_protocol.cli tail ticket:ENGI-0042` for a live tail. Or query the SQLite store directly. A graphical tool is in [FUTURE.md](./FUTURE.md) §7.
 
+### 7.7 "My agent receives its own sent messages on the next `recv`"
+
+By design. An agent that is subscribed to a channel receives **all** messages on that channel, including ones it sent itself. This is consistent with a pub/sub model: the sender is also a subscriber.
+
+**This is not a bug** — it is what allows agents to maintain a coherent view of the conversation, including their own contributions.
+
+**If you want to filter out self-messages**, check the `sender` field:
+
+```python
+reply = channels__recv()
+peer_messages = [m for m in reply["messages"] if m["sender"] != MY_AGENT_ID]
+```
+
+The discipline's reconciliation recipe already accounts for this: when draining inbox after sending a clarification request, an agent filters for messages of `type: clarification_reply` from senders other than itself. Do not assert on the total message count when the agent is subscribed to the channel it sent on.
+
+### 7.8 "Demo runner exits with 'Demo FAILED: assertion error'"
+
+Most likely cause: a timing issue where the background listener has not yet
+delivered a message when `recv` is called.
+
+The demo runners and integration tests include `asyncio.sleep(0.1–0.15)` pauses
+between `send` and the subsequent `recv` to allow the watch loop (which polls
+every 50 ms) to pick up and buffer new messages. If your environment is under
+heavy load, you may need to increase these sleeps.
+
+For CI environments with slow I/O, set `SOX_WATCH_POLL_INTERVAL_MS=25` to make
+the listener more responsive (at the cost of slightly higher SQLite read traffic).
+
+### 7.9 "Three-agent broadcast: implementer sees its own broadcast in its final drain"
+
+Expected behaviour. When the implementer broadcasts on `ticket:DEMO-002` and
+then drains its own inbox, it receives the broadcast it sent — because it is
+subscribed. The correct check is:
+
+```python
+# Does NOT assert inbox is empty — implementer sees own broadcast.
+non_self_msgs = [m for m in inbox if m["sender"] != "implementer"]
+assert non_self_msgs == []  # no *peer* replies
+```
+
+See `examples/group-broadcast/run_demo.py` Phase 6 for the reference
+implementation of this pattern.
+
 ---
 
 ## 8. Operational concerns
