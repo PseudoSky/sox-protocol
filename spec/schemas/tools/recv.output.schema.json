@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/recv.output.schema.json",
+  "title": "channels__recv — output",
+  "description": "Output schema for the channels__recv MCP tool. Returns messages accumulated since the last drain, marked as delivered to this agent atomically. Defined in CONTRACTS.md §5.2.",
+  "type": "object",
+  "required": ["drained_at", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "drained_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating point) at which this drain operation completed in the backing store."
+    },
+    "messages": {
+      "type": "array",
+      "description": "Ordered list of messages drained. Within each channel, messages are in send-time order (ascending sent_at). Across channels, order is unspecified. Each element conforms to spec/schemas/message.schema.json (inlined here for standalone schema compilation).",
+      "items": {
+        "type": "object",
+        "required": ["channel", "sender", "body", "sent_at", "message_id"],
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the channel this message was sent to."
+          },
+          "sender": {
+            "type": "string",
+            "minLength": 1,
+            "description": "agent_id of the agent that sent the message."
+          },
+          "body": {
+            "type": "object",
+            "description": "Opaque message payload. See CONTRACTS.md §9 for recommended field conventions.",
+            "additionalProperties": true
+          },
+          "correlation_id": {
+            "type": ["string", "null"],
+            "maxLength": 128,
+            "description": "Optional correlation token. Null if not supplied by the sender."
+          },
+          "sent_at": {
+            "type": "number",
+            "description": "Unix epoch seconds at which the backing store accepted the message."
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Backing-store-assigned unique identifier for this message."
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "drained_at": 1714300010.0,
+      "messages": []
+    },
+    {
+      "drained_at": 1714300010.0,
+      "messages": [
+        {
+          "channel": "ticket:ENGI-0042",
+          "sender": "agent-alpha",
+          "body": {
+            "type": "clarification_request",
+            "subject": "Which schema version?",
+            "question": "v2 or v3?"
+          },
+          "correlation_id": "req-001",
+          "sent_at": 1714300000.0,
+          "message_id": "msg-0000001"
+        }
+      ]
+    }
+  ]
+}

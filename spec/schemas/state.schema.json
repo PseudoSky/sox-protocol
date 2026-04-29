@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/state.schema.json",
+  "title": "State",
+  "description": "Per-agent enforcer state, persisted across hook invocations and updated transactionally on each decide() call. Defined in CONTRACTS.md §3.2.",
+  "type": "object",
+  "required": ["schema_version", "agent_id"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Protocol schema version. MUST be '1.0' for this revision."
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier of the agent this state record belongs to."
+    },
+    "tool_calls_since_drain": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Count of tool calls that have completed since the most recent channels__recv call. Reset to 0 on each recv."
+    },
+    "last_drain_ts": {
+      "type": ["number", "null"],
+      "default": null,
+      "description": "Unix epoch seconds of the most recent channels__recv call. Null if the agent has never drained."
+    },
+    "last_send_ts": {
+      "type": ["number", "null"],
+      "default": null,
+      "description": "Unix epoch seconds of the most recent channels__send call. Null if the agent has never sent."
+    },
+    "sends_since_last_drain": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Count of channels__send calls since the most recent channels__recv. Reset to 0 on each recv."
+    },
+    "turns_since_last_drain": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Count of LLM turns (turn_started events) since the most recent channels__recv. Reset to 0 on each recv."
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "agent_id": "agent-alpha",
+      "tool_calls_since_drain": 0,
+      "last_drain_ts": null,
+      "last_send_ts": null,
+      "sends_since_last_drain": 0,
+      "turns_since_last_drain": 0
+    },
+    {
+      "schema_version": "1.0",
+      "agent_id": "agent-beta",
+      "tool_calls_since_drain": 7,
+      "last_drain_ts": 1714300000.0,
+      "last_send_ts": 1714300005.5,
+      "sends_since_last_drain": 1,
+      "turns_since_last_drain": 3
+    }
+  ]
+}

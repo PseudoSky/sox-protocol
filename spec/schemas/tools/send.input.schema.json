@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/send.input.schema.json",
+  "title": "channels__send — input",
+  "description": "Input schema for the channels__send MCP tool. The tool is non-blocking: it returns as soon as the message is durably accepted by the backing store. Defined in CONTRACTS.md §5.1.",
+  "type": "object",
+  "required": ["channel", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "channel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Name of the channel to send the message to. Examples: 'ticket:ENGI-0042', 'agent:agent-beta', 'broadcast:status'."
+    },
+    "body": {
+      "type": "object",
+      "description": "Opaque message payload. MUST be a JSON object. See CONTRACTS.md §9 for recommended field conventions.",
+      "additionalProperties": true
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "Optional correlation token supplied by the caller for request-reply matching or at-least-once deduplication. Stored verbatim and echoed back in recv output."
+    }
+  },
+  "examples": [
+    {
+      "channel": "ticket:ENGI-0042",
+      "body": {
+        "type": "clarification_request",
+        "subject": "Which schema version?",
+        "question": "The task mentions v2 but production is v3. Which do I target?"
+      },
+      "correlation_id": "req-001"
+    },
+    {
+      "channel": "broadcast:status",
+      "body": {
+        "type": "status_update",
+        "subject": "PR #42 open for review"
+      },
+      "correlation_id": null
+    }
+  ]
+}

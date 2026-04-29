@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/recv.input.schema.json",
+  "title": "channels__recv — input",
+  "description": "Input schema for the channels__recv MCP tool. The tool is non-blocking: it returns immediately with whatever messages have accumulated since the last drain. Defined in CONTRACTS.md §5.2.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "channels": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Optional list of channel names to drain. When null (or omitted), all channels the calling agent is subscribed to are drained."
+    },
+    "max_messages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 50,
+      "description": "Maximum number of messages to return in a single call. Oldest messages (by sent_at, per-channel) are returned first up to this limit."
+    }
+  },
+  "examples": [
+    {},
+    {
+      "channels": null,
+      "max_messages": 50
+    },
+    {
+      "channels": ["ticket:ENGI-0042"],
+      "max_messages": 10
+    }
+  ]
+}

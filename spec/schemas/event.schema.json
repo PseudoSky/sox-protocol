@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/event.schema.json",
+  "title": "Event",
+  "description": "An event delivered to the cadence enforcer's decide() function. Describes a lifecycle moment for a specific agent. Defined in CONTRACTS.md §3.1.",
+  "type": "object",
+  "required": ["schema_version", "event_type", "agent_id", "timestamp"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Protocol schema version. MUST be '1.0' for this revision."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "tool_used",
+        "channel_send",
+        "channel_recv",
+        "turn_started",
+        "stop_requested"
+      ],
+      "description": "Discriminator for the event. 'tool_used' fires on any tool call completion; 'channel_send' / 'channel_recv' fire on SOX tool calls specifically; 'turn_started' fires when the agent begins a new LLM turn; 'stop_requested' fires when the agent is about to exit."
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier of the agent that produced this event."
+    },
+    "timestamp": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating point) at which the event occurred."
+    },
+    "tool_name": {
+      "type": ["string", "null"],
+      "description": "Name of the tool that was called. Populated for event_type 'tool_used'; SHOULD be null for all other event types."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary key-value pairs for adapter-specific context. Implementations MUST NOT rely on any particular metadata field for core enforcer logic.",
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "event_type": "tool_used",
+      "agent_id": "agent-alpha",
+      "timestamp": 1714300000.0,
+      "tool_name": "bash",
+      "metadata": {}
+    },
+    {
+      "schema_version": "1.0",
+      "event_type": "channel_recv",
+      "agent_id": "agent-alpha",
+      "timestamp": 1714300005.5,
+      "tool_name": null,
+      "metadata": {}
+    },
+    {
+      "schema_version": "1.0",
+      "event_type": "stop_requested",
+      "agent_id": "agent-alpha",
+      "timestamp": 1714300010.0,
+      "tool_name": null,
+      "metadata": {}
+    }
+  ]
+}

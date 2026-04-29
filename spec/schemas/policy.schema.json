@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/policy.schema.json",
+  "title": "Policy",
+  "description": "Operator-tunable parameters governing the cadence enforcer. Loaded from ${SOX_CONFIG_DIR}/policy.toml if present, falling back to the defaults specified here. Defined in CONTRACTS.md §4.",
+  "type": "object",
+  "required": ["schema_version"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Protocol schema version. MUST be '1.0' for this revision."
+    },
+    "reminder_threshold_tool_calls": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 5,
+      "description": "Number of tool calls (tool_used events) since last drain after which a reminder injection is triggered."
+    },
+    "reminder_threshold_turns": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 3,
+      "description": "Number of LLM turns (turn_started events) since last drain after which a reminder injection is triggered."
+    },
+    "force_drain_on_stop": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, a stop_requested event while the agent's inbox is non-empty produces a 'block' decision requiring the agent to drain before exiting."
+    },
+    "send_followed_by_idle_turns": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 3,
+      "description": "Number of turns after a channels__send with no subsequent channels__recv that triggers a send-and-wait anti-pattern warning."
+    },
+    "suspect_send_and_wait": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, enables the send-and-wait anti-pattern detection governed by send_followed_by_idle_turns."
+    },
+    "reminder_text_drain": {
+      "type": "string",
+      "default": "You have not checked the channels inbox in a while. Call {{recv_tool}} before continuing if you may be waiting on input.",
+      "description": "Injected message when tool_calls_since_drain or turns_since_last_drain crosses its threshold. MUST use {{recv_tool}} placeholder rather than a concrete tool name."
+    },
+    "reminder_text_drain_on_stop": {
+      "type": "string",
+      "default": "Inbox not drained. Call {{recv_tool}} and integrate any messages before completing the task.",
+      "description": "Block message produced on stop_requested when inbox is non-empty and force_drain_on_stop is true. MUST use {{recv_tool}} placeholder rather than a concrete tool name."
+    },
+    "reminder_text_send_and_wait": {
+      "type": "string",
+      "default": "You sent a message and have not made progress. Per the discipline, continue under your best-guess interpretation while awaiting reply. Drain the inbox at the next major decision.",
+      "description": "Injected message when the send-and-wait anti-pattern is detected. MUST use placeholder tokens rather than concrete tool names where tool references are needed."
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "reminder_threshold_tool_calls": 5,
+      "reminder_threshold_turns": 3,
+      "force_drain_on_stop": true,
+      "send_followed_by_idle_turns": 3,
+      "suspect_send_and_wait": true,
+      "reminder_text_drain": "You have not checked the channels inbox in a while. Call {{recv_tool}} before continuing if you may be waiting on input.",
+      "reminder_text_drain_on_stop": "Inbox not drained. Call {{recv_tool}} and integrate any messages before completing the task.",
+      "reminder_text_send_and_wait": "You sent a message and have not made progress. Per the discipline, continue under your best-guess interpretation while awaiting reply. Drain the inbox at the next major decision."
+    },
+    {
+      "schema_version": "1.0",
+      "reminder_threshold_tool_calls": 10,
+      "reminder_threshold_turns": 5,
+      "force_drain_on_stop": false,
+      "send_followed_by_idle_turns": 5,
+      "suspect_send_and_wait": false,
+      "reminder_text_drain": "Reminder: check {{recv_tool}} for pending messages.",
+      "reminder_text_drain_on_stop": "Drain inbox via {{recv_tool}} before stopping.",
+      "reminder_text_send_and_wait": "Continue working under best-guess; drain inbox at next checkpoint."
+    }
+  ]
+}

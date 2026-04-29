@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/list-channels.output.schema.json",
+  "title": "channels__list_channels — output",
+  "description": "Output schema for the channels__list_channels MCP tool. Returns all channels with at least one subscriber or at least one message stored in the last 24 hours, plus the protocol version of the serving MCP node. This is also the mechanism by which adapters detect protocol version mismatches. Defined in CONTRACTS.md §5.4.",
+  "type": "object",
+  "required": ["channels", "protocol_version"],
+  "additionalProperties": false,
+  "properties": {
+    "channels": {
+      "type": "array",
+      "description": "List of discoverable channels.",
+      "items": {
+        "type": "object",
+        "required": ["name", "subscriber_count"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Fully-qualified channel name."
+          },
+          "subscriber_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of agents currently subscribed to this channel."
+          }
+        }
+      }
+    },
+    "protocol_version": {
+      "type": "string",
+      "description": "Protocol version advertised by this MCP server node (e.g. '1.0'). Runtime adapters MUST compare the MAJOR component against their own and refuse to operate on a MAJOR mismatch per CONTRACTS.md §8."
+    }
+  },
+  "examples": [
+    {
+      "channels": [],
+      "protocol_version": "1.0"
+    },
+    {
+      "channels": [
+        {
+          "name": "ticket:ENGI-0042",
+          "subscriber_count": 2
+        },
+        {
+          "name": "broadcast:status",
+          "subscriber_count": 5
+        }
+      ],
+      "protocol_version": "1.0"
+    }
+  ]
+}
