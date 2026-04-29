@@ -1,0 +1,51 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nix/dev/ai/sox-protocol/tools/sox-hooks/post_tool_use.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nix/dev/ai/sox-protocol/tools/sox-hooks/stop.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/nix/dev/ai/sox-protocol/tools/sox-hooks/stop.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "sox": {
+      "type": "stdio",
+      "command": "/opt/homebrew/Caskroom/miniconda/base/bin/python",
+      "args": [
+        "-m",
+        "sox_protocol.core.mcp_server"
+      ],
+      "env": {
+        "SOX_BACKING_STORE": "sqlite:////Users/nix/dev/ai/sox-protocol/.sox/messages.db",
+        "SOX_AGENT_ID_SOURCE": "env:CLAUDE_AGENT_NAME"
+      }
+    }
+  }
+}

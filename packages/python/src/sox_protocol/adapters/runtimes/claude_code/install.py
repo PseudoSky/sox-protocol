@@ -214,12 +214,12 @@ def _load_settings(settings_path: Path) -> dict[str, Any]:
 
 
 def _build_hook_entry(project_dir: Path, event: str) -> dict[str, Any]:
-    """Construct a single hook entry for settings.json."""
+    """Construct a single hook entry for settings.json (Claude Code ≥0.2 format)."""
     hook_script_name = _event_to_script_name(event)
     hook_path = _hooks_install_dir(project_dir) / hook_script_name
     return {
-        "type": "command",
-        "command": str(hook_path),
+        "matcher": "",
+        "hooks": [{"type": "command", "command": str(hook_path)}],
     }
 
 
@@ -243,9 +243,20 @@ def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
     hooks_section: dict[str, Any] = settings.setdefault("hooks", {})
     for event in _HOOK_EVENTS:
         hook_entry = _build_hook_entry(project_dir, event)
-        event_hooks: list[dict[str, Any]] = hooks_section.setdefault(event, [])
-        # Idempotency: check if an entry with this command already exists
-        if not any(h.get("command") == hook_entry["command"] for h in event_hooks):
+        target_cmd = hook_entry["hooks"][0]["command"]
+        # Migrate: remove any old-format entries (bare {"type","command"}) for our script
+        event_hooks_raw: list[dict[str, Any]] = hooks_section.setdefault(event, [])
+        hooks_section[event] = [
+            h for h in event_hooks_raw
+            if h.get("command") != target_cmd  # drop old-format entries for our script
+        ]
+        event_hooks = hooks_section[event]
+        # Idempotency: skip if new-format entry already present
+        already_registered = any(
+            any(h2.get("command") == target_cmd for h2 in h.get("hooks", []))
+            for h in event_hooks
+        )
+        if not already_registered:
             event_hooks.append(hook_entry)
 
     # --- MCP server ---
