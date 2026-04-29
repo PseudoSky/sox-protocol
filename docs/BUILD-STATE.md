@@ -166,12 +166,12 @@ Update this table as phases complete.
 | M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `DONE` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `DONE` | *interactive (no delegation)* | M1, M2, M3 |
-| M5 | Python Claude Code adapter | `IN_PROGRESS` | `python-pro` | — |
+| M5 | Python Claude Code adapter | `DONE` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `READY` | `test-automator` | — |
-| M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
+| M7 | End-to-end demos & integration | `READY` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
-**Currently next action:** M4 is `DONE`. M5 and M6 are both `READY`. Next: spawn `python-pro` for M5.
+**Currently next action:** M5 is `DONE`. M6 and M7 are both `READY`. Next: spawn `test-automator` for M6.
 
 ---
 
@@ -473,7 +473,7 @@ Mark M4 = `DONE`. Does not by itself unblock anything new (M5 only requires M3 +
 
 ## Phase M5 — Python Claude Code runtime adapter
 
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Prereqs:** M3, M4
 - **Unblocks on DONE:** M7
 - **Agent:** `python-pro`

@@ -30,9 +30,21 @@ dev = [
 
 [project.scripts]
 sox-mcp-server = "sox_protocol.core.mcp_server.server:main"
+sox = "sox_protocol.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sox_protocol"]
+
+[tool.hatch.build.targets.wheel.sources]
+# Bundle spec/discipline/ into the wheel under sox_protocol/spec/
+"../../spec" = "sox_protocol/spec"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "../../spec/discipline/",
+    "../../spec/VERSION",
+]
 
 # ---------------------------------------------------------------------------
 # pytest

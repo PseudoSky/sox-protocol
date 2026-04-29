@@ -1,0 +1,10 @@
+---
+name: inter-agent-channels
+description: >
+  Inter-agent coordination via async channels. Load this skill when blocked
+  waiting on a peer, broadcasting a status update, or seeking clarification
+  from another agent. Provides the send-and-continue pattern, polling cadence
+  rules, and the speculative-then-reconcile recipe.
+---
+
+{{discipline_body}}
