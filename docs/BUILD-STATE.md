@@ -168,7 +168,7 @@ Update this table as phases complete.
 | M4 | Discipline doc + worked examples | `DONE` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `DONE` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `DONE` | `test-automator` | — |
-| M7 | End-to-end demos & integration | `READY` | `test-automator` | — |
+| M7 | End-to-end demos & integration | `IN_PROGRESS` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
 **Currently next action:** M6 is `DONE`. M7 is `READY`. Next: spawn `test-automator` for M7.
@@ -624,7 +624,7 @@ Mark M6 = `DONE`. M6 is independent; it does not directly unblock any phase, but
 
 ## Phase M7 — End-to-end demos & integration tests
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M5
 - **Unblocks on DONE:** M8
 - **Agent:** `test-automator`
