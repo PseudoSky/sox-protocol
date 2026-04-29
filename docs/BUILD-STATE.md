@@ -163,7 +163,7 @@ Update this table as phases complete.
 |---|---|---|---|---|
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
 | M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
-| M2 | BackingStore binding + adapters | `READY` | `python-pro` | M1, M4 |
+| M2 | BackingStore binding + adapters | `IN_PROGRESS` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `BLOCKED` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `BLOCKED` | `python-pro` | — |
@@ -297,7 +297,7 @@ Mark M1 = `DONE`. If M2 was running in parallel and is also `DONE`, promote M3 t
 
 ## Phase M2 — Python BackingStore binding + reference adapters
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M0
 - **Unblocks on DONE:** M3
 - **Agent:** `python-pro`
