@@ -165,7 +165,7 @@ Update this table as phases complete.
 | M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `DONE` | `python-pro` | M4 |
-| M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
+| M4 | Discipline doc + worked examples | `IN_PROGRESS` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `BLOCKED` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `READY` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
@@ -413,7 +413,7 @@ Mark M3 = `DONE`. Promote M5, M6 to `READY`.
 
 ## Phase M4 — Discipline document and worked examples
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M0
 - **Unblocks on DONE:** M5 (a runtime adapter renders the discipline)
 - **Agent:** *no delegation — interactive with Claude directly*
