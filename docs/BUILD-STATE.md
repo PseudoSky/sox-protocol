@@ -166,7 +166,7 @@ Update this table as phases complete.
 | M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `DONE` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `DONE` | *interactive (no delegation)* | M1, M2, M3 |
-| M5 | Python Claude Code adapter | `READY` | `python-pro` | — |
+| M5 | Python Claude Code adapter | `IN_PROGRESS` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `READY` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
@@ -473,7 +473,7 @@ Mark M4 = `DONE`. Does not by itself unblock anything new (M5 only requires M3 +
 
 ## Phase M5 — Python Claude Code runtime adapter
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M3, M4
 - **Unblocks on DONE:** M7
 - **Agent:** `python-pro`
