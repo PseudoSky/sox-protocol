@@ -164,14 +164,14 @@ Update this table as phases complete.
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
 | M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
-| M3 | Python MCP server | `IN_PROGRESS` | `python-pro` | M4 |
+| M3 | Python MCP server | `DONE` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `BLOCKED` | `python-pro` | — |
-| M6 | Language-neutral conformance harness | `BLOCKED` | `test-automator` | — |
+| M6 | Language-neutral conformance harness | `READY` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
-**Currently next action:** M2 is `DONE`. M3 and M4 are `READY`. Orchestrator will spawn `python-pro` for M3 next (serial).
+**Currently next action:** M3 is `DONE`. M4 is `READY` (interactive — user must drive). M6 is `READY`. M5 is `BLOCKED` pending M4.
 
 ---
 
@@ -352,7 +352,7 @@ Mark M2 = `DONE`. If M1 also `DONE`, promote M3 to `READY`.
 
 ## Phase M3 — Python MCP server
 
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Prereqs:** M1, M2
 - **Unblocks on DONE:** M5, M6
 - **Agent:** `python-pro`

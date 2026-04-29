@@ -12,6 +12,8 @@ requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.20.0",
     "pydantic>=2.0.0",
+    "fastmcp>=2.0.0",
+    "jsonschema>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -23,7 +25,11 @@ dev = [
     "ruff>=0.4.0",
     "import-linter>=2.1.0",
     "datamodel-code-generator>=0.25.0",
+    "types-jsonschema>=4.0.0",
 ]
+
+[project.scripts]
+sox-mcp-server = "sox_protocol.core.mcp_server.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sox_protocol"]
