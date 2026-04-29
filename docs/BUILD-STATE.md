@@ -162,7 +162,7 @@ Update this table as phases complete.
 | Phase | Title | Status | Agent | Parallel with |
 |---|---|---|---|---|
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
-| M1 | Python core enforcer | `IN_PROGRESS` | `python-pro` | M2, M4 |
+| M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `READY` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `BLOCKED` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
@@ -171,7 +171,7 @@ Update this table as phases complete.
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
-**Currently next action:** M0 is `DONE`. M1, M2, M4 are `READY`. Orchestrator will spawn `python-pro` for M1 next (serial execution).
+**Currently next action:** M1 is `DONE`. M2 is `READY`. Orchestrator will spawn `python-pro` for M2 next.
 
 ---
 
@@ -241,7 +241,7 @@ Mark M0 = `DONE`. Promote M1, M2, M4 from `BLOCKED` to `READY`.
 
 ## Phase M1 — Python core enforcer
 
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Prereqs:** M0
 - **Unblocks on DONE:** M3, M5
 - **Agent:** `python-pro`

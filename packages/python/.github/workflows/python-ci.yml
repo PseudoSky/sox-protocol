@@ -1,0 +1,65 @@
+name: Python CI
+
+on:
+  push:
+    paths:
+      - "packages/python/**"
+      - "spec/schemas/**"
+      - ".github/workflows/python-ci.yml"
+  pull_request:
+    paths:
+      - "packages/python/**"
+      - "spec/schemas/**"
+      - ".github/workflows/python-ci.yml"
+
+defaults:
+  run:
+    working-directory: packages/python
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install package and dev dependencies
+        run: uv pip install --system -e ".[dev]"
+
+      - name: Ruff lint
+        run: python -m ruff check src/ tests/
+
+      - name: mypy --strict on core/
+        run: python -m mypy --strict src/sox_protocol/core/
+
+      - name: import-linter — core must not import adapters
+        run: python -m lint-imports
+
+      - name: pytest with coverage (100% on decide.py)
+        run: |
+          python -m pytest tests/unit/ \
+            --cov=sox_protocol.core.enforcer.decide \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=100 \
+            -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: packages/python/coverage.xml

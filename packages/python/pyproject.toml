@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sox-protocol"
+version = "0.0.1"
+description = "SOX Protocol — reference Python implementation of the inter-agent channels protocol."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "mypy>=1.10.0",
+    "ruff>=0.4.0",
+    "import-linter>=2.1.0",
+    "datamodel-code-generator>=0.25.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sox_protocol"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+# ---------------------------------------------------------------------------
+# coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["sox_protocol"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# packages/python is the root; mypy discovers src/ via the explicit namespace
+mypy_path = "src"
+explicit_package_bases = true
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+ignore = ["ANN101", "ANN102"]
+
+# ---------------------------------------------------------------------------
+# import-linter
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_packages = ["sox_protocol"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "core must not import from adapters"
+type = "forbidden"
+source_modules = ["sox_protocol.core"]
+forbidden_modules = ["sox_protocol.adapters"]
