@@ -164,7 +164,7 @@ Update this table as phases complete.
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
 | M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
-| M3 | Python MCP server | `READY` | `python-pro` | M4 |
+| M3 | Python MCP server | `IN_PROGRESS` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `BLOCKED` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `BLOCKED` | `test-automator` | — |
@@ -352,7 +352,7 @@ Mark M2 = `DONE`. If M1 also `DONE`, promote M3 to `READY`.
 
 ## Phase M3 — Python MCP server
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M1, M2
 - **Unblocks on DONE:** M5, M6
 - **Agent:** `python-pro`
