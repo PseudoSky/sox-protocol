@@ -162,7 +162,7 @@ Update this table as phases complete.
 | Phase | Title | Status | Agent | Parallel with |
 |---|---|---|---|---|
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
-| M1 | Python core enforcer | `READY` | `python-pro` | M2, M4 |
+| M1 | Python core enforcer | `IN_PROGRESS` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `READY` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `BLOCKED` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
@@ -241,7 +241,7 @@ Mark M0 = `DONE`. Promote M1, M2, M4 from `BLOCKED` to `READY`.
 
 ## Phase M1 — Python core enforcer
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M0
 - **Unblocks on DONE:** M3, M5
 - **Agent:** `python-pro`
