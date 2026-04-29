@@ -169,9 +169,9 @@ Update this table as phases complete.
 | M5 | Python Claude Code adapter | `DONE` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `DONE` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `DONE` | `test-automator` | — |
-| M8 | Docs polish, placeholders, publication | `IN_PROGRESS` | `content-marketer` | — |
+| M8 | Docs polish, placeholders, publication | `DONE` | `content-marketer` | — |
 
-**Currently next action:** M7 is `DONE`. M8 is `READY`. Next: spawn `content-marketer` for M8.
+**Currently next action:** M8 is `DONE`. All phases complete. v0.0.1 tagged.
 
 ---
 
@@ -683,7 +683,7 @@ Mark M7 = `DONE`. Promote M8 to `READY`.
 
 ## Phase M8 — Documentation polish, placeholder packages, publication
 
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Prereqs:** M6, M7
 - **Unblocks on DONE:** v0.0.1 release
 - **Agent:** `content-marketer`
