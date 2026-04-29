@@ -163,15 +163,15 @@ Update this table as phases complete.
 |---|---|---|---|---|
 | M0 | Spec frozen | `DONE` | `api-designer` | — |
 | M1 | Python core enforcer | `DONE` | `python-pro` | M2, M4 |
-| M2 | BackingStore binding + adapters | `IN_PROGRESS` | `python-pro` | M1, M4 |
-| M3 | Python MCP server | `BLOCKED` | `python-pro` | M4 |
+| M2 | BackingStore binding + adapters | `DONE` | `python-pro` | M1, M4 |
+| M3 | Python MCP server | `READY` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `READY` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `BLOCKED` | `python-pro` | — |
 | M6 | Language-neutral conformance harness | `BLOCKED` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
-**Currently next action:** M1 is `DONE`. M2 is `READY`. Orchestrator will spawn `python-pro` for M2 next.
+**Currently next action:** M2 is `DONE`. M3 and M4 are `READY`. Orchestrator will spawn `python-pro` for M3 next (serial).
 
 ---
 
@@ -297,7 +297,7 @@ Mark M1 = `DONE`. If M2 was running in parallel and is also `DONE`, promote M3 t
 
 ## Phase M2 — Python BackingStore binding + reference adapters
 
-- **Status:** `IN_PROGRESS`
+- **Status:** `DONE`
 - **Prereqs:** M0
 - **Unblocks on DONE:** M3
 - **Agent:** `python-pro`
