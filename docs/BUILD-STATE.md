@@ -161,7 +161,7 @@ Update this table as phases complete.
 
 | Phase | Title | Status | Agent | Parallel with |
 |---|---|---|---|---|
-| M0 | Spec frozen | `READY` | `api-designer` | — |
+| M0 | Spec frozen | `IN_PROGRESS` | `api-designer` | — |
 | M1 | Python core enforcer | `BLOCKED` | `python-pro` | M2, M4 |
 | M2 | BackingStore binding + adapters | `BLOCKED` | `python-pro` | M1, M4 |
 | M3 | Python MCP server | `BLOCKED` | `python-pro` | M4 |
@@ -171,13 +171,13 @@ Update this table as phases complete.
 | M7 | End-to-end demos & integration | `BLOCKED` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
-**Currently next action:** M0 is `READY`. In auto mode, run `claude "Run docs/BUILD-STATE.md"` from the repo root and the orchestrator will spawn `api-designer` for M0. In manual mode, see [Phase M0](#phase-m0--spec-frozen).
+**Currently next action:** M0 is `IN_PROGRESS`. Orchestrator has spawned `api-designer` for M0.
 
 ---
 
 ## Phase M0 — Spec frozen
 
-- **Status:** `READY`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** none
 - **Unblocks on DONE:** M1, M2, M4
 - **Agent:** `api-designer`
