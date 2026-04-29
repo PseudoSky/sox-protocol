@@ -167,7 +167,7 @@ Update this table as phases complete.
 | M3 | Python MCP server | `DONE` | `python-pro` | M4 |
 | M4 | Discipline doc + worked examples | `DONE` | *interactive (no delegation)* | M1, M2, M3 |
 | M5 | Python Claude Code adapter | `DONE` | `python-pro` | — |
-| M6 | Language-neutral conformance harness | `READY` | `test-automator` | — |
+| M6 | Language-neutral conformance harness | `IN_PROGRESS` | `test-automator` | — |
 | M7 | End-to-end demos & integration | `READY` | `test-automator` | — |
 | M8 | Docs polish, placeholders, publication | `BLOCKED` | `content-marketer` | — |
 
@@ -540,7 +540,7 @@ Mark M5 = `DONE`. Promote M7 to `READY`.
 
 ## Phase M6 — Language-neutral conformance harness
 
-- **Status:** `BLOCKED`
+- **Status:** `IN_PROGRESS`
 - **Prereqs:** M3
 - **Unblocks on DONE:** none directly (independent track; gates publication at M8)
 - **Agent:** `test-automator`
