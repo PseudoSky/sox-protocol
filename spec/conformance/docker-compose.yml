@@ -1,0 +1,88 @@
+# SOX Protocol Conformance Suite — docker-compose.yml
+#
+# Usage:
+#   IMPLEMENTATION_IMAGE=my-sox-server:latest docker compose up --abort-on-container-exit
+#
+# Or via the runner:
+#   IMPLEMENTATION_IMAGE=my-sox-server:latest spec/conformance/runner/run.sh
+#
+# Environment variables:
+#   IMPLEMENTATION_IMAGE  (required) Docker image that runs an MCP HTTP server
+#                         conforming to the SOX wire protocol. The image MUST:
+#                           - Expose an MCP HTTP (streamable-http) endpoint on
+#                             $SOX_HTTP_PORT (default 8000).
+#                           - Respect SOX_AGENT_ID and SOX_BACKING_STORE env vars.
+#                           - Accept SOX_MCP_TRANSPORT=http.
+#   SOX_HTTP_PORT         Port on which mcp-server-under-test listens (default 8000).
+#   SOX_BACKING_STORE     Backing store URI passed to the implementation
+#                         (default: memory://; for stateful scenarios use
+#                          sqlite:///data/sox-conformance.db).
+
+services:
+  mcp-server-under-test:
+    image: "${IMPLEMENTATION_IMAGE:?IMPLEMENTATION_IMAGE env var must be set}"
+    environment:
+      SOX_AGENT_ID: "conformance-server"
+      SOX_BACKING_STORE: "${SOX_BACKING_STORE:-memory://}"
+      SOX_MCP_TRANSPORT: "http"
+      SOX_HTTP_HOST: "0.0.0.0"
+      SOX_HTTP_PORT: "${SOX_HTTP_PORT:-8000}"
+    ports:
+      - "${SOX_HTTP_PORT:-8000}:${SOX_HTTP_PORT:-8000}"
+    tmpfs:
+      # Ephemeral tmpfs for the backing-store state so each compose run
+      # starts with a clean slate. If SOX_BACKING_STORE points to a file
+      # path, that path should live under /data.
+      - /data:mode=1777
+    healthcheck:
+      test:
+        - "CMD"
+        - "sh"
+        - "-c"
+        - >
+          curl -sf
+          -X POST
+          http://localhost:${SOX_HTTP_PORT:-8000}/mcp
+          -H 'Content-Type: application/json'
+          -H 'Accept: application/json, text/event-stream'
+          -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"healthcheck","version":"0.0.1"}}}'
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+    networks:
+      - sox-conformance
+
+  mcp-test-client:
+    image: alpine:3.19
+    depends_on:
+      mcp-server-under-test:
+        condition: service_healthy
+    environment:
+      SOX_SERVER_URL: "http://mcp-server-under-test:${SOX_HTTP_PORT:-8000}/mcp"
+      SOX_HTTP_PORT: "${SOX_HTTP_PORT:-8000}"
+      SCENARIOS_DIR: "/conformance/scenarios"
+      SCHEMAS_DIR: "/conformance/schemas"
+    volumes:
+      # Mount the spec tree read-only so the runner can read scenarios and schemas
+      - type: bind
+        source: "${SPEC_ROOT:-.}"
+        target: /conformance
+        read_only: true
+      # Results volume so the host can read the output
+      - type: volume
+        source: conformance-results
+        target: /results
+    networks:
+      - sox-conformance
+    command:
+      - /bin/sh
+      - /conformance/runner/run.sh
+    # Pass through the exit code so docker compose exits non-zero on failure
+
+networks:
+  sox-conformance:
+    driver: bridge
+
+volumes:
+  conformance-results:

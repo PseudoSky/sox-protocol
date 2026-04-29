@@ -176,13 +176,23 @@ jobs:
             echo "Clean: spec/schemas/ has no 'packages/' references."
           fi
 
-          # conformance/ scripts (populated at M6): same prohibition.
-          if [[ -d spec/conformance ]] && find spec/conformance -name "*.sh" -o -name "*.json" -o -name "*.yml" | grep -q .; then
-            if grep -r "packages/" spec/conformance/ 2>/dev/null; then
-              echo "ERROR: Found 'packages/' reference in spec/conformance/." >&2
-              FAILED=$(( FAILED + 1 ))
+          # conformance/ machine-readable artefacts (populated at M6): same prohibition.
+          # Check only .sh, .json, and .yml files — NOT .md prose documentation.
+          # Documentation in spec/conformance/README.md may refer to packages/ in
+          # human-readable examples (e.g. "run packages/python/tests/..."); that is
+          # intentional and not a machine-readable dependency.
+          if [[ -d spec/conformance ]]; then
+            CONF_FAILED=0
+            while IFS= read -r conf_file; do
+              if grep -l "packages/" "${conf_file}" 2>/dev/null; then
+                echo "ERROR: Found 'packages/' reference in ${conf_file}" >&2
+                CONF_FAILED=$(( CONF_FAILED + 1 ))
+              fi
+            done < <(find spec/conformance \( -name "*.sh" -o -name "*.json" -o -name "*.yml" \))
+            if [[ "${CONF_FAILED}" -gt 0 ]]; then
+              FAILED=$(( FAILED + CONF_FAILED ))
             else
-              echo "Clean: spec/conformance/ has no 'packages/' references."
+              echo "Clean: spec/conformance/ machine-readable files have no 'packages/' references."
             fi
           else
             echo "SKIP: spec/conformance/ not yet populated (pre-M6)."

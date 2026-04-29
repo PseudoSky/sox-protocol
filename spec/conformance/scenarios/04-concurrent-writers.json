@@ -1,0 +1,254 @@
+{
+  "name": "04-concurrent-writers",
+  "description": "N concurrent senders, single receiver. No loss, no duplication. The runner sends messages from multiple agents in rapid succession and verifies all arrive.",
+  "agents": {
+    "senders": ["agent-w1", "agent-w2", "agent-w3", "agent-w4", "agent-w5"],
+    "receiver": "agent-reader"
+  },
+  "concurrency": {
+    "writers": 5,
+    "messages_per_writer": 4,
+    "total_expected": 20
+  },
+  "setup": [
+    {
+      "agent": "agent-reader",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "task:concurrent-04" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-w1-1",
+      "agent": "agent-w1",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w1 msg 1", "writer": "w1", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w1-2",
+      "agent": "agent-w1",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w1 msg 2", "writer": "w1", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w1-3",
+      "agent": "agent-w1",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w1 msg 3", "writer": "w1", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w1-4",
+      "agent": "agent-w1",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w1 msg 4", "writer": "w1", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w2-1",
+      "agent": "agent-w2",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w2 msg 1", "writer": "w2", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w2-2",
+      "agent": "agent-w2",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w2 msg 2", "writer": "w2", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w2-3",
+      "agent": "agent-w2",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w2 msg 3", "writer": "w2", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w2-4",
+      "agent": "agent-w2",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w2 msg 4", "writer": "w2", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w3-1",
+      "agent": "agent-w3",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w3 msg 1", "writer": "w3", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w3-2",
+      "agent": "agent-w3",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w3 msg 2", "writer": "w3", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w3-3",
+      "agent": "agent-w3",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w3 msg 3", "writer": "w3", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w3-4",
+      "agent": "agent-w3",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w3 msg 4", "writer": "w3", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w4-1",
+      "agent": "agent-w4",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w4 msg 1", "writer": "w4", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w4-2",
+      "agent": "agent-w4",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w4 msg 2", "writer": "w4", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w4-3",
+      "agent": "agent-w4",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w4 msg 3", "writer": "w4", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w4-4",
+      "agent": "agent-w4",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w4 msg 4", "writer": "w4", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w5-1",
+      "agent": "agent-w5",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w5 msg 1", "writer": "w5", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w5-2",
+      "agent": "agent-w5",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w5 msg 2", "writer": "w5", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w5-3",
+      "agent": "agent-w5",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w5 msg 3", "writer": "w5", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-w5-4",
+      "agent": "agent-w5",
+      "tool": "channels__send",
+      "args": {
+        "channel": "task:concurrent-04",
+        "body": { "type": "status_update", "subject": "w5 msg 4", "writer": "w5", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "recv-all",
+      "agent": "agent-reader",
+      "tool": "channels__recv",
+      "args": { "max_messages": 100 },
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array" }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "no_loss",
+      "description": "All 20 messages from 5 writers must be received",
+      "sent_count": 20,
+      "recv_step": "recv-all",
+      "min": 20
+    },
+    {
+      "type": "no_duplication",
+      "description": "message_id values must be unique across all received messages",
+      "recv_step": "recv-all"
+    },
+    {
+      "type": "all_writers_represented",
+      "recv_step": "recv-all",
+      "writers": ["w1", "w2", "w3", "w4", "w5"],
+      "body_field": "writer",
+      "description": "Messages from every writer must appear in recv output"
+    }
+  ]
+}

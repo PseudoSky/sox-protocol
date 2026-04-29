@@ -53,6 +53,9 @@ include = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = [
+    "conformance: language-neutral conformance suite (spec/conformance/scenarios/)",
+]
 
 # ---------------------------------------------------------------------------
 # coverage

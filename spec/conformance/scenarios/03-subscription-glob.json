@@ -1,0 +1,88 @@
+{
+  "name": "03-subscription-glob",
+  "description": "Glob patterns deliver matching messages only. Non-matching channels do not leak to the subscriber.",
+  "agents": {
+    "sender": "agent-alpha",
+    "receiver": "agent-beta"
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:proj-*" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-matching-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:proj-001",
+        "body": { "type": "status_update", "subject": "matching message 1" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string" }
+      }
+    },
+    {
+      "id": "send-matching-2",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:proj-002",
+        "body": { "type": "status_update", "subject": "matching message 2" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string" }
+      }
+    },
+    {
+      "id": "send-non-matching",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "broadcast:announcements",
+        "body": { "type": "status_update", "subject": "this should NOT arrive" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string" }
+      }
+    },
+    {
+      "id": "recv-1",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array" }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "received_count",
+      "recv_step": "recv-1",
+      "min": 2,
+      "max": 2,
+      "description": "Exactly 2 matching messages received (not the non-matching one)"
+    },
+    {
+      "type": "no_channel_leak",
+      "recv_step": "recv-1",
+      "forbidden_channel": "broadcast:announcements",
+      "description": "Non-matching channel broadcast:announcements must not appear in recv output"
+    },
+    {
+      "type": "all_channels_match_pattern",
+      "recv_step": "recv-1",
+      "pattern": "ticket:proj-*",
+      "description": "Every received message must be from a channel matching ticket:proj-*"
+    }
+  ]
+}

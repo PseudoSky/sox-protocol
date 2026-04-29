@@ -1,0 +1,117 @@
+{
+  "name": "02-group-broadcast",
+  "description": "One sender, three receivers on the same channel. All three must receive the message independently.",
+  "agents": {
+    "sender": "agent-alpha",
+    "receivers": ["agent-beta", "agent-gamma", "agent-delta"]
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "broadcast:group-02" },
+      "expect": { "subscribed": { "type": "array" } }
+    },
+    {
+      "agent": "agent-gamma",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "broadcast:group-02" },
+      "expect": { "subscribed": { "type": "array" } }
+    },
+    {
+      "agent": "agent-delta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "broadcast:group-02" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "broadcast:group-02",
+        "body": { "type": "status_update", "subject": "broadcast to all" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string", "minLength": 1 }
+      },
+      "capture": ["message_id"]
+    },
+    {
+      "id": "recv-beta",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      },
+      "assertions": [
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "channel",
+          "value": "broadcast:group-02"
+        }
+      ]
+    },
+    {
+      "id": "recv-gamma",
+      "agent": "agent-gamma",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      },
+      "assertions": [
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "channel",
+          "value": "broadcast:group-02"
+        }
+      ]
+    },
+    {
+      "id": "recv-delta",
+      "agent": "agent-delta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      },
+      "assertions": [
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "channel",
+          "value": "broadcast:group-02"
+        }
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "type": "all_receivers_got_message",
+      "sent_step": "send-1",
+      "recv_steps": ["recv-beta", "recv-gamma", "recv-delta"],
+      "description": "All three receivers must receive the broadcast independently"
+    },
+    {
+      "type": "no_duplication",
+      "agent": "agent-beta",
+      "recv_step": "recv-beta",
+      "description": "Each receiver gets the message exactly once"
+    },
+    {
+      "type": "schema_valid",
+      "step": "send-1",
+      "schema": "tools/send.output.schema.json"
+    }
+  ]
+}

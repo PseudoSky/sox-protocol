@@ -1,0 +1,137 @@
+name: Conformance Badge
+
+# Generates per-package shields.io endpoint JSON files committed to the
+# gh-pages branch. Badge URLs follow the pattern:
+#   https://img.shields.io/endpoint?url=https://<org>.github.io/<repo>/badges/<pkg>-conformance.json
+#
+# At v0 only packages/python/ has a passing badge. Placeholder packages
+# (typescript, rust) have no badge until their conformance suites pass.
+#
+# This workflow is triggered:
+#   - After python-ci.yml conformance job passes on main.
+#   - Manually via workflow_dispatch for immediate regeneration.
+
+on:
+  workflow_run:
+    workflows: ["Python CI"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package to badge (python | all)"
+        required: false
+        default: "python"
+
+jobs:
+  generate-badges:
+    name: Generate Conformance Badges
+    runs-on: ubuntu-latest
+    # Only run when triggered by a successful Python CI run (or manually)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success')
+    permissions:
+      contents: write
+      pages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Python conformance badge
+        run: |
+          mkdir -p /tmp/badges
+
+          # Python package: conformance passing (updated by conformance job)
+          cat > /tmp/badges/python-conformance.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "SOX conformance",
+            "message": "v1.0 passing",
+            "color": "brightgreen",
+            "style": "flat",
+            "cacheSeconds": 300
+          }
+          EOF
+
+          # TypeScript: not yet implemented
+          cat > /tmp/badges/typescript-conformance.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "SOX conformance",
+            "message": "not implemented",
+            "color": "lightgrey",
+            "style": "flat",
+            "cacheSeconds": 3600
+          }
+          EOF
+
+          # Rust: not yet implemented
+          cat > /tmp/badges/rust-conformance.json << 'EOF'
+          {
+            "schemaVersion": 1,
+            "label": "SOX conformance",
+            "message": "not implemented",
+            "color": "lightgrey",
+            "style": "flat",
+            "cacheSeconds": 3600
+          }
+          EOF
+
+          echo "Badge files generated:"
+          ls -la /tmp/badges/
+
+      - name: Publish badges to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Switch to or create gh-pages branch
+          git fetch origin gh-pages 2>/dev/null || true
+          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
+            git checkout gh-pages
+            git pull origin gh-pages --rebase
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . >/dev/null 2>&1 || true
+            echo "# SOX Protocol Badges" > README.md
+            git add README.md
+          fi
+
+          mkdir -p badges
+          cp /tmp/badges/*.json badges/
+
+          git add badges/
+          if git diff --cached --quiet; then
+            echo "No badge changes to commit."
+          else
+            git commit -m "chore: update conformance badges [skip ci]"
+            git push origin gh-pages
+            echo "Badges committed and pushed."
+          fi
+
+      - name: Print badge URLs
+        run: |
+          _repo="${{ github.repository }}"
+          _org=$(echo "${_repo}" | cut -d/ -f1)
+          _name=$(echo "${_repo}" | cut -d/ -f2)
+
+          echo ""
+          echo "Badge endpoint URLs (shields.io):"
+          echo ""
+          echo "  Python (passing):"
+          echo "  https://img.shields.io/endpoint?url=https://${_org}.github.io/${_name}/badges/python-conformance.json"
+          echo ""
+          echo "  TypeScript (not implemented):"
+          echo "  https://img.shields.io/endpoint?url=https://${_org}.github.io/${_name}/badges/typescript-conformance.json"
+          echo ""
+          echo "  Rust (not implemented):"
+          echo "  https://img.shields.io/endpoint?url=https://${_org}.github.io/${_name}/badges/rust-conformance.json"
+          echo ""
+          echo "Embed in README.md with:"
+          echo "  ![SOX conformance](https://img.shields.io/endpoint?url=https://${_org}.github.io/${_name}/badges/python-conformance.json)"
