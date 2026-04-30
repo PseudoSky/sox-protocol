@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/send.input.schema.json",
+  "title": "{{send_tool}} — input",
+  "description": "Input schema for the SOX send operation (tool name varies by adapter; use {{send_tool}} placeholder in discipline text). Non-blocking: the tool returns as soon as the backing store durably accepts the message. Normative reference: CONTRACTS.md §5.1 and spec/primitives/channels.md.",
+  "type": "object",
+  "required": ["channel", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "channel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Name of the target channel. Recommended naming conventions: 'ticket:<id>' for task-scoped channels, 'broadcast:<topic>' for one-to-many announcements, 'agent:<id>' for direct messages, 'group:<name>' for named groups, 'thread:<parent-message-id>' for reply threads."
+    },
+    "body": {
+      "type": "object",
+      "description": "Opaque message payload. MUST be a JSON object. SOX does not inspect or validate the body beyond requiring it to be an object. Recommended advisory fields: 'type' (string), 'subject' (string), 'context' (string), 'question' (string), 'answer' (string), 'urgency' (one of low/normal/high). Reserved body types with normative schemas: 'sox-ack' (spec/envelopes/sox-ack.schema.json), 'sox-nack' (spec/envelopes/sox-nack.schema.json), 'sox-error' is not sent by agents, 'sox-invite' (spec/envelopes/sox-invite.schema.json).",
+      "additionalProperties": true
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "Optional caller-supplied correlation token. Stored verbatim and echoed back in recv output. Use for: request-reply pairing, at-least-once deduplication, thread anchoring. The protocol does not enforce uniqueness. Null when not needed."
+    }
+  },
+  "examples": [
+    {
+      "channel": "ticket:ENGI-0042",
+      "body": {
+        "type": "clarification_request",
+        "subject": "Which schema version to target?",
+        "context": "Implementing the auth migration. The task spec mentions v2 but production shows v3.",
+        "question": "Should I target schema v2 or v3?",
+        "urgency": "normal"
+      },
+      "correlation_id": "req-001"
+    },
+    {
+      "channel": "broadcast:status",
+      "body": {
+        "type": "status_update",
+        "subject": "Auth rewrite complete",
+        "context": "PR #42 is open for review."
+      },
+      "correlation_id": null
+    },
+    {
+      "channel": "agent:agent-beta",
+      "body": {
+        "type": "sox-invite",
+        "channel": "ticket:ENGI-0042",
+        "inviting_agent": "agent-alpha",
+        "purpose": "Need your review on the token service changes.",
+        "pattern": null,
+        "correlation_id": "invite-007"
+      },
+      "correlation_id": "invite-007"
+    }
+  ]
+}

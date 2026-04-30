@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/envelopes/sox-nack.schema.json",
+  "title": "SOX NACK envelope body",
+  "description": "Reserved body type for negative acknowledgement messages. A 'sox-nack' signals that the receiver received but cannot or will not process the referenced message. The sender may retry, escalate, or proceed under its current assumption. See spec/primitives/ack-nack.md for semantics.",
+  "type": "object",
+  "required": ["type", "correlation_id", "reason_code"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "sox-nack",
+      "description": "Discriminator. MUST be 'sox-nack'."
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The message_id (or caller-supplied correlation_id) of the message being negatively acknowledged."
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "outside_domain",
+        "receiver_busy",
+        "malformed_request",
+        "missing_context",
+        "rate_limited",
+        "other"
+      ],
+      "description": "Machine-readable reason for the NACK. 'outside_domain': the request is outside the receiver's knowledge domain. 'receiver_busy': receiver cannot process before sender's decision point. 'malformed_request': request body is missing required fields or is structurally invalid. 'missing_context': insufficient context to produce a useful answer. 'rate_limited': receiver is applying its own rate limit. 'other': use detail field for explanation."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Optional. Human-readable explanation of the NACK. Required when reason_code is 'other'."
+    },
+    "retry_after": {
+      "type": ["number", "null"],
+      "description": "Optional. Unix epoch seconds after which the sender MAY retry the request. Null or absent means no specific retry guidance."
+    }
+  },
+  "examples": [
+    {
+      "type": "sox-nack",
+      "correlation_id": "req-001",
+      "reason_code": "outside_domain"
+    },
+    {
+      "type": "sox-nack",
+      "correlation_id": "req-007",
+      "reason_code": "receiver_busy",
+      "detail": "Currently processing a blocking file write; retry after checkpoint.",
+      "retry_after": 1714300060.0
+    },
+    {
+      "type": "sox-nack",
+      "correlation_id": "req-999",
+      "reason_code": "other",
+      "detail": "Insufficient permissions to answer this question in the current security context."
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/subscribe.output.schema.json",
+  "title": "{{subscribe_tool}} — output",
+  "description": "Output schema for the SOX subscribe operation. Returns the list of channels that currently exist in the backing store and match the registered pattern. An empty array is valid — it means the subscription was registered successfully but no matching channels exist yet. Future messages on matching channels will still be delivered to the subscribing agent. Normative reference: CONTRACTS.md §5.3.",
+  "type": "object",
+  "required": ["subscribed"],
+  "additionalProperties": false,
+  "properties": {
+    "subscribed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "List of channel names that currently exist in the backing store and match the registered pattern. This is a snapshot at subscription time; the list may grow as new channels matching the pattern receive messages."
+    }
+  },
+  "examples": [
+    {
+      "subscribed": []
+    },
+    {
+      "subscribed": ["ticket:ENGI-0042"]
+    },
+    {
+      "subscribed": [
+        "ticket:ENGI-0042",
+        "ticket:ENGI-0043",
+        "ticket:ENGI-0099"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/envelopes/sox-ack.schema.json",
+  "title": "SOX ACK envelope body",
+  "description": "Reserved body type for application-level acknowledgement messages. A 'sox-ack' signals that the receiver received and accepted the referenced message (identified by correlation_id). This is an application-layer ACK; it is not a transport-layer delivery guarantee. See spec/primitives/ack-nack.md for semantics.",
+  "type": "object",
+  "required": ["type", "correlation_id"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "sox-ack",
+      "description": "Discriminator. MUST be 'sox-ack'."
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The message_id (or caller-supplied correlation_id) of the message being acknowledged. The receiver copies this from the original message's correlation_id field, or from its message_id if no correlation_id was set."
+    },
+    "acknowledged_channel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Optional. The channel on which the acknowledged message was originally sent. Helps the sender disambiguate when the same correlation_id appears on multiple channels."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Optional. Free-form human-readable detail about the acknowledgement (e.g. 'Will process by T+2'). MUST NOT contain sensitive information."
+    }
+  },
+  "examples": [
+    {
+      "type": "sox-ack",
+      "correlation_id": "req-001"
+    },
+    {
+      "type": "sox-ack",
+      "correlation_id": "req-001",
+      "acknowledged_channel": "ticket:ENGI-0042",
+      "detail": "Received clarification request; will respond within 2 LLM turns."
+    }
+  ]
+}

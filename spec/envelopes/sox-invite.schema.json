@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/envelopes/sox-invite.schema.json",
+  "title": "SOX invite envelope body",
+  "description": "Reserved body type for channel invitation messages. A 'sox-invite' is sent to an agent's DM channel (agent:<target-agent-id>) to request that the target agent subscribe to a specified channel. The invite is advisory — the receiving agent decides whether to accept. No protocol enforcement of the invite response is defined in v1.0.",
+  "type": "object",
+  "required": ["type", "channel", "inviting_agent"],
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "type": "string",
+      "const": "sox-invite",
+      "description": "Discriminator. MUST be 'sox-invite'."
+    },
+    "channel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "The channel the inviting agent wants the recipient to join (subscribe to)."
+    },
+    "inviting_agent": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The agent_id of the agent sending the invite. In v1.0 this is self-reported; verified identity enforcement is deferred (see spec/ports/identity.md)."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "Optional. Human-readable explanation of why the agent is being invited to this channel (e.g. 'Coordinating on ENGI-0042 auth rewrite')."
+    },
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Optional. If the inviting agent wants the recipient to subscribe using a glob pattern rather than an exact channel name (e.g. 'ticket:ENGI-*'), this field carries the recommended pattern. The recipient MAY use this pattern verbatim or substitute their own."
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "Optional. Correlation token so the inviting agent can match a sox-ack / sox-nack response to this invite."
+    }
+  },
+  "examples": [
+    {
+      "type": "sox-invite",
+      "channel": "ticket:ENGI-0042",
+      "inviting_agent": "agent-alpha",
+      "purpose": "Coordinating on the auth rewrite for ENGI-0042. Your expertise on the token service is needed.",
+      "pattern": null,
+      "correlation_id": "invite-001"
+    },
+    {
+      "type": "sox-invite",
+      "channel": "group:security-team",
+      "inviting_agent": "agent-orchestrator",
+      "purpose": "Security review kick-off.",
+      "pattern": "group:security-*",
+      "correlation_id": null
+    }
+  ]
+}

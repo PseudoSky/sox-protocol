@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/list_channels.output.schema.json",
+  "title": "{{list_tool}} — output",
+  "description": "Output schema for the SOX list_channels (discovery) operation. Returns all channels with at least one subscriber or at least one message in the backing store's retention window (default: last 24 hours). Also exposes the MCP server's protocol_version so adapters can detect major-version mismatches at startup. Normative reference: CONTRACTS.md §5.4 and §8.",
+  "type": "object",
+  "required": ["channels", "protocol_version"],
+  "additionalProperties": false,
+  "properties": {
+    "channels": {
+      "type": "array",
+      "description": "List of discoverable channels. An empty array means no channels are currently active.",
+      "items": {
+        "type": "object",
+        "required": ["name", "subscriber_count"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Fully-qualified channel name."
+          },
+          "subscriber_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of agents currently subscribed to this channel."
+          }
+        }
+      }
+    },
+    "protocol_version": {
+      "type": "string",
+      "description": "Protocol version advertised by this MCP server node (e.g. '1.0'). Adapters MUST compare the MAJOR component of this value against their own expected major version and refuse to operate on a mismatch. See CONTRACTS.md §8 for the versioning policy."
+    }
+  },
+  "examples": [
+    {
+      "channels": [],
+      "protocol_version": "1.0"
+    },
+    {
+      "channels": [
+        {
+          "name": "ticket:ENGI-0042",
+          "subscriber_count": 2
+        },
+        {
+          "name": "broadcast:status",
+          "subscriber_count": 5
+        },
+        {
+          "name": "group:security-team",
+          "subscriber_count": 3
+        }
+      ],
+      "protocol_version": "1.0"
+    }
+  ]
+}

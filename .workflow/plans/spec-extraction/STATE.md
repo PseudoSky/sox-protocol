@@ -12,12 +12,12 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-extract | Extract protocol spec from current implementation | `IN_PROGRESS` | api-designer | 1 | 2026-04-30T00:00:00Z |
-| 02-review | Architectural review of spec/ | `BLOCKED` | architect-reviewer | 0 | 2026-04-29T00:00:00Z |
+| 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
+| 02-review | Architectural review of spec/ | `READY` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
 
-`01-extract` is `READY`. Spawn `api-designer`.
+`02-review` is `READY`. Spawn `architect-reviewer`.
 
 ## Transitions
 

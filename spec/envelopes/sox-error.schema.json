@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/envelopes/sox-error.schema.json",
+  "title": "SOX error envelope",
+  "description": "Standard error response returned by the SOX MCP server when a tool call cannot be completed. This is the server-to-caller error shape; it is not a channel message body (it is never stored in the backing store). Returned inline as the tool call result when the operation fails.",
+  "type": "object",
+  "required": ["error_code", "message"],
+  "additionalProperties": false,
+  "properties": {
+    "error_code": {
+      "type": "string",
+      "enum": [
+        "identity_failure",
+        "channel_not_found",
+        "subscription_not_found",
+        "validation_error",
+        "rate_limited",
+        "store_unavailable",
+        "version_mismatch",
+        "internal_error"
+      ],
+      "description": "Machine-readable error code. 'identity_failure': caller could not be authenticated or authorised. 'channel_not_found': specified channel does not exist or has no recent activity. 'subscription_not_found': recv called for a channel the agent is not subscribed to. 'validation_error': input does not conform to the operation schema. 'rate_limited': caller has exceeded a rate limit. 'store_unavailable': backing store is unreachable or returned an error. 'version_mismatch': protocol major version of caller and server differ. 'internal_error': unexpected server-side error."
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable description of the error. MUST NOT leak internal implementation details (stack traces, file paths, credentials)."
+    },
+    "detail": {
+      "type": ["object", "null"],
+      "description": "Optional. Structured additional detail. For 'validation_error', this SHOULD contain a list of validation failures. Shape is error_code-specific.",
+      "additionalProperties": true
+    },
+    "retry_after": {
+      "type": ["number", "null"],
+      "description": "Optional. Unix epoch seconds after which the caller MAY retry. Populated for 'rate_limited' and transient 'store_unavailable' errors. Null means no retry guidance."
+    }
+  },
+  "examples": [
+    {
+      "error_code": "identity_failure",
+      "message": "Agent identity could not be verified. Ensure SOX_AGENT_SECRET is set correctly.",
+      "detail": null,
+      "retry_after": null
+    },
+    {
+      "error_code": "validation_error",
+      "message": "Input does not conform to send.input.schema.json.",
+      "detail": {
+        "violations": [
+          { "field": "channel", "issue": "Required field missing." },
+          { "field": "body", "issue": "Must be a JSON object." }
+        ]
+      },
+      "retry_after": null
+    },
+    {
+      "error_code": "rate_limited",
+      "message": "Send rate limit exceeded. Maximum 100 sends per minute per agent.",
+      "detail": null,
+      "retry_after": 1714300060.0
+    },
+    {
+      "error_code": "store_unavailable",
+      "message": "Backing store is temporarily unreachable. Retry after indicated time.",
+      "detail": null,
+      "retry_after": 1714300015.0
+    }
+  ]
+}

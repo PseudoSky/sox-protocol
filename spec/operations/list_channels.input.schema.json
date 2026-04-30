@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/list_channels.input.schema.json",
+  "title": "{{list_tool}} — input",
+  "description": "Input schema for the SOX list_channels operation. No input parameters are required. The tool returns all discoverable channels. Calling with an empty object {} or no arguments is valid. Normative reference: CONTRACTS.md §5.4.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "examples": [
+    {}
+  ]
+}

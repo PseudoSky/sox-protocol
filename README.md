@@ -5,6 +5,24 @@
 
 ---
 
+## What is in `spec/`?
+
+`spec/` is the canonical, language-neutral specification for SOX Protocol. It contains everything needed to implement SOX in any language, independent of the Python reference implementation:
+
+- **`spec/protocol.md`** — top-level overview: four core operations, message envelope shape, novelty claim, links to all sub-specs.
+- **`spec/primitives/`** — one file per concept: channels, groups, DMs, threads, presence, ACK/NACK, pending state, sequence numbers, trace IDs.
+- **`spec/ports/`** — behaviour contracts (not language-specific) for BackingStore, Transport, Identity, Middleware, DisciplineRenderer, and EnforcerBinding.
+- **`spec/state-machines/`** — message lifecycle (sent → stored → buffered → delivered → acked/replied/nacked) and agent presence states.
+- **`spec/envelopes/`** — JSON Schema 2020-12 for reserved body types: `sox-ack`, `sox-nack`, `sox-error`, `sox-invite`.
+- **`spec/operations/`** — JSON Schema 2020-12 for every tool's input and output: `send`, `recv`, `subscribe`, `list_channels`.
+- **`spec/schemas/`** — JSON Schema 2020-12 for enforcer internals: Event, Decision, State, Policy, Message.
+- **`spec/discipline/`** — canonical markdown discipline with `{{placeholder}}` tokens; adapters substitute at install time.
+- **`spec/conformance/`** — Docker-based, language-neutral test harness; passing it makes an implementation "SOX v1.0-compliant."
+
+`packages/python/` is one conformant reference implementation. `packages/typescript/` and `packages/rust/` are open for contributions. See [docs/adr/0001-protocol-vs-implementation-split.md](docs/adr/0001-protocol-vs-implementation-split.md) for the rationale behind this split.
+
+---
+
 ## What is SOX?
 
 SOX Protocol fills a structural gap in multi-agent LLM systems: *no surveyed framework markets a documented pattern for speculative-execute-while-awaiting-clarification.* When agent A needs clarification on ambiguous context, it should post a question to peers, continue working under a best-guess interpretation, and non-destructively integrate the late-arriving answer into its in-progress reasoning — all without blocking.

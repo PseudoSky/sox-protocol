@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/send.output.schema.json",
+  "title": "{{send_tool}} — output",
+  "description": "Output schema for the SOX send operation. Returned as soon as the backing store durably accepts the message. A successful response guarantees the message is immediately visible to all matching watch loops and subsequent recv calls (backing-store send-atomicity contract). Normative reference: CONTRACTS.md §5.1 and spec/ports/backing-store.md §2.1.",
+  "type": "object",
+  "required": ["sent_at", "message_id"],
+  "additionalProperties": false,
+  "properties": {
+    "sent_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. This is the canonical timestamp used for per-channel ordering in recv responses."
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backing-store-assigned unique identifier for the message just sent. Use this as the correlation_id for thread channels (thread:<message_id>) or as the reference in sox-ack/sox-nack bodies."
+    }
+  },
+  "examples": [
+    {
+      "sent_at": 1714300000.0,
+      "message_id": "msg-0000001"
+    },
+    {
+      "sent_at": 1714300042.815,
+      "message_id": "01HX5Q3YNZJ4KRTMFDBQ8WVCEG"
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/recv.output.schema.json",
+  "title": "{{recv_tool}} — output",
+  "description": "Output schema for the SOX recv (drain) operation. Messages are returned in per-channel send-time order (ascending sent_at within each channel). Cross-channel order within a single response is unspecified. Each returned message is atomically marked as delivered to the calling agent — it will not be returned to the same agent again. Normative reference: CONTRACTS.md §5.2, spec/ports/backing-store.md §2.2 and §3.2.",
+  "type": "object",
+  "required": ["drained_at", "messages"],
+  "additionalProperties": false,
+  "properties": {
+    "drained_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating-point) at which this drain operation completed."
+    },
+    "messages": {
+      "type": "array",
+      "description": "Ordered list of messages drained. Empty array is valid when the mailbox is empty. Within each channel, messages are in ascending sent_at order. Across channels, order is unspecified.",
+      "items": {
+        "type": "object",
+        "required": ["channel", "sender", "body", "sent_at", "message_id"],
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the channel this message was sent to."
+          },
+          "sender": {
+            "type": "string",
+            "minLength": 1,
+            "description": "agent_id of the agent that sent the message. In v1.0 with identity enforcement, this is a server-certified value. Without identity enforcement, it is self-reported."
+          },
+          "body": {
+            "type": "object",
+            "description": "Opaque message payload. See send.input.schema.json for advisory field conventions and spec/envelopes/ for reserved body types.",
+            "additionalProperties": true
+          },
+          "correlation_id": {
+            "type": ["string", "null"],
+            "maxLength": 128,
+            "description": "Caller-supplied correlation token echoed verbatim from the send call. Null if the sender did not supply one."
+          },
+          "sent_at": {
+            "type": "number",
+            "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message."
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Backing-store-assigned unique identifier for this message."
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "drained_at": 1714300010.0,
+      "messages": []
+    },
+    {
+      "drained_at": 1714300010.0,
+      "messages": [
+        {
+          "channel": "ticket:ENGI-0042",
+          "sender": "agent-alpha",
+          "body": {
+            "type": "clarification_request",
+            "subject": "Which schema version?",
+            "question": "Target v2 or v3?",
+            "urgency": "normal"
+          },
+          "correlation_id": "req-001",
+          "sent_at": 1714300000.0,
+          "message_id": "msg-0000001"
+        },
+        {
+          "channel": "agent:agent-beta",
+          "sender": "agent-gamma",
+          "body": {
+            "type": "sox-invite",
+            "channel": "group:security-team",
+            "inviting_agent": "agent-gamma",
+            "purpose": "Security review kick-off.",
+            "pattern": null,
+            "correlation_id": "invite-001"
+          },
+          "correlation_id": "invite-001",
+          "sent_at": 1714300005.0,
+          "message_id": "msg-0000002"
+        }
+      ]
+    }
+  ]
+}

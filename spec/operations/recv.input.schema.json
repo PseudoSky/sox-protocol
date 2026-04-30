@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/recv.input.schema.json",
+  "title": "{{recv_tool}} — input",
+  "description": "Input schema for the SOX recv (drain) operation. Non-blocking: returns immediately with whatever messages have accumulated in the agent's local mailbox since the last drain. An empty result is always valid. Calling with no arguments drains all subscribed channels. Normative reference: CONTRACTS.md §5.2 and spec/ports/backing-store.md §2.2.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "channels": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Optional list of channel names to drain. When null or omitted, all channels the calling agent is subscribed to are drained. When provided, only messages from the listed channels are returned; messages from other channels remain in the mailbox."
+    },
+    "max_messages": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 50,
+      "description": "Maximum number of messages to return in a single call. Within each channel, the oldest messages (lowest sent_at) are returned first up to this limit. Default: 50."
+    }
+  },
+  "examples": [
+    {},
+    {
+      "channels": null,
+      "max_messages": 50
+    },
+    {
+      "channels": ["ticket:ENGI-0042"],
+      "max_messages": 10
+    },
+    {
+      "channels": ["ticket:ENGI-0042", "agent:agent-alpha"],
+      "max_messages": 100
+    }
+  ]
+}
