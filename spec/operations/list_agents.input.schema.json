@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/list_agents.input.schema.json",
+  "title": "list_agents — input",
+  "description": "Input schema for the SOX list_agents operation. Returns the server-tracked liveness records for all agents known to this server, optionally filtered by presence state. Normative reference: spec/primitives/presence.md §2.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status_filter": {
+      "type": "array",
+      "description": "If set, return only agents whose current server-derived presence state is one of the listed values. Omit to return all agents regardless of state.",
+      "items": {
+        "type": "string",
+        "enum": ["online", "busy", "stale", "offline"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "namespace": {
+      "type": "string",
+      "description": "If set, return only agents whose identity was authenticated within this namespace. Omit to return agents across all namespaces visible to the caller.",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "examples": [
+    {},
+    {
+      "status_filter": ["online", "busy"]
+    },
+    {
+      "status_filter": ["online"],
+      "namespace": "production"
+    }
+  ]
+}

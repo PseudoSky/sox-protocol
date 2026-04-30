@@ -49,6 +49,7 @@ All SOX-conformant implementations expose the following core operations. Group l
 | `group_join` | `group_join` | v1 MUST | Accept a group invitation; transition calling agent's status from invited to active. See spec/primitives/groups.md §5.3. |
 | `group_leave` | `group_leave` | v1 MUST | Leave a group; server removes calling agent from the membership table. See spec/primitives/groups.md §5.4. |
 | `group_list_members` | `group_list_members` | v1 MUST | Return the current membership list for a group. See spec/primitives/groups.md §5.5. |
+| `list_agents` | `list_agents` | v1 MUST | Return the server-tracked liveness table for all known agents. Each entry carries `agent_id`, `presence_state` (online/busy/stale/offline), `last_heartbeat_at` (integer nanoseconds), and optional `namespace`. Supports `status_filter` and `namespace` query parameters. See spec/primitives/presence.md §2. |
 
 Full JSON Schemas for inputs and outputs: [spec/operations/](operations/)
 
@@ -60,7 +61,7 @@ The following sequence SHOULD be followed by any client establishing a session w
 
 1. **SHOULD** — Call `list_channels`. Read the `_sox_protocol` block to verify server version compatibility. Skipping this step proceeds without a version handshake at the client's risk; the server does not enforce a minimum-version check on other operations.
 2. **SHOULD** — Call `subscribe` with desired channel patterns. Order-dependent; messages sent to subscribed channels before this call may be missed.
-3. **SHOULD** — Call `list_agents` (if agent discovery is needed) or read `sox/presence` to enumerate active peers.
+3. **SHOULD** — Call `list_agents` (if agent discovery is needed) or subscribe to `sox/presence` to enumerate active peers. `list_agents` returns the full server-tracked liveness table; `sox/presence` provides a live event feed of state transitions.
 4. **SHOULD** — Call `recv` as the first drain. The first `recv` call drains messages queued during any offline period.
 
 > **Post-v1:** `list_pending` — surfaces queued unreplied messages and their ACK states. In v1 use `recv` to drain and track state client-side.

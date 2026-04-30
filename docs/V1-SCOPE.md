@@ -7,14 +7,16 @@
 
 ---
 
-## Protocol operations (8 tools)
+## Protocol operations (10 tools)
 
 | Tool | Status | Brief |
 |---|---|---|
 | `{{send_tool}}` | v1 MUST | Append a message to a named channel. Non-blocking. Returns `{sent_at, message_id, seq, backpressure}`. Supports `reply_to` for threading and `idempotency_key` for dedup (24h TTL default). |
 | `{{recv_tool}}` | v1 MUST | Drain the calling agent's mailbox. Non-blocking. Returns messages in ascending `seq` order per channel. Supports `thread_depth` (0, n, or -1) for inline ancestor expansion and `include_meta` for observability metadata toggle. |
 | `{{subscribe_tool}}` | v1 MUST | Register interest in channels matching a glob pattern. Persists across server restarts. Idempotent. Cannot glob-match reserved prefixes `dm/` or `group/`. |
+| `unsubscribe` | v1 MUST | Remove channel subscriptions matching names or glob patterns. Discards queued-but-unread messages for removed subscriptions. See `spec/operations/unsubscribe.input.schema.json`. |
 | `{{list_tool}}` | v1 MUST | Discover active channels. Returns the mandatory `_sox_protocol` version negotiation block (`server_version`, `supported_versions`, `min_client_version`). Clients MUST read this on first call and fail-fast on version mismatch. |
+| `list_agents` | v1 MUST | Return the server-tracked liveness table for all known agents. Each entry includes `agent_id`, `presence_state` (online/busy/stale/offline), and `last_heartbeat_at`. Supports `status_filter` and `namespace` filters. See `spec/operations/list_agents.{input,output}.schema.json` and `spec/primitives/presence.md §2`. |
 | `channels__ack` | v1 MUST | Signal ACK or NACK for a received message. Control-plane only: does NOT enter channel history, does NOT consume a `seq` slot. Updates server-side pending-state record. Statuses: `received`, `processing`, `done`, `nack`. |
 | `channels__heartbeat` | v1 MUST | Update the server-side liveness record for the calling agent. Control-plane only. Status values: `online`, `busy`, `offline`. Server derives `stale` (30s) and `offline` (90s) from timeout. Triggers events on `sox/presence`. |
 | `replay` | v1 MUST | Replay historical messages from a channel using a per-channel `seq` cursor. Parameters: `channel`, `since` (seq), `until` (seq or null), `limit`. Access gated by `replay_policy` (default: `subscriber`). Paginates via `has_more`. |

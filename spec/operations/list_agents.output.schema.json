@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/list_agents.output.schema.json",
+  "title": "list_agents — output",
+  "description": "Output schema for the SOX list_agents operation. Returns the server-tracked liveness table for all agents matching the input filters. Presence states are server-derived from heartbeat timing per spec/primitives/presence.md §3.",
+  "type": "object",
+  "required": ["agents"],
+  "additionalProperties": false,
+  "properties": {
+    "agents": {
+      "type": "array",
+      "description": "List of agent liveness records known to this server. May be empty if no agents have ever sent a heartbeat, or if all known agents are filtered out.",
+      "items": {
+        "type": "object",
+        "required": ["agent_id", "presence_state", "last_heartbeat_at"],
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The authenticated agent identity (from spec/ports/identity.md). Matches the agent_id field in sox/presence channel events."
+          },
+          "presence_state": {
+            "type": "string",
+            "enum": ["online", "busy", "stale", "offline"],
+            "description": "Server-derived presence state. 'stale' means no heartbeat within 30s; 'offline' means no heartbeat within 90s or agent explicitly sent offline status. See spec/primitives/presence.md §3."
+          },
+          "last_heartbeat_at": {
+            "type": "integer",
+            "description": "Unix timestamp (nanoseconds) of the most recent heartbeat received from this agent. Zero if the agent was registered but has never heartbeated (e.g. appeared via identity verification only).",
+            "minimum": 0
+          },
+          "namespace": {
+            "type": ["string", "null"],
+            "description": "Namespace the agent authenticated into, or null if namespaces are not in use.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "agents": []
+    },
+    {
+      "agents": [
+        {
+          "agent_id": "agent-alpha",
+          "presence_state": "online",
+          "last_heartbeat_at": 1714300000000000000,
+          "namespace": null
+        },
+        {
+          "agent_id": "agent-beta",
+          "presence_state": "busy",
+          "last_heartbeat_at": 1714299990000000000,
+          "namespace": null
+        },
+        {
+          "agent_id": "agent-gamma",
+          "presence_state": "stale",
+          "last_heartbeat_at": 1714299970000000000,
+          "namespace": null
+        }
+      ]
+    }
+  ]
+}
