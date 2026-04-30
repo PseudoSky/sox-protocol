@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Tests for the Claude Code runtime adapter installer.
 
 Uses ``tmp_path`` fixtures to simulate a fresh Claude Code project.

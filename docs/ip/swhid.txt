@@ -1,0 +1,25 @@
+SOX Protocol Software Heritage record
+Submitted: TODO
+SWHID: TODO — swh:1:dir:<hash>;origin=https://github.com/PseudoSky/sox-protocol;visit=<visit-id>;anchor=<commit-hash>
+
+---
+
+MANUAL STEP REQUIRED
+====================
+
+To submit this repository to Software Heritage for permanent archival:
+
+1. Visit: https://archive.softwareheritage.org/save/
+2. Enter the repository URL: https://github.com/PseudoSky/sox-protocol
+3. Click "Submit" and wait for the ingestion to complete.
+4. Once complete, copy the SWHID (starts with swh:1:dir:...) from the result page.
+5. Update this file:
+   - Replace "TODO" in "Submitted:" with the date (YYYY-MM-DD)
+   - Replace the SWHID TODO placeholder with the full SWHID string
+
+The SWHID serves as a timestamped, immutable archival proof of the protocol
+specification — strengthening the prior-art record against any patent claims
+that may surface on agent-communication protocol primitives.
+
+Rationale: see docs/ip/oin-application.md and the patent landscape strategy
+at ~/.claude/plugins/workflow/memory/research/patent-landscape/agent-communication-protocols.md

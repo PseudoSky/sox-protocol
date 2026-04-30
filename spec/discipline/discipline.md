@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Inter-agent channels
 
 SOX channels give agents an async mailbox per named channel. Any agent can

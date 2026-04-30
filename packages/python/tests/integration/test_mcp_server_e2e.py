@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """End-to-end integration tests for the SOX MCP server (Milestone 3).
 
 All four scenarios from the spec:

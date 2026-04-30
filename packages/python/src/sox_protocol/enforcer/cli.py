@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SOX Protocol — enforcer CLI bridge for Claude Code hooks.
 
 Called by the hook shell scripts::

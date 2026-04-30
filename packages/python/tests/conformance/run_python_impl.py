@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Thin wrapper that runs spec/conformance/runner/run.sh against the Python
 reference implementation.
 

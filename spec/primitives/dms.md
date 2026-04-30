@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Direct Messages (DMs) — Primitive Spec
 
 **Protocol version:** 1.0  

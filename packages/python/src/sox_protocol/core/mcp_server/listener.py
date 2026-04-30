@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Background asyncio listener for the SOX MCP server.
 
 Architecture — push at the network layer, pull at the LLM layer

@@ -1,0 +1,20 @@
+SOX Protocol
+Copyright 2026 pseudosky and SOX Protocol contributors
+
+This product is licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License at:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+SOX Protocol is a runtime-agnostic peer messaging protocol for LLM agents,
+providing channel primitives (pub/sub, direct messages, groups, threads,
+presence, ACK/NACK) and a speculative-execute-while-awaiting-clarification
+discipline for multi-agent systems.
+
+---
+
+This NOTICE file is provided in accordance with Apache License, Version 2.0,
+Section 4(d). The contents of this file are for informational purposes only
+and do not modify the License.

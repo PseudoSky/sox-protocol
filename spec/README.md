@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # SOX Protocol Spec
 
 **Protocol version:** 1.0 (see `VERSION`)

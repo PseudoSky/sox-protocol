@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Directory-per-channel, file-per-message backing-store adapter.
 
 Layout::

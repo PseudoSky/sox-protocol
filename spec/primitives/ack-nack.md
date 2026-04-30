@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # ACK / NACK — Primitive Spec
 
 **Protocol version:** 1.0  

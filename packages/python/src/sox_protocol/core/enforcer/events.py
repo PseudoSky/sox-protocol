@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # GENERATED FROM spec/schemas/ — DO NOT EDIT BY HAND
 # Regenerate with: make codegen
 #

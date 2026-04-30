@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Pure in-memory BackingStore implementation.
 
 Intended for use in tests and interactive development.  Data is not persisted;

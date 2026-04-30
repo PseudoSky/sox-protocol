@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Exhaustive table-driven tests for decide().
 
 Coverage target: 100% line coverage on decide.py.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Parametrised port-contract tests for all BackingStore adapters.
 
 Each test in this module is run against SqliteStore, FilesystemStore, and

@@ -4,6 +4,91 @@ Thank you for your interest in contributing! This guide covers three types of co
 
 ---
 
+## Contributor agreements: DCO, signed commits, and patent grant
+
+### Developer Certificate of Origin (DCO)
+
+SOX Protocol uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) instead of a CLA. By contributing, you certify that you have the right to submit the work under this project's license.
+
+**Every commit must carry a `Signed-off-by:` trailer:**
+
+```
+Signed-off-by: Your Name <your@email.com>
+```
+
+Add it automatically with:
+
+```bash
+git commit -s -m "your commit message"
+```
+
+Or configure git to add it by default for this repo:
+
+```bash
+git config user.name "Your Name"
+git config user.email "your@email.com"
+```
+
+PRs without a `Signed-off-by:` trailer will not be merged. A local commit-msg hook is included to warn you before pushing. Activate it with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+If you forget to sign off, amend your commits before opening the PR:
+
+```bash
+git commit --amend --signoff
+# or for multiple commits:
+git rebase --signoff HEAD~N
+```
+
+### Signed-commit policy
+
+All commits merged to `main` must be cryptographically signed. Two supported methods:
+
+**Option A — GPG signing:**
+
+```bash
+# Generate a key if you don't have one
+gpg --gen-key
+
+# Tell git which key to use
+git config --global user.signingkey <YOUR_KEY_ID>
+
+# Sign commits by default in this repo
+git config commit.gpgsign true
+
+# Verify a commit is signed
+git log --show-signature -1
+```
+
+**Option B — Sigstore cosign (keyless, recommended for CI):**
+
+```bash
+# Install cosign: https://docs.sigstore.dev/cosign/installation/
+brew install cosign   # macOS
+
+# Sign a git tag
+cosign sign-blob --bundle tag.bundle <tag-file>
+
+# For commit signing via gitsign (Sigstore-backed git commit signing):
+brew install gitsign
+git config --global gpg.x509.program gitsign
+git config --global gpg.format x509
+git config --global commit.gpgsign true
+```
+
+### Apache 2.0 patent grant
+
+By submitting a contribution to SOX Protocol, you grant all users a perpetual, worldwide, royalty-free patent license under Apache 2.0 §3 covering any patent claims necessarily infringed by your contribution. This is automatic under the Apache 2.0 license — no separate CLA is required. The patent grant applies to all contributions, including spec changes, language ports, and implementation improvements.
+
+If you work for an organization that holds patents potentially relevant to this protocol, please ensure you have authority to make this grant before contributing.
+
+---
+
+---
+
 ## 1. Spec changes (changes to `spec/`)
 
 The spec is the contract between the protocol and all language implementations. Changes must be backward-compatible or involve coordination across implementations.

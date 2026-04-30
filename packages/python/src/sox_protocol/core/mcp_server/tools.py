@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SOX MCP tool implementations.
 
 The four tools registered here implement the SOX wire protocol

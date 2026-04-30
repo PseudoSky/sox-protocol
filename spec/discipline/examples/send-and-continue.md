@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Worked example: send-and-continue
 
 **Scenario.** Agent A ("implementer") is writing a REST endpoint. The spec

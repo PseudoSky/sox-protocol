@@ -1,7 +1,9 @@
 # SOX Protocol — runtime-agnostic peer messaging for LLM agents
 
 **Status:** v0.0.1; SOX v1.0-compliant Python reference implementation
-**License:** MIT
+**License:** [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) Apache 2.0
+
+> **Patent grant:** SOX Protocol is licensed under Apache 2.0, which includes an express patent grant (§3) from every contributor. This means contributors and users are protected from patent assertions on the protocol primitives they help build or adopt. See [docs/ip/](docs/ip/) for the full IP strategy, OIN application tracker, and Software Heritage archival record.
 
 ---
 
@@ -301,7 +303,7 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ## License
 
-MIT. See LICENSE for details.
+Apache 2.0. See [LICENSE](LICENSE) for details. The Apache 2.0 license includes an express patent grant — see [docs/ip/](docs/ip/) for the IP strategy rationale.
 
 ---
 

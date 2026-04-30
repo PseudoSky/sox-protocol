@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Async SQLite-backed enforcer state store.
 
 Persists per-agent counters across hook invocations.  Every read-modify-write

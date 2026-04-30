@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Async SQLite backing-store adapter.
 
 Uses ``aiosqlite`` with WAL journal mode for concurrent-read / single-writer

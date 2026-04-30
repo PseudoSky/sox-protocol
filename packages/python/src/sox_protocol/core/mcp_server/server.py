@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SOX Protocol MCP server.
 
 Entry point for the long-lived MCP server process.  Reads configuration

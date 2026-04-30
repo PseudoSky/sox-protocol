@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Pure cadence-enforcer decision function.
 
 This module is the heart of the SOX cadence enforcer.  It implements the

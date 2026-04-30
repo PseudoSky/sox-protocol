@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# SOX Protocol pre-commit hook: warn on missing Signed-off-by trailer.
+# Install: git config core.hooksPath .githooks
+
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+if ! echo "$COMMIT_MSG" | grep -q "^Signed-off-by:"; then
+  echo ""
+  echo "WARNING: Commit is missing a Signed-off-by trailer."
+  echo "  SOX Protocol requires DCO sign-off on every commit."
+  echo "  Add it with:  git commit -s"
+  echo "  Or amend:     git commit --amend --signoff"
+  echo ""
+  echo "  See CONTRIBUTING.md for full policy."
+  echo ""
+  # Warn only — do not block the commit. Change 'exit 0' to 'exit 1' to enforce.
+  exit 0
+fi

@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # SOX Protocol — Language-Neutral Conformance Suite
 
 This directory is the **verification authority** for SOX v1.0 compliance. Any

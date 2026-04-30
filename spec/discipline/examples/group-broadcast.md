@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Worked example: group broadcast
 
 **Scenario.** Agent A ("implementer") finishes a major sub-task and broadcasts

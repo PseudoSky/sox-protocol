@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Policy dataclass for the SOX cadence enforcer.
 
 Operator-tunable parameters loaded from ``${SOX_CONFIG_DIR}/policy.toml``

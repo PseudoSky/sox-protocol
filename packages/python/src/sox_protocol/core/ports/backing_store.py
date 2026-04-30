@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Python binding of the BackingStore port.
 
 Canonical behaviour contract: ``spec/ports/backing-store.md``

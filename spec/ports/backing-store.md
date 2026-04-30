@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # BackingStore Port — Behaviour Contract
 
 **Version:** 1.0  

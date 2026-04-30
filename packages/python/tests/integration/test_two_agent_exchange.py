@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Integration tests: two-agent speculative-then-reconcile exchange (M7).
 
 CI version of ``examples/two-agent-clarification/run_demo.py``.

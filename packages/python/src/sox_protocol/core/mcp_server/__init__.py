@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SOX MCP server package.
 
 Exposes the four SOX protocol tools over MCP (stdio or HTTP).

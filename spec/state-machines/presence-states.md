@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Agent Presence States — State Machine
 
 **Protocol version:** 1.0  

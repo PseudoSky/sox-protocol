@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """SQLite-specific BackingStore adapter tests.
 
 Covers behaviours unique to the SQLite adapter that are not part of the
