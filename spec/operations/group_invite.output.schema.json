@@ -4,7 +4,7 @@
   "title": "group_invite — output",
   "description": "Output schema for the SOX group_invite operation. Confirms the invitation was recorded. Normative reference: spec/primitives/groups.md §5.2.",
   "type": "object",
-  "required": ["invited", "agent_id"],
+  "required": ["invited", "agent_id", "invited_at"],
   "additionalProperties": false,
   "properties": {
     "invited": {
@@ -15,16 +15,22 @@
       "type": "string",
       "minLength": 1,
       "description": "The agent_id that was invited, echoed from the input."
+    },
+    "invited_at": {
+      "type": "integer",
+      "description": "Unix epoch seconds when the invitation was recorded."
     }
   },
   "examples": [
     {
       "invited": true,
-      "agent_id": "agent-beta"
+      "agent_id": "agent-beta",
+      "invited_at": 1714300000
     },
     {
       "invited": false,
-      "agent_id": "agent-beta"
+      "agent_id": "agent-beta",
+      "invited_at": 1714300000
     }
   ]
 }

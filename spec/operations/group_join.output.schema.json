@@ -4,7 +4,7 @@
   "title": "group_join — output",
   "description": "Output schema for the SOX group_join operation. Confirms the agent's active membership in the group. Normative reference: spec/primitives/groups.md §5.3.",
   "type": "object",
-  "required": ["joined", "group_id", "member_count"],
+  "required": ["joined", "group_id", "member_count", "joined_at"],
   "additionalProperties": false,
   "properties": {
     "joined": {
@@ -20,13 +20,18 @@
       "type": "integer",
       "minimum": 1,
       "description": "Current count of active members in the group after the join."
+    },
+    "joined_at": {
+      "type": "integer",
+      "description": "Unix epoch seconds when the agent's membership was transitioned to active."
     }
   },
   "examples": [
     {
       "joined": true,
       "group_id": "group/eng-team",
-      "member_count": 3
+      "member_count": 3,
+      "joined_at": 1714300000
     }
   ]
 }

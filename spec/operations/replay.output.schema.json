@@ -120,6 +120,27 @@
         }
       ],
       "has_more": true
+    },
+    {
+      "messages": [
+        {
+          "message_id": "msg-replay-001",
+          "channel": "#general",
+          "sender": "agent-beta",
+          "body": {"text": "example replay message"},
+          "seq": 3,
+          "ts": 1700000002000000000,
+          "reply_to": null,
+          "delivered_to": ["agent-alpha"],
+          "origin_server": null,
+          "_meta": {
+            "trace_id": "trace-abc123",
+            "middleware_timings": [],
+            "server_node_id": "node-1"
+          }
+        }
+      ],
+      "has_more": false
     }
   ]
 }

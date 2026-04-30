@@ -71,7 +71,7 @@ Creates a new group channel and adds the creating agent as the first `active` me
 - `group_id` (string, optional): desired group ID. If omitted, server assigns an opaque ID.
 - `display_name` (string, optional): human-readable name for tooling display.
 
-**Returns:** `{ channel: "group/<group-id>", created_at: <number> }`
+**Returns:** `{ group_id: "group/<group-id>", created_at: <number> }`
 
 ### 5.2 `group_invite`
 
@@ -79,10 +79,10 @@ Invites an agent to a group. The inviting agent MUST be an `active` member. The 
 
 **Parameters:**
 
-- `channel` (string): the `group/<group-id>` channel.
+- `group_id` (string): the `group/<group-id>` channel.
 - `agent_id` (string): the agent to invite.
 
-**Returns:** `{ channel: <string>, invited_agent: <string>, invited_at: <number> }`
+**Returns:** `{ group_id: <string>, invited_agent: <string>, invited_at: <number> }`
 
 ### 5.3 `group_join`
 
@@ -90,9 +90,9 @@ An invited agent accepts membership. Transitions the calling agent's status from
 
 **Parameters:**
 
-- `channel` (string): the `group/<group-id>` channel.
+- `group_id` (string): the `group/<group-id>` channel.
 
-**Returns:** `{ channel: <string>, joined_at: <number> }`
+**Returns:** `{ group_id: <string>, joined_at: <number> }`
 
 ### 5.4 `group_leave`
 
@@ -100,9 +100,9 @@ An active member leaves the group. The server removes the agent from the members
 
 **Parameters:**
 
-- `channel` (string): the `group/<group-id>` channel.
+- `group_id` (string): the `group/<group-id>` channel.
 
-**Returns:** `{ channel: <string>, left_at: <number> }`
+**Returns:** `{ group_id: <string>, left_at: <number> }`
 
 ### 5.5 `group_list_members`
 
@@ -110,9 +110,9 @@ Returns the current membership table for a group. Caller MUST be an `active` mem
 
 **Parameters:**
 
-- `channel` (string): the `group/<group-id>` channel.
+- `group_id` (string): the `group/<group-id>` channel.
 
-**Returns:** Array of `{ agent_id, joined_at, status }` objects.
+**Returns:** Array of `{ agent_id, status, joined_at, presence_state }` objects.
 
 > **Post-v1:** Member roles (owner, admin, member, observer) are out of scope for v1. All `active` members have equal permissions within the group. Role-based access is a middleware/hook layer concern deferred to v1.x.
 

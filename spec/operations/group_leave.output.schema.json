@@ -4,7 +4,7 @@
   "title": "group_leave — output",
   "description": "Output schema for the SOX group_leave operation. Confirms the calling agent has been removed from the group membership table. Normative reference: spec/primitives/groups.md §5.4.",
   "type": "object",
-  "required": ["left", "group_id"],
+  "required": ["left", "group_id", "left_at"],
   "additionalProperties": false,
   "properties": {
     "left": {
@@ -15,12 +15,17 @@
       "type": "string",
       "minLength": 1,
       "description": "The full group channel name, echoed from the input."
+    },
+    "left_at": {
+      "type": "integer",
+      "description": "Unix epoch seconds when the agent was removed from the membership table."
     }
   },
   "examples": [
     {
       "left": true,
-      "group_id": "group/eng-team"
+      "group_id": "group/eng-team",
+      "left_at": 1714300050
     }
   ]
 }

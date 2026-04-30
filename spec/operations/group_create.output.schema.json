@@ -14,7 +14,7 @@
     },
     "created_at": {
       "type": "integer",
-      "description": "Unix epoch seconds when the group was created."
+      "description": "Unix epoch seconds when the group was created. Unit: Unix epoch seconds (not nanoseconds — membership-table semantics differ from wire envelope ts)."
     }
   },
   "examples": [

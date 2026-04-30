@@ -17,13 +17,22 @@
       "description": "Current membership list. Each entry represents one agent in the group.",
       "items": {
         "type": "object",
-        "required": ["agent_id", "presence_state"],
+        "required": ["agent_id", "status", "joined_at"],
         "additionalProperties": false,
         "properties": {
           "agent_id": {
             "type": "string",
             "minLength": 1,
             "description": "The member agent's verified identity."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "invited"],
+            "description": "'active' means the agent has joined. 'invited' means the invite was sent but not yet accepted."
+          },
+          "joined_at": {
+            "type": "integer",
+            "description": "Unix epoch seconds when the agent joined or was invited."
           },
           "presence_state": {
             "type": ["string", "null"],
@@ -37,16 +46,16 @@
     {
       "group_id": "group/eng-team",
       "members": [
-        { "agent_id": "agent-alpha", "presence_state": null },
-        { "agent_id": "agent-beta", "presence_state": null }
+        { "agent_id": "agent-alpha", "status": "active", "joined_at": 1714300000, "presence_state": null },
+        { "agent_id": "agent-beta", "status": "invited", "joined_at": 1714300050, "presence_state": null }
       ]
     },
     {
       "group_id": "group/eng-team",
       "members": [
-        { "agent_id": "agent-alpha", "presence_state": "active" },
-        { "agent_id": "agent-beta", "presence_state": "idle" },
-        { "agent_id": "agent-gamma", "presence_state": null }
+        { "agent_id": "agent-alpha", "status": "active", "joined_at": 1714300000, "presence_state": "active" },
+        { "agent_id": "agent-beta", "status": "active", "joined_at": 1714300010, "presence_state": "idle" },
+        { "agent_id": "agent-gamma", "status": "invited", "joined_at": 1714300100, "presence_state": null }
       ]
     }
   ]

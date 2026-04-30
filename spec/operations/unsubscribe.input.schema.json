@@ -16,12 +16,6 @@
         "maxLength": 256
       },
       "description": "Channel names or glob patterns to unsubscribe from. Supports the same two forms as subscribe.input: (1) Exact match — full channel name. (2) Glob — pattern with '*' wildcards using Unix glob rules. Pattern matching is case-sensitive. Each entry is matched against the agent's current subscriptions; non-matching entries are silently ignored."
-    },
-    "namespace": {
-      "type": "string",
-      "minLength": 1,
-      "default": "default",
-      "description": "Namespace scope for the unsubscribe operation. Defaults to 'default'."
     }
   },
   "examples": [
@@ -29,8 +23,7 @@
       "channels": ["ticket:ENGI-0042"]
     },
     {
-      "channels": ["ticket:ENGI-*", "broadcast:*"],
-      "namespace": "default"
+      "channels": ["ticket:ENGI-*", "broadcast:*"]
     },
     {
       "channels": ["group/eng-team", "dm/agent-alpha~agent-beta"]

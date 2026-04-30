@@ -136,7 +136,7 @@ The following prefixes are reserved by the protocol. Agents MUST NOT create chan
 |---|---|
 | Subscriptions (subscribe operation) | Determine which channels an agent receives from on `recv` |
 | Groups ([groups.md](groups.md)) | A group is a named set of agents sharing a group channel; no special protocol behaviour beyond naming |
-| DMs ([dms.md](dms.md)) | A DM is a channel named `agent:<target-id>`; same wire protocol |
+| DMs ([dms.md](dms.md)) | A DM is a managed channel named `dm/<agent-a-id>~<agent-b-id>` (lexicographically sorted pair); see spec/primitives/dms.md §2. |
 | Threads ([threads.md](threads.md)) | A thread is a channel named `thread:<parent-message-id>` |
 | Presence ([presence.md](presence.md)) | Agents publish presence updates to presence channels |
 | ACK/NACK ([ack-nack.md](ack-nack.md)) | ACKs are control-plane signals sent via the `channels_ack` operation; they do not enter channel history and are not returned by `recv` or `replay`. |

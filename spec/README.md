@@ -9,7 +9,7 @@ This directory contains the canonical, language-neutral artefacts for SOX Protoc
 
 ## Directory structure
 
-```
+```text
 spec/
 ├── VERSION                          # single line: "1.0"
 ├── README.md                        # this file
