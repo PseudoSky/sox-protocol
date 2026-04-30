@@ -89,6 +89,10 @@ def _settings_path(project_dir: Path) -> Path:
     return project_dir / ".claude" / "settings.json"
 
 
+def _mcp_json_path(project_dir: Path) -> Path:
+    return project_dir / ".mcp.json"
+
+
 def _agents_dir(project_dir: Path) -> Path:
     return project_dir / ".claude" / "agents"
 
@@ -233,6 +237,39 @@ def _event_to_script_name(event: str) -> str:
     return mapping.get(event, f"{event.lower()}.sh")
 
 
+def _update_mcp_json(project_dir: Path, *, dry_run: bool = False) -> bool:
+    """Idempotently write/update .mcp.json with the SOX server entry."""
+    mcp_json_path = _mcp_json_path(project_dir)
+    existing: dict[str, Any] = {}
+    if mcp_json_path.exists():
+        raw = mcp_json_path.read_text(encoding="utf-8").strip()
+        if raw:
+            existing = json.loads(raw)
+    original = json.dumps(existing, sort_keys=True)
+
+    servers: dict[str, Any] = existing.setdefault("mcpServers", {})
+    if _MCP_SERVER_NAME not in servers:
+        db_path = str(project_dir / _DEFAULT_DB_RELPATH)
+        servers[_MCP_SERVER_NAME] = {
+            "type": "stdio",
+            "command": sys.executable,
+            "args": ["-m", "sox_protocol.core.mcp_server"],
+            "env": {
+                "SOX_BACKING_STORE": f"sqlite:///{db_path}",
+            },
+        }
+
+    if json.dumps(existing, sort_keys=True) == original:
+        return False
+
+    if not dry_run:
+        mcp_json_path.write_text(
+            json.dumps(existing, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    return True
+
+
 def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
     """Idempotently update .claude/settings.json. Returns True if changed."""
     settings_path = _settings_path(project_dir)
@@ -352,13 +389,19 @@ def install(project_dir: Path | None = None, *, verbose: bool = True) -> None:
     else:
         actions.append(f"  Hook scripts already up-to-date")
 
-    # 3. settings.json
+    # 3. .mcp.json  (project MCP server discovery — read by Claude Code at startup)
+    if _update_mcp_json(project_dir):
+        actions.append(f"  Written {_mcp_json_path(project_dir)}")
+    else:
+        actions.append(f"  .mcp.json already up-to-date")
+
+    # 4. settings.json  (hooks + allowedMcpServers)
     if _update_settings(project_dir):
         actions.append(f"  Updated {_settings_path(project_dir)}")
     else:
         actions.append(f"  settings.json already up-to-date")
 
-    # 4. Bootstrap lines
+    # 5. Bootstrap lines
     modified_agents = _insert_bootstrap(project_dir)
     if modified_agents:
         for af in modified_agents:

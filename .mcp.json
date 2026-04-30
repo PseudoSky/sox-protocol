@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "sox": {
+      "type": "stdio",
+      "command": "/opt/homebrew/Caskroom/miniconda/base/bin/python",
+      "args": [
+        "-m",
+        "sox_protocol.core.mcp_server"
+      ],
+      "env": {
+        "SOX_BACKING_STORE": "sqlite:////Users/nix/dev/ai/sox-protocol/.sox/messages.db"
+      }
+    }
+  }
+}
