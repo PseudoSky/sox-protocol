@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ack-tool-not-message
+spec_ref: spec/primitives/ack-nack.md
+description: >
+  channels_ack is invoked as a tool; the ack does NOT appear in channel
+  history on subsequent recv. Verifies control-plane-only semantics: after
+  ACKing a message, a second recv returns only new messages, not the ACK itself.
+
+agents:
+  - id: agent-ack-sender
+    credential: secret-ack-sender
+  - id: agent-ack-recv
+    credential: secret-ack-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-ack-recv
+    input:
+      pattern: "test:ack"
+
+sequence:
+  - id: ack-send-1
+    as_agent: agent-ack-sender
+    operation: send
+    input:
+      channel: "test:ack"
+      body:
+        type: clarification_request
+        question: please ack me
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: ack-recv-1
+    as_agent: agent-ack-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - seq: 1
+
+  - id: ack-call
+    as_agent: agent-ack-recv
+    operation: channels_ack
+    input:
+      message_id: "{{capture:ack-send-1.message_id}}"
+      status: received
+    expected_output:
+      acked_at: "{{any_number}}"
+
+  - id: ack-recv-2
+    as_agent: agent-ack-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: ack-recv-2
+    expected_count: 0

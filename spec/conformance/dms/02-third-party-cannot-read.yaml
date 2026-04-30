@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: third-party-cannot-read
+spec_ref: spec/primitives/dms.md
+description: >
+  Agent C subscribed to dm/agent-alpha~agent-beta (or glob dm/*) cannot read
+  messages between A and B. DM channels enforce two-party access; a third
+  agent's recv must return empty even if they attempt to subscribe.
+
+agents:
+  - id: dm-agent-a
+    credential: secret-dm-a
+  - id: dm-agent-b
+    credential: secret-dm-b
+  - id: dm-agent-c
+    credential: secret-dm-c
+
+setup:
+  - operation: subscribe
+    as_agent: dm-agent-a
+    input:
+      pattern: "dm/dm-agent-a~dm-agent-b"
+  - operation: subscribe
+    as_agent: dm-agent-b
+    input:
+      pattern: "dm/dm-agent-a~dm-agent-b"
+
+sequence:
+  - id: dm-send-private
+    as_agent: dm-agent-a
+    operation: send
+    input:
+      channel: "dm/dm-agent-a~dm-agent-b"
+      body:
+        type: clarification_request
+        subject: private message
+    expected_output:
+      seq: 1
+
+  - id: dm-recv-c
+    as_agent: dm-agent-c
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: dm-recv-c
+    expected_count: 0

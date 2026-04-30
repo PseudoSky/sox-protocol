@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+name: seq-starts-at-one
+spec_ref: spec/primitives/sequence-numbers.md
+description: >
+  First message in a fresh channel has seq=1; recv echoes it.
+  Verifies the per-channel monotone counter starts at 1.
+
+agents:
+  - id: agent-seq-sender
+    credential: secret-seq-sender
+  - id: agent-seq-recv
+    credential: secret-seq-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-seq-recv
+    input:
+      pattern: "test:seq-start"
+
+sequence:
+  - id: seq-send-first
+    as_agent: agent-seq-sender
+    operation: send
+    input:
+      channel: "test:seq-start"
+      body:
+        type: status_update
+        subject: first message
+    expected_output:
+      seq: 1
+      message_id: "{{any_string}}"
+
+  - id: seq-recv-first
+    as_agent: agent-seq-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:seq-start"
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: seq-recv-first
+    min: 1

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+name: server-certified-sender
+spec_ref: spec/ports/identity.md
+description: >
+  Sender field in stored envelope is server-certified from auth credential,
+  not from client-supplied body. The agent authenticates as agent-certified-a;
+  the recv must show sender=agent-certified-a regardless of body content.
+
+agents:
+  - id: agent-certified-a
+    credential: secret-certified-a
+  - id: agent-certified-b
+    credential: secret-certified-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-certified-b
+    input:
+      pattern: "test:identity"
+
+sequence:
+  - id: id-send-1
+    as_agent: agent-certified-a
+    operation: send
+    input:
+      channel: "test:identity"
+      body:
+        type: status_update
+        subject: identity test
+    expected_output:
+      seq: 1
+      message_id: "{{any_string}}"
+
+  - id: id-recv-1
+    as_agent: agent-certified-b
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:identity"
+          sender: agent-certified-a
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: id-recv-1
+    min: 1

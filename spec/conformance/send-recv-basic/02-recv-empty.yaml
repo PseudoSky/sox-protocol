@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+name: recv-empty
+spec_ref: spec/operations/recv.output.schema.json
+description: >
+  recv with no pending messages returns empty list, non-blocking.
+  Verifies that a recv call on a freshly subscribed agent with no messages
+  returns immediately with messages: [] and a valid drained_at timestamp.
+
+agents:
+  - id: agent-empty
+    credential: secret-empty
+
+setup:
+  - operation: subscribe
+    as_agent: agent-empty
+    input:
+      pattern: "test:empty-channel"
+
+sequence:
+  - id: recv-empty-1
+    as_agent: agent-empty
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: recv-empty-1
+    expected_count: 0

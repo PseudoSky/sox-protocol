@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+# SOX Protocol Conformance Suite — GitHub Actions workflow.
+#
+# Runs the conformance harness on every PR and push to main across two matrix
+# legs:
+#   1. python-reference-stdio  — SharedMemoryTarget (in-process)
+#   2. python-reference-http   — HttpTarget against a live sox serve instance
+#
+# Both legs must pass (exit 0) before a PR is mergeable.
+name: conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  conformance:
+    name: conformance (${{ matrix.leg }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg:
+          - python-reference-stdio
+          # http leg is enabled once Step 4 (http-transport) is complete
+          # - python-reference-http
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python reference implementation
+        run: |
+          pip install -e "packages/python[dev]"
+
+      - name: Install harness dependencies
+        run: |
+          pip install pyyaml pytest pytest-cov httpx yamllint
+
+      - name: Lint fixture YAML files
+        run: |
+          yamllint -d relaxed spec/conformance/
+
+      - name: Run harness unit tests (100% coverage required)
+        working-directory: tools
+        run: |
+          pytest conformance_runner_tests/ \
+            --cov=conformance_runner \
+            --cov-fail-under=100 \
+            -q
+
+      - name: Run conformance suite — stdio target
+        if: matrix.leg == 'python-reference-stdio'
+        run: |
+          python3 tools/conformance_runner.py \
+            --target packages/python \
+            --strict \
+            --verbose
+
+      - name: Start HTTP server
+        if: matrix.leg == 'python-reference-http'
+        run: |
+          SOX_MCP_TRANSPORT=http SOX_HTTP_PORT=8765 SOX_BACKING_STORE=memory:// \
+            python -m sox_protocol.core.mcp_server &
+          echo "SOX_HTTP_PID=$!" >> "$GITHUB_ENV"
+          # Wait for server readiness
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8765/health; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run conformance suite — HTTP target
+        if: matrix.leg == 'python-reference-http'
+        run: |
+          python3 tools/conformance_runner.py \
+            --target http://localhost:8765 \
+            --strict \
+            --verbose
+
+      - name: Stop HTTP server
+        if: matrix.leg == 'python-reference-http' && always()
+        run: |
+          if [ -n "$SOX_HTTP_PID" ]; then kill "$SOX_HTTP_PID" || true; fi
+
+      - name: Upload conformance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-results-${{ matrix.leg }}
+          path: |
+            conformance-results-*.txt
+          if-no-files-found: ignore

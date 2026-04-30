@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+name: nack-via-ack-tool
+spec_ref: spec/envelopes/sox-nack.schema.json
+description: >
+  channels_ack with status=nack records NACK; no body posted to channel.
+  Verifies that a NACK via channels_ack tool succeeds and does not produce
+  any channel message visible on subsequent recv.
+
+agents:
+  - id: agent-nack-sender
+    credential: secret-nack-sender
+  - id: agent-nack-recv
+    credential: secret-nack-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-nack-recv
+    input:
+      pattern: "test:nack"
+
+sequence:
+  - id: nack-send-1
+    as_agent: agent-nack-sender
+    operation: send
+    input:
+      channel: "test:nack"
+      body:
+        type: clarification_request
+        question: can you handle this?
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: nack-recv-1
+    as_agent: agent-nack-recv
+    operation: recv
+    input: {}
+
+  - id: nack-call
+    as_agent: agent-nack-recv
+    operation: channels_ack
+    input:
+      message_id: "{{capture:nack-send-1.message_id}}"
+      status: nack
+      reason: capacity exceeded
+    expected_output:
+      acked_at: "{{any_number}}"
+
+  - id: nack-recv-2
+    as_agent: agent-nack-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: nack-recv-2
+    expected_count: 0

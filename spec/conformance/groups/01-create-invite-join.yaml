@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+name: create-invite-join
+spec_ref: spec/primitives/groups.md#5
+description: >
+  group_create -> group_invite -> group_join transitions invitee from invited
+  to active; group_list_members reflects membership.
+
+agents:
+  - id: agent-group-owner
+    credential: secret-group-owner
+  - id: agent-group-member
+    credential: secret-group-member
+
+sequence:
+  - id: create-group
+    as_agent: agent-group-owner
+    operation: group_create
+    input:
+      group_id: "test-group-cij"
+      display_name: "Test Group CIJ"
+    expected_output:
+      group_id: "{{any_string}}"
+      created_at: "{{any_number}}"
+
+  - id: invite-member
+    as_agent: agent-group-owner
+    operation: group_invite
+    input:
+      group_id: "group/test-group-cij"
+      agent_id: agent-group-member
+    expected_output:
+      group_id: "{{any_string}}"
+      invited_agent: agent-group-member
+      invited_at: "{{any_number}}"
+
+  - id: join-group
+    as_agent: agent-group-member
+    operation: group_join
+    input:
+      group_id: "group/test-group-cij"
+    expected_output:
+      group_id: "{{any_string}}"
+      joined_at: "{{any_number}}"
+
+  - id: list-members
+    as_agent: agent-group-owner
+    operation: group_list_members
+    input:
+      group_id: "group/test-group-cij"
+    expected_output:
+      members: "{{any_array}}"
+
+assertions:
+  - type: no_loss
+    recv_step: list-members
+    min: 0

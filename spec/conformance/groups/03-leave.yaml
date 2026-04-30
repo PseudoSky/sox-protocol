@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: Apache-2.0
+name: group-leave
+spec_ref: spec/primitives/groups.md#5.4
+description: >
+  group_leave removes member; subsequent broadcasts do not deliver to the
+  departed agent. After leaving, a send to the group channel must not
+  appear in the leaver's recv.
+
+agents:
+  - id: agent-leave-owner
+    credential: secret-leave-owner
+  - id: agent-leave-member
+    credential: secret-leave-member
+
+sequence:
+  - id: leave-create
+    as_agent: agent-leave-owner
+    operation: group_create
+    input:
+      group_id: "test-group-leave"
+
+  - id: leave-invite
+    as_agent: agent-leave-owner
+    operation: group_invite
+    input:
+      group_id: "group/test-group-leave"
+      agent_id: agent-leave-member
+
+  - id: leave-join
+    as_agent: agent-leave-member
+    operation: group_join
+    input:
+      group_id: "group/test-group-leave"
+
+  - id: leave-leave
+    as_agent: agent-leave-member
+    operation: group_leave
+    input:
+      group_id: "group/test-group-leave"
+    expected_output:
+      group_id: "{{any_string}}"
+      left_at: "{{any_number}}"
+
+  - id: leave-send-after
+    as_agent: agent-leave-owner
+    operation: send
+    input:
+      channel: "group/test-group-leave"
+      body:
+        type: status_update
+        subject: after member left
+
+  - id: leave-recv-leaver
+    as_agent: agent-leave-member
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: leave-recv-leaver
+    expected_count: 0

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+name: unsubscribe-discards-queue
+spec_ref: spec/operations/unsubscribe.input.schema.json
+description: >
+  unsubscribe drops queued-but-unread messages for the removed pattern.
+  After subscribing, receiving a send, then unsubscribing, a subsequent
+  recv must return 0 messages for the unsubscribed channel.
+
+agents:
+  - id: agent-unsub-sender
+    credential: secret-unsub-sender
+  - id: agent-unsub-recv
+    credential: secret-unsub-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-unsub-recv
+    input:
+      pattern: "test:unsub"
+
+sequence:
+  - id: send-before-unsub
+    as_agent: agent-unsub-sender
+    operation: send
+    input:
+      channel: "test:unsub"
+      body:
+        type: status_update
+        subject: queued message
+
+  - id: unsubscribe-1
+    as_agent: agent-unsub-recv
+    operation: unsubscribe
+    input:
+      patterns:
+        - "test:unsub"
+    expected_output:
+      unsubscribed: "{{any_array}}"
+
+  - id: recv-after-unsub
+    as_agent: agent-unsub-recv
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages: []
+
+assertions:
+  - type: no_redelivery
+    recv_step: recv-after-unsub
+    expected_count: 0

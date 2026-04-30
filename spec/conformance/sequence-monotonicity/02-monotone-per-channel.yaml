@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+name: monotone-per-channel
+spec_ref: spec/primitives/sequence-numbers.md
+description: >
+  5 sends produce seq 1..5; recv returns them in seq order; second channel's
+  seq sequence is independent (also starts at 1). Verifies per-channel
+  monotone counter independence.
+
+agents:
+  - id: agent-mono-sender
+    credential: secret-mono-sender
+  - id: agent-mono-recv
+    credential: secret-mono-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-mono-recv
+    input:
+      pattern: "test:mono-a"
+  - operation: subscribe
+    as_agent: agent-mono-recv
+    input:
+      pattern: "test:mono-b"
+
+sequence:
+  - id: mono-send-a1
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-a"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: mono-send-b1
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-b"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: mono-send-a2
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-a"
+      body: {n: 2}
+    expected_output:
+      seq: 2
+
+  - id: mono-send-a3
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-a"
+      body: {n: 3}
+    expected_output:
+      seq: 3
+
+  - id: mono-send-a4
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-a"
+      body: {n: 4}
+    expected_output:
+      seq: 4
+
+  - id: mono-send-a5
+    as_agent: agent-mono-sender
+    operation: send
+    input:
+      channel: "test:mono-a"
+      body: {n: 5}
+    expected_output:
+      seq: 5
+
+  - id: mono-recv-all
+    as_agent: agent-mono-recv
+    operation: recv
+    input: {}
+
+assertions:
+  - type: ordering
+    recv_step: mono-recv-all
+    channel: "test:mono-a"
+    by: seq
+  - type: received_count
+    recv_step: mono-recv-all
+    min: 6
+    max: 6

@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+name: stale-heartbeat-marks-offline
+spec_ref: spec/state-machines/presence-states.md
+description: >
+  Without heartbeat for the configured stale window, presence transitions
+  to stale/offline; the transition is recorded on sox/presence. This fixture
+  is marked pending because it requires waiting 30+ seconds for the stale
+  timeout — impractical for unit conformance runs. Implementations with
+  configurable stale thresholds may run it with a short timeout.
+pending: true
+
+agents:
+  - id: agent-stale
+    credential: secret-stale
+  - id: agent-stale-observer
+    credential: secret-stale-observer
+
+setup:
+  - operation: subscribe
+    as_agent: agent-stale-observer
+    input:
+      pattern: "sox/presence"
+
+sequence:
+  - id: stale-hb
+    as_agent: agent-stale
+    operation: channels_heartbeat
+    input:
+      status: online
+
+  - id: stale-wait
+    type: sleep
+    milliseconds: 31000
+
+  - id: stale-recv-presence
+    as_agent: agent-stale-observer
+    operation: recv
+    input: {}
+
+assertions:
+  - type: no_loss
+    recv_step: stale-recv-presence
+    min: 1

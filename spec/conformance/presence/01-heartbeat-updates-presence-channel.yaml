@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+name: heartbeat-updates-presence-channel
+spec_ref: spec/primitives/presence.md
+description: >
+  channels_heartbeat updates server liveness; sox/presence channel reflects
+  agent as online. An observer subscribed to sox/presence receives a
+  presence-change event after the heartbeat call.
+
+agents:
+  - id: agent-hb-active
+    credential: secret-hb-active
+  - id: agent-hb-observer
+    credential: secret-hb-observer
+
+setup:
+  - operation: subscribe
+    as_agent: agent-hb-observer
+    input:
+      pattern: "sox/presence"
+
+sequence:
+  - id: hb-call
+    as_agent: agent-hb-active
+    operation: channels_heartbeat
+    input:
+      status: online
+    expected_output:
+      recorded_at: "{{any_number}}"
+
+  - id: hb-recv-presence
+    as_agent: agent-hb-observer
+    operation: recv
+    input: {}
+
+assertions:
+  - type: no_loss
+    recv_step: hb-recv-presence
+    min: 1

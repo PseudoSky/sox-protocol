@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: reply-to-link
+spec_ref: spec/primitives/threads.md
+description: >
+  send with reply_to threads to parent message_id; recv with thread_depth
+  surfaces parent context. Verifies that reply_to is echoed back verbatim
+  in the stored envelope.
+
+agents:
+  - id: agent-thread-a
+    credential: secret-thread-a
+  - id: agent-thread-b
+    credential: secret-thread-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-thread-b
+    input:
+      pattern: "test:thread"
+
+sequence:
+  - id: send-parent
+    as_agent: agent-thread-a
+    operation: send
+    input:
+      channel: "test:thread"
+      body:
+        type: clarification_request
+        question: what is the answer?
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-parent
+    as_agent: agent-thread-b
+    operation: recv
+    input: {}
+
+  - id: send-reply
+    as_agent: agent-thread-b
+    operation: send
+    input:
+      channel: "test:thread"
+      body:
+        type: clarification_reply
+        answer: "42"
+      reply_to: "{{capture:send-parent.message_id}}"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 2
+
+  - id: recv-reply
+    as_agent: agent-thread-a
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - seq: 2
+          reply_to: "{{capture:send-parent.message_id}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-reply
+    min: 1

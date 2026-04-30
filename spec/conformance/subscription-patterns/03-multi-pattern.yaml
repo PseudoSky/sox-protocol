@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: Apache-2.0
+name: multi-pattern
+spec_ref: spec/primitives/channels.md#subscriptions
+description: >
+  Multiple overlapping subscriptions deliver each message exactly once.
+  Agent subscribes to both "ticket:*" and "ticket:ENGI-*" (overlapping).
+  A send to "ticket:ENGI-001" must arrive exactly once, not duplicated.
+
+agents:
+  - id: agent-multi-sender
+    credential: secret-multi-sender
+  - id: agent-multi-recv
+    credential: secret-multi-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-multi-recv
+    input:
+      pattern: "ticket:*"
+  - operation: subscribe
+    as_agent: agent-multi-recv
+    input:
+      pattern: "ticket:ENGI-*"
+
+sequence:
+  - id: send-overlap
+    as_agent: agent-multi-sender
+    operation: send
+    input:
+      channel: "ticket:ENGI-001"
+      body:
+        type: status_update
+        subject: overlap test
+
+  - id: recv-multi
+    as_agent: agent-multi-recv
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+
+assertions:
+  - type: no_duplication
+    recv_step: recv-multi
+  - type: received_count
+    recv_step: recv-multi
+    min: 1
+    max: 1

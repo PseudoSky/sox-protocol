@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+name: glob-match
+spec_ref: spec/primitives/channels.md#subscriptions
+description: >
+  subscribe pattern team/* receives team/eng but not ops/eng.
+  Verifies glob subscription: matching messages delivered; non-matching dropped.
+
+agents:
+  - id: agent-glob-sender
+    credential: secret-glob-sender
+  - id: agent-glob-recv
+    credential: secret-glob-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-glob-recv
+    input:
+      pattern: "team/*"
+
+sequence:
+  - id: send-matching
+    as_agent: agent-glob-sender
+    operation: send
+    input:
+      channel: "team/eng"
+      body:
+        type: status_update
+        subject: engineering update
+
+  - id: send-non-matching
+    as_agent: agent-glob-sender
+    operation: send
+    input:
+      channel: "ops/eng"
+      body:
+        type: status_update
+        subject: ops update
+
+  - id: recv-glob
+    as_agent: agent-glob-recv
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages:
+        - channel: "team/eng"
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: recv-glob
+    min: 1
+  - type: no_channel_leak
+    recv_step: recv-glob
+    forbidden_channel: "ops/eng"
+  - type: all_channels_match_pattern
+    recv_step: recv-glob
+    pattern: "team/*"

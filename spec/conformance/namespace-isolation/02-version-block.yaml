@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+name: version-block
+spec_ref: spec/protocol.md#versioning
+description: >
+  list_channels response includes _sox_protocol block with protocol_version
+  matching spec/VERSION. Verifies the mandatory version negotiation block
+  is present and well-formed on every list_channels response.
+
+agents:
+  - id: agent-version-check
+    credential: secret-version-check
+
+sequence:
+  - id: version-list
+    as_agent: agent-version-check
+    operation: list_channels
+    input: {}
+    expected_output:
+      channels: "{{any_array}}"
+      protocol_version: "{{any_string}}"
+
+assertions: []

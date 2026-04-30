@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+name: group-broadcast
+spec_ref: spec/primitives/groups.md
+description: >
+  send to a group channel fans out to all active members; non-members do not receive.
+  Owner creates group, invites and joins member, sends to group channel.
+  Both owner and member recv the message; non-member gets nothing.
+
+agents:
+  - id: agent-bc-owner
+    credential: secret-bc-owner
+  - id: agent-bc-member
+    credential: secret-bc-member
+  - id: agent-bc-outsider
+    credential: secret-bc-outsider
+
+setup:
+  - operation: subscribe
+    as_agent: agent-bc-outsider
+    input:
+      pattern: "broadcast:outsider-check"
+
+sequence:
+  - id: bc-create
+    as_agent: agent-bc-owner
+    operation: group_create
+    input:
+      group_id: "test-group-bc"
+    expected_output:
+      group_id: "{{any_string}}"
+
+  - id: bc-invite
+    as_agent: agent-bc-owner
+    operation: group_invite
+    input:
+      group_id: "group/test-group-bc"
+      agent_id: agent-bc-member
+
+  - id: bc-join
+    as_agent: agent-bc-member
+    operation: group_join
+    input:
+      group_id: "group/test-group-bc"
+
+  - id: bc-send
+    as_agent: agent-bc-owner
+    operation: send
+    input:
+      channel: "group/test-group-bc"
+      body:
+        type: status_update
+        subject: broadcast to group
+    expected_output:
+      seq: 1
+
+  - id: bc-recv-owner
+    as_agent: agent-bc-owner
+    operation: recv
+    input: {}
+
+  - id: bc-recv-member
+    as_agent: agent-bc-member
+    operation: recv
+    input: {}
+
+  - id: bc-recv-outsider
+    as_agent: agent-bc-outsider
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: all_receivers_got_message
+    recv_steps:
+      - bc-recv-owner
+      - bc-recv-member
+  - type: no_redelivery
+    recv_step: bc-recv-outsider
+    expected_count: 0

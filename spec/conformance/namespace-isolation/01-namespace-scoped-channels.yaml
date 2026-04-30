@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+name: namespace-scoped-channels
+spec_ref: spec/primitives/namespace.md
+description: >
+  Channel created under namespace A is not visible to list_channels under
+  namespace B. Verifies store-level namespace isolation: agents in different
+  namespaces see different channel sets.
+  This fixture is marked pending because namespace routing depends on the
+  namespace_resolver middleware and namespace configuration which requires
+  server-level setup beyond basic agent credentials.
+pending: true
+
+agents:
+  - id: agent-ns-a
+    credential: secret-ns-a
+    namespace: namespace-alpha
+  - id: agent-ns-b
+    credential: secret-ns-b
+    namespace: namespace-beta
+
+sequence:
+  - id: ns-send-a
+    as_agent: agent-ns-a
+    operation: send
+    input:
+      channel: "test:ns-scoped"
+      body:
+        type: status_update
+        subject: namespace alpha message
+
+  - id: ns-list-b
+    as_agent: agent-ns-b
+    operation: list_channels
+    input: {}
+    expected_output:
+      channels: "{{any_array}}"
+      _sox_protocol: "{{any_object}}"
+
+assertions: []

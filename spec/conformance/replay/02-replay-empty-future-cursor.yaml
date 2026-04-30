@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+name: replay-empty-future-cursor
+spec_ref: spec/operations/replay.output.schema.json
+description: >
+  replay with since_seq beyond last seq returns empty; no error.
+  Sends 2 messages (seq 1..2), then replays since_seq=999 — must return
+  empty messages array with has_more=false and no error.
+
+agents:
+  - id: agent-rp-empty-sender
+    credential: secret-rp-empty-sender
+  - id: agent-rp-empty-reader
+    credential: secret-rp-empty-reader
+
+setup:
+  - operation: subscribe
+    as_agent: agent-rp-empty-reader
+    input:
+      pattern: "test:replay-empty"
+
+sequence:
+  - id: rpe-send-1
+    as_agent: agent-rp-empty-sender
+    operation: send
+    input:
+      channel: "test:replay-empty"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: rpe-send-2
+    as_agent: agent-rp-empty-sender
+    operation: send
+    input:
+      channel: "test:replay-empty"
+      body: {n: 2}
+    expected_output:
+      seq: 2
+
+  - id: rpe-replay-beyond
+    as_agent: agent-rp-empty-reader
+    operation: replay
+    input:
+      channel: "test:replay-empty"
+      since_seq: 999
+    expected_output:
+      messages: []
+      has_more: false
+
+assertions:
+  - type: no_redelivery
+    recv_step: rpe-replay-beyond
+    expected_count: 0

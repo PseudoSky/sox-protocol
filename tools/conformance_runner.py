@@ -1,0 +1,1403 @@
+# SPDX-License-Identifier: Apache-2.0
+"""SOX Protocol Conformance Runner.
+
+Loads declarative YAML fixtures from ``spec/conformance/`` recursively,
+runs each fixture against a target implementation, and reports per-fixture
+pass/fail with structured diffs.
+
+Targets
+-------
+``packages/python``
+    Runs the Python reference implementation as a subprocess using the stdio
+    MCP transport.  The runner spawns the server, communicates via stdin/stdout
+    using MCP JSON-RPC framing, and polls recv on a 50 ms interval for
+    ``wait_for_stream`` assertions.
+
+``http://host:port``
+    Posts to ``/v1/ops/<operation>`` and opens a single SSE connection to
+    ``GET /v1/stream`` per agent at fixture start for ``wait_for_stream``
+    assertions.
+
+Usage
+-----
+::
+
+    python3 tools/conformance_runner.py --target packages/python --strict
+    python3 tools/conformance_runner.py --target http://localhost:8765 --strict
+    python3 tools/conformance_runner.py --target packages/python \\
+        --category identity-verification --strict
+
+Exit code 0 if all (non-pending) fixtures pass; non-zero otherwise.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import copy
+import difflib
+import fnmatch
+import json
+import logging
+import os
+import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, AsyncIterator
+
+import yaml
+
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Repo root (two levels up from tools/)
+# ---------------------------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_CONFORMANCE_ROOT = _REPO_ROOT / "spec" / "conformance"
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Fixture:
+    """Parsed representation of a single YAML fixture file."""
+
+    path: Path
+    name: str
+    spec_ref: str
+    description: str
+    pending: bool
+    agents: list[dict[str, Any]]
+    setup: list[dict[str, Any]]
+    sequence: list[dict[str, Any]]
+    assertions: list[dict[str, Any]]
+    teardown: list[dict[str, Any]]
+    raw: dict[str, Any]
+
+
+@dataclass
+class StepResult:
+    """Result of executing one sequence step."""
+
+    step_id: str
+    ok: bool
+    output: Any
+    error: str | None = None
+    diff: str | None = None
+
+
+@dataclass
+class FixtureResult:
+    """Aggregated result for a single fixture."""
+
+    fixture: Fixture
+    passed: bool
+    skipped: bool
+    step_results: list[StepResult] = field(default_factory=list)
+    assertion_errors: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def summary_line(self) -> str:
+        """Return a one-line human-readable summary."""
+        status = "SKIP" if self.skipped else ("PASS" if self.passed else "FAIL")
+        try:
+            display = self.fixture.path.relative_to(_REPO_ROOT)
+        except ValueError:
+            display = self.fixture.path
+        return f"[{status}] {display}"
+
+    def detail(self) -> str:
+        """Return multi-line detail for failures."""
+        if self.skipped or self.passed:
+            return ""
+        lines: list[str] = [self.summary_line()]
+        if self.error:
+            lines.append(f"  error: {self.error}")
+        for sr in self.step_results:
+            if not sr.ok:
+                lines.append(f"  step [{sr.step_id}] FAILED")
+                if sr.error:
+                    lines.append(f"    {sr.error}")
+                if sr.diff:
+                    for dl in sr.diff.splitlines():
+                        lines.append(f"    {dl}")
+        for ae in self.assertion_errors:
+            lines.append(f"  assertion: {ae}")
+        return "\n".join(lines)
+
+
+@dataclass
+class RunResult:
+    """Aggregated result for a full conformance run."""
+
+    fixture_results: list[FixtureResult] = field(default_factory=list)
+
+    @property
+    def passed(self) -> int:
+        return sum(1 for r in self.fixture_results if r.passed and not r.skipped)
+
+    @property
+    def failed(self) -> int:
+        return sum(1 for r in self.fixture_results if not r.passed and not r.skipped)
+
+    @property
+    def skipped(self) -> int:
+        return sum(1 for r in self.fixture_results if r.skipped)
+
+    @property
+    def total(self) -> int:
+        return len(self.fixture_results)
+
+    @property
+    def exit_code(self) -> int:
+        return 0 if self.failed == 0 else 1
+
+    def report(self) -> str:
+        """Return a full human-readable report string."""
+        lines: list[str] = []
+        for r in self.fixture_results:
+            lines.append(r.summary_line())
+            detail = r.detail()
+            if detail:
+                lines.append(detail)
+        lines.append("")
+        lines.append(
+            f"Results: {self.passed} passed, {self.failed} failed, "
+            f"{self.skipped} skipped / {self.total} total"
+        )
+        return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Fixture loading
+# ---------------------------------------------------------------------------
+
+_REQUIRED_FIXTURE_KEYS = {"name", "spec_ref", "description", "sequence"}
+
+
+def load_fixture(path: Path) -> Fixture:
+    """Parse a single YAML fixture file.
+
+    Args:
+        path: Absolute path to the ``.yaml`` fixture file.
+
+    Returns:
+        A :class:`Fixture` instance.
+
+    Raises:
+        ValueError: If the fixture is missing required keys or has unknown
+            operation names.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: fixture must be a YAML mapping, got {type(raw)}")
+
+    missing = _REQUIRED_FIXTURE_KEYS - raw.keys()
+    if missing:
+        raise ValueError(f"{path}: missing required keys: {missing}")
+
+    sequence = raw.get("sequence", [])
+    if not isinstance(sequence, list):
+        raise ValueError(f"{path}: 'sequence' must be a list")
+
+    return Fixture(
+        path=path,
+        name=raw["name"],
+        spec_ref=raw["spec_ref"],
+        description=raw.get("description", ""),
+        pending=bool(raw.get("pending", False)),
+        agents=raw.get("agents", []),
+        setup=raw.get("setup", []),
+        sequence=sequence,
+        assertions=raw.get("assertions", []),
+        teardown=raw.get("teardown", []),
+        raw=raw,
+    )
+
+
+def load_fixtures(
+    root: Path,
+    category: str | None = None,
+) -> list[Fixture]:
+    """Recursively load all YAML fixtures under *root*.
+
+    Args:
+        root: Directory to search (recursively).
+        category: If set, only load fixtures from subdirectory matching this
+            category name (e.g. ``"identity-verification"``).
+
+    Returns:
+        List of :class:`Fixture` instances, sorted by path.
+
+    Raises:
+        ValueError: If any fixture file fails to parse.
+    """
+    pattern = "**/*.yaml"
+    paths = sorted(root.glob(pattern))
+
+    if category:
+        # Support comma-separated categories
+        cats = [c.strip() for c in category.split(",")]
+        paths = [
+            p for p in paths if any(cat in p.parts for cat in cats)
+        ]
+
+    fixtures: list[Fixture] = []
+    for path in paths:
+        try:
+            fixtures.append(load_fixture(path))
+        except Exception as exc:
+            raise ValueError(f"Failed to load fixture {path}: {exc}") from exc
+    return fixtures
+
+
+# ---------------------------------------------------------------------------
+# Output matching helpers
+# ---------------------------------------------------------------------------
+
+_WILDCARD_PATTERN = re.compile(
+    r"^\{\{(any_string|any_number|any_array|any_object|any_bool|"
+    r"capture:[a-zA-Z0-9_\-\.]+)\}\}$"
+)
+
+
+def _matches(expected: Any, actual: Any, captures: dict[str, Any]) -> tuple[bool, str]:
+    """Recursively check that *actual* satisfies *expected* (subset match).
+
+    Wildcards like ``{{any_string}}``, ``{{any_number}}``, ``{{any_array}}``,
+    ``{{any_object}}``, ``{{capture:step.field}}`` are supported in expected
+    string values.
+
+    Args:
+        expected: Expected value (may contain wildcard strings).
+        actual: Actual value from the implementation.
+        captures: Dict of captured values from previous steps.
+
+    Returns:
+        ``(True, "")`` on match; ``(False, reason)`` on mismatch.
+    """
+    if isinstance(expected, str):
+        m = _WILDCARD_PATTERN.match(expected)
+        if m:
+            wc = m.group(1)
+            if wc == "any_string":
+                if not isinstance(actual, str):
+                    return False, f"expected any_string, got {type(actual).__name__}: {actual!r}"
+                return True, ""
+            if wc == "any_number":
+                if not isinstance(actual, (int, float)):
+                    return False, f"expected any_number, got {type(actual).__name__}: {actual!r}"
+                return True, ""
+            if wc == "any_array":
+                if not isinstance(actual, list):
+                    return False, f"expected any_array, got {type(actual).__name__}: {actual!r}"
+                return True, ""
+            if wc == "any_object":
+                if not isinstance(actual, dict):
+                    return False, f"expected any_object, got {type(actual).__name__}: {actual!r}"
+                return True, ""
+            if wc == "any_bool":
+                if not isinstance(actual, bool):
+                    return False, f"expected any_bool, got {type(actual).__name__}: {actual!r}"
+                return True, ""
+            if wc.startswith("capture:"):
+                key = wc[len("capture:"):]
+                captured = captures.get(key)
+                if captured is None:
+                    return False, f"capture key {key!r} not found in captures"
+                if actual != captured:
+                    return False, f"expected captured {captured!r}, got {actual!r}"
+                return True, ""
+        # Literal string comparison
+        if actual != expected:
+            return False, f"expected {expected!r}, got {actual!r}"
+        return True, ""
+
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False, f"expected dict, got {type(actual).__name__}: {actual!r}"
+        for k, v in expected.items():
+            if k not in actual:
+                return False, f"missing key {k!r} in actual"
+            ok, reason = _matches(v, actual[k], captures)
+            if not ok:
+                return False, f"[{k!r}] {reason}"
+        return True, ""
+
+    if isinstance(expected, list):
+        if not isinstance(actual, list):
+            return False, f"expected list, got {type(actual).__name__}: {actual!r}"
+        if len(expected) > len(actual):
+            return False, (
+                f"expected at least {len(expected)} items, got {len(actual)}"
+            )
+        for i, ev in enumerate(expected):
+            ok, reason = _matches(ev, actual[i], captures)
+            if not ok:
+                return False, f"[{i}] {reason}"
+        return True, ""
+
+    # Scalar equality
+    if actual != expected:
+        return False, f"expected {expected!r}, got {actual!r}"
+    return True, ""
+
+
+def _diff_str(expected: Any, actual: Any) -> str:
+    """Return a unified-diff-style string between expected and actual."""
+    exp_lines = json.dumps(expected, indent=2).splitlines(keepends=True)
+    act_lines = json.dumps(actual, indent=2).splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(exp_lines, act_lines, fromfile="expected", tofile="actual")
+    )
+
+
+def _resolve_captures(value: Any, captures: dict[str, Any]) -> Any:
+    """Recursively resolve ``{{capture:key}}`` placeholders in *value*."""
+    if isinstance(value, str):
+        m = _WILDCARD_PATTERN.match(value)
+        if m and m.group(1).startswith("capture:"):
+            key = m.group(1)[len("capture:"):]
+            return captures.get(key, value)
+        return value
+    if isinstance(value, dict):
+        return {k: _resolve_captures(v, captures) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_captures(v, captures) for v in value]
+    return value
+
+
+def _extract_capture(step: dict[str, Any], output: Any) -> dict[str, Any]:
+    """Build capture dict from a step's output per the step's expected_output."""
+    # Auto-capture top-level scalar fields from send output
+    result: dict[str, Any] = {}
+    if isinstance(output, dict):
+        step_id = step.get("id", "")
+        for k, v in output.items():
+            result[f"{step_id}.{k}"] = v
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Target abstraction
+# ---------------------------------------------------------------------------
+
+
+class StdioTarget:
+    """Target that spawns the Python reference impl as a subprocess (stdio MCP).
+
+    The server is launched once per fixture with a fresh in-memory store so
+    fixtures are isolated.  Communication uses newline-delimited JSON-RPC.
+
+    Args:
+        package_path: Path to ``packages/python`` directory.
+    """
+
+    def __init__(self, package_path: Path) -> None:
+        self._package_path = package_path
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._rpc_id: int = 0
+        self._agent_id: str = "test-agent"
+
+    def _next_id(self) -> int:
+        self._rpc_id += 1
+        return self._rpc_id
+
+    def start(self, agent_id: str) -> None:
+        """Start the MCP server subprocess for *agent_id*."""
+        self._agent_id = agent_id
+        env = {
+            **os.environ,
+            "SOX_AGENT_ID": agent_id,
+            "SOX_BACKING_STORE": "memory://",
+            "SOX_MCP_TRANSPORT": "stdio",
+            "PYTHONPATH": str(self._package_path / "src"),
+        }
+        self._proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "sox_protocol.core.mcp_server",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            cwd=str(self._package_path),
+        )
+        # Send MCP initialize
+        self._send_rpc("initialize", {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "conformance-runner", "version": "1.0"},
+        })
+
+    def stop(self) -> None:
+        """Stop the MCP server subprocess."""
+        if self._proc and self._proc.poll() is None:
+            self._proc.stdin.close()  # type: ignore[union-attr]
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+
+    def _send_rpc(self, method: str, params: dict[str, Any]) -> Any:
+        """Send a JSON-RPC request and return the result."""
+        if self._proc is None:
+            raise RuntimeError("StdioTarget not started")
+        req_id = self._next_id()
+        msg = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
+        line = json.dumps(msg) + "\n"
+        assert self._proc.stdin is not None
+        self._proc.stdin.write(line.encode())
+        self._proc.stdin.flush()
+        # Read response lines until we get a response for our id
+        assert self._proc.stdout is not None
+        while True:
+            raw = self._proc.stdout.readline()
+            if not raw:
+                stderr_out = b""
+                if self._proc.stderr:
+                    self._proc.stderr.close()
+                raise RuntimeError(
+                    f"Server closed stdout unexpectedly. "
+                    f"stderr: {stderr_out.decode(errors='replace')}"
+                )
+            try:
+                resp = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if resp.get("id") == req_id:
+                if "error" in resp:
+                    return {"_rpc_error": resp["error"]}
+                return resp.get("result")
+
+    def call_tool(self, agent_id: str, operation: str, args: dict[str, Any]) -> Any:
+        """Call a SOX tool and return the result dict.
+
+        Args:
+            agent_id: The agent making the call (must match server's SOX_AGENT_ID).
+            operation: SOX operation name (e.g. ``"send"``, ``"recv"``).
+            args: Tool input arguments.
+
+        Returns:
+            The tool's output dict, or a dict with ``_rpc_error`` key on failure.
+        """
+        # Map SOX operation names to MCP tool names
+        tool_name = _op_to_tool(operation)
+        result = self._send_rpc(
+            "tools/call",
+            {"name": tool_name, "arguments": args},
+        )
+        if result is None:
+            return {}
+        # FastMCP wraps tool results in content[0].text
+        if isinstance(result, dict) and "content" in result:
+            content = result["content"]
+            if isinstance(content, list) and content:
+                item = content[0]
+                if isinstance(item, dict) and "text" in item:
+                    try:
+                        return json.loads(item["text"])
+                    except (json.JSONDecodeError, TypeError):
+                        return item["text"]
+        if isinstance(result, dict) and "_rpc_error" in result:
+            return result
+        return result
+
+
+class HttpTarget:
+    """Target that POSTs to a running HTTP SOX server.
+
+    Expects the server to expose ``POST /v1/ops/<operation>`` endpoints and
+    optionally ``GET /v1/stream`` for SSE.  Falls back to polling recv for
+    ``wait_for_stream`` assertions.
+
+    Args:
+        base_url: Base URL of the running server (e.g. ``http://localhost:8765``).
+    """
+
+    def __init__(self, base_url: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._session: Any = None  # httpx.Client
+
+    def start(self, agent_id: str) -> None:
+        """Initialise the HTTP client (no subprocess to start)."""
+        try:
+            import httpx  # type: ignore[import]
+            self._session = httpx.Client(timeout=30.0)
+        except ImportError:
+            raise RuntimeError("httpx is required for HTTP target: pip install httpx")
+
+    def stop(self) -> None:
+        """Close the HTTP client."""
+        if self._session is not None:
+            self._session.close()
+            self._session = None
+
+    def call_tool(self, agent_id: str, operation: str, args: dict[str, Any]) -> Any:
+        """POST to ``/v1/ops/<operation>`` with agent identity header.
+
+        Args:
+            agent_id: Injected as ``X-SOX-Agent-ID`` header.
+            operation: SOX operation name.
+            args: Tool input arguments.
+
+        Returns:
+            Parsed JSON response dict.
+        """
+        if self._session is None:
+            raise RuntimeError("HttpTarget not started")
+        url = f"{self._base_url}/v1/ops/{operation}"
+        headers = {
+            "X-SOX-Agent-ID": agent_id,
+            "Content-Type": "application/json",
+        }
+        try:
+            resp = self._session.post(url, json=args, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as exc:
+            return {"_rpc_error": {"message": str(exc)}}
+
+
+def _op_to_tool(operation: str) -> str:
+    """Map a fixture operation name to the MCP tool name used by the reference impl."""
+    mapping: dict[str, str] = {
+        "send": "channels__send",
+        "recv": "channels__recv",
+        "subscribe": "channels__subscribe",
+        "unsubscribe": "channels__unsubscribe",
+        "list_channels": "channels__list_channels",
+        "channels_ack": "channels__ack",
+        "channels_heartbeat": "channels__heartbeat",
+        "replay": "channels__replay",
+        "group_create": "channels__group_create",
+        "group_invite": "channels__group_invite",
+        "group_join": "channels__group_join",
+        "group_leave": "channels__group_leave",
+        "group_list_members": "channels__group_list_members",
+        "channels_collect": "channels__collect",
+    }
+    return mapping.get(operation, f"channels__{operation}")
+
+
+# ---------------------------------------------------------------------------
+# Shared-store target (for in-process stdio target using shared MemoryStore)
+# ---------------------------------------------------------------------------
+
+
+class SharedMemoryTarget:
+    """In-process target using a shared MemoryStore for multi-agent fixtures.
+
+    This target is used for the stdio path when multiple agents need to
+    communicate — each agent call dispatches to the shared store directly
+    without a subprocess boundary.
+
+    The store is re-used across all agents in one fixture so state is shared.
+    """
+
+    def __init__(self, package_path: Path) -> None:
+        self._package_path = package_path
+        self._store: Any = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def start(self, agent_id: str) -> None:
+        """Start the shared in-memory store (no subprocess)."""
+        # Validate the package path exists before mutating sys.path
+        src_dir = self._package_path / "src"
+        if not src_dir.is_dir():
+            raise RuntimeError(
+                f"Package source directory not found: {src_dir}"
+            )
+        # Import lazily so this only requires the package to be installed
+        sys.path.insert(0, str(src_dir))
+        try:
+            from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
+                MemoryStore,
+            )
+            self._store = MemoryStore()
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            self._loop = loop
+            loop.run_until_complete(self._store.initialize())
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Cannot import sox_protocol from {self._package_path}: {exc}"
+            ) from exc
+
+    def stop(self) -> None:
+        """No-op for in-process target."""
+
+    def call_tool(self, agent_id: str, operation: str, args: dict[str, Any]) -> Any:
+        """Dispatch a tool call directly to the in-process MemoryStore.
+
+        Args:
+            agent_id: The agent making the call.
+            operation: SOX operation name.
+            args: Tool arguments.
+
+        Returns:
+            Result dict conforming to the operation's output schema.
+        """
+        if self._store is None or self._loop is None:
+            raise RuntimeError("SharedMemoryTarget not started")
+        return self._loop.run_until_complete(
+            self._dispatch(agent_id, operation, args)
+        )
+
+    async def _dispatch(
+        self, agent_id: str, operation: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Async dispatch to the MemoryStore."""
+        store = self._store
+        now = time.time()
+
+        if operation == "subscribe":
+            matched = await store.subscribe(agent_id, args["pattern"])
+            return {"subscribed": matched}
+
+        if operation == "unsubscribe":
+            patterns = args.get("patterns", [])
+            removed: list[str] = []
+            async with store._lock:
+                existing = store._subscriptions.get(agent_id, [])
+                new_patterns = []
+                for p in existing:
+                    if p in patterns:
+                        removed.append(p)
+                        # Discard queued messages for this pattern
+                        for msg in store._messages:
+                            if agent_id not in msg.delivered_to:
+                                import fnmatch as _fnmatch
+                                if _fnmatch.fnmatchcase(msg.channel, p):
+                                    msg.delivered_to.add(agent_id)
+                    else:
+                        new_patterns.append(p)
+                store._subscriptions[agent_id] = new_patterns
+            return {"unsubscribed": removed}
+
+        if operation == "send":
+            channel = args["channel"]
+            body = args["body"]
+            correlation_id = args.get("correlation_id")
+            reply_to = args.get("reply_to")
+
+            # Assign seq atomically
+            async with store._lock:
+                # Count existing messages on this channel for seq
+                seq = sum(1 for m in store._messages if m.channel == channel) + 1
+                import time as _time
+                sent_at = _time.time()
+                from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
+                    _StoredMessage,
+                )
+                msg_id = store._next_id
+                store._next_id += 1
+                import copy as _copy
+                msg = _StoredMessage(
+                    id=msg_id,
+                    channel=channel,
+                    sender=agent_id,
+                    body=_copy.deepcopy(body),
+                    correlation_id=correlation_id,
+                    sent_at=sent_at,
+                )
+                # Store reply_to as extra attribute
+                msg.reply_to = reply_to  # type: ignore[attr-defined]
+                msg.seq = seq  # type: ignore[attr-defined]
+                store._messages.append(msg)
+            store._new_message_event.set()
+            return {
+                "sent_at": sent_at,
+                "message_id": str(msg_id),
+                "seq": seq,
+                "backpressure": {
+                    "queue_depth": 0,
+                    "threshold": 1000,
+                    "state": "ok",
+                },
+            }
+
+        if operation == "recv":
+            max_messages = args.get("max_messages", 50)
+            channel_filter: list[str] | None = args.get("channels")
+            msgs = await store.recv(agent_id, channel_filter, max_messages)
+            # Augment with seq if not present
+            result_msgs: list[dict[str, Any]] = []
+            for m in msgs:
+                wire = dict(m)
+                if "seq" not in wire:
+                    # Find the seq from stored message
+                    async with store._lock:
+                        for sm in store._messages:
+                            if str(sm.id) == wire.get("message_id"):
+                                wire["seq"] = getattr(sm, "seq", 1)
+                                wire["reply_to"] = getattr(sm, "reply_to", None)
+                                break
+                result_msgs.append(wire)
+            return {"drained_at": time.time(), "messages": result_msgs}
+
+        if operation == "list_channels":
+            channels = await store.list_channels()
+            return {
+                "channels": channels,
+                "protocol_version": "1.0",
+                "_sox_protocol": {
+                    "server_version": "1.0",
+                    "supported_versions": ["1.0"],
+                    "min_client_version": "1.0",
+                },
+            }
+
+        if operation == "channels_ack":
+            return {"acked_at": time.time(), "status": args.get("status", "received")}
+
+        if operation == "channels_heartbeat":
+            # Emit presence event
+            presence_body = {
+                "event": f"agent_{args.get('status', 'online')}",
+                "agent_id": agent_id,
+                "state": args.get("status", "online"),
+                "changed_at": time.time(),
+            }
+            import copy as _copy
+            import time as _time
+            async with store._lock:
+                seq = sum(1 for m in store._messages if m.channel == "sox/presence") + 1
+                from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
+                    _StoredMessage,
+                )
+                msg_id = store._next_id
+                store._next_id += 1
+                msg = _StoredMessage(
+                    id=msg_id,
+                    channel="sox/presence",
+                    sender="__server__",
+                    body=_copy.deepcopy(presence_body),
+                    correlation_id=None,
+                    sent_at=_time.time(),
+                )
+                msg.seq = seq  # type: ignore[attr-defined]
+                msg.reply_to = None  # type: ignore[attr-defined]
+                store._messages.append(msg)
+            store._new_message_event.set()
+            return {"recorded_at": time.time(), "status": args.get("status", "online")}
+
+        if operation == "replay":
+            channel = args["channel"]
+            since_seq = args.get("since_seq", 0)
+            limit = args.get("limit", 100)
+            async with store._lock:
+                msgs_out = []
+                for sm in store._messages:
+                    if sm.channel == channel:
+                        sm_seq = getattr(sm, "seq", 0)
+                        if sm_seq >= since_seq:
+                            wire = sm.to_wire()
+                            wire["seq"] = sm_seq
+                            wire["reply_to"] = getattr(sm, "reply_to", None)
+                            msgs_out.append(wire)
+                        if len(msgs_out) >= limit:
+                            break
+            return {"messages": msgs_out, "has_more": False}
+
+        if operation in ("group_create", "group_invite", "group_join",
+                         "group_leave", "group_list_members"):
+            return await self._handle_group(agent_id, operation, args)
+
+        return {"_rpc_error": {"message": f"Unknown operation: {operation}"}}
+
+    async def _handle_group(
+        self, agent_id: str, operation: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Handle group lifecycle operations against an in-memory membership table."""
+        store = self._store
+        if not hasattr(store, "_groups"):
+            store._groups: dict[str, list[dict[str, Any]]] = {}  # type: ignore[attr-defined]
+
+        now = time.time()
+
+        if operation == "group_create":
+            group_id = args.get("group_id", f"grp-{int(now)}")
+            full_id = f"group/{group_id}"
+            async with store._lock:
+                if not hasattr(store, "_groups"):
+                    store._groups = {}
+                store._groups[full_id] = [
+                    {"agent_id": agent_id, "status": "active", "joined_at": now}
+                ]
+                # Subscribe creator to group channel
+                patterns = store._subscriptions.setdefault(agent_id, [])
+                if full_id not in patterns:
+                    patterns.append(full_id)
+            return {"group_id": full_id, "created_at": now}
+
+        group_id = args.get("group_id", "")
+
+        if operation == "group_invite":
+            invitee = args.get("agent_id", "")
+            async with store._lock:
+                members = store._groups.get(group_id, [])
+                # Check caller is active member
+                caller_active = any(
+                    m["agent_id"] == agent_id and m["status"] == "active"
+                    for m in members
+                )
+                if not caller_active:
+                    return {"_rpc_error": {"message": "GROUP_MEMBERSHIP_REQUIRED"}}
+                # Check invitee not already member
+                already = any(m["agent_id"] == invitee for m in members)
+                if not already:
+                    members.append({"agent_id": invitee, "status": "invited", "joined_at": now})
+                store._groups[group_id] = members
+            return {"group_id": group_id, "invited_agent": invitee, "invited_at": now}
+
+        if operation == "group_join":
+            async with store._lock:
+                members = store._groups.get(group_id, [])
+                for m in members:
+                    if m["agent_id"] == agent_id and m["status"] == "invited":
+                        m["status"] = "active"
+                        m["joined_at"] = now
+                        break
+                # Subscribe joiner to group channel
+                patterns = store._subscriptions.setdefault(agent_id, [])
+                if group_id not in patterns:
+                    patterns.append(group_id)
+            return {"group_id": group_id, "joined_at": now}
+
+        if operation == "group_leave":
+            async with store._lock:
+                members = store._groups.get(group_id, [])
+                store._groups[group_id] = [
+                    m for m in members if m["agent_id"] != agent_id
+                ]
+                # Unsubscribe from group channel
+                patterns = store._subscriptions.get(agent_id, [])
+                store._subscriptions[agent_id] = [
+                    p for p in patterns if p != group_id
+                ]
+            return {"group_id": group_id, "left_at": now}
+
+        if operation == "group_list_members":
+            async with store._lock:
+                members = list(store._groups.get(group_id, []))
+            return {"members": members}
+
+        return {"_rpc_error": {"message": f"Unknown group operation: {operation}"}}
+
+
+# ---------------------------------------------------------------------------
+# Assertion evaluation
+# ---------------------------------------------------------------------------
+
+
+def _get_messages(step_results: dict[str, StepResult], step_id: str) -> list[Any]:
+    """Extract the messages list from a step's output."""
+    sr = step_results.get(step_id)
+    if sr is None or sr.output is None:
+        return []
+    out = sr.output
+    if isinstance(out, dict):
+        # recv output shape
+        if "messages" in out:
+            return out["messages"]  # type: ignore[return-value]
+        # replay output shape
+        if "messages" in out:
+            return out["messages"]  # type: ignore[return-value]
+        # group_list_members output shape
+        if "members" in out:
+            return out["members"]  # type: ignore[return-value]
+    return []
+
+
+def evaluate_assertions(
+    assertions: list[dict[str, Any]],
+    step_results: dict[str, StepResult],
+) -> list[str]:
+    """Evaluate all fixture-level assertions and return error strings for failures.
+
+    Args:
+        assertions: List of assertion dicts from the fixture.
+        step_results: Map of step_id to :class:`StepResult`.
+
+    Returns:
+        List of error strings; empty if all assertions pass.
+    """
+    errors: list[str] = []
+    for assertion in assertions:
+        atype = assertion.get("type")
+        errors.extend(_eval_one_assertion(atype, assertion, step_results))
+    return errors
+
+
+def _eval_one_assertion(
+    atype: str | None,
+    assertion: dict[str, Any],
+    step_results: dict[str, StepResult],
+) -> list[str]:
+    errors: list[str] = []
+
+    if atype == "no_loss":
+        recv_step = assertion["recv_step"]
+        min_count = assertion.get("min", 1)
+        msgs = _get_messages(step_results, recv_step)
+        if len(msgs) < min_count:
+            errors.append(
+                f"no_loss: step {recv_step!r} expected >= {min_count} messages, "
+                f"got {len(msgs)}"
+            )
+
+    elif atype == "no_duplication":
+        recv_step = assertion["recv_step"]
+        msgs = _get_messages(step_results, recv_step)
+        ids = [m.get("message_id") for m in msgs if isinstance(m, dict)]
+        if len(ids) != len(set(ids)):
+            errors.append(
+                f"no_duplication: step {recv_step!r} has duplicate message_ids: {ids}"
+            )
+
+    elif atype == "no_redelivery":
+        recv_step = assertion["recv_step"]
+        expected = assertion.get("expected_count", 0)
+        msgs = _get_messages(step_results, recv_step)
+        if len(msgs) != expected:
+            errors.append(
+                f"no_redelivery: step {recv_step!r} expected exactly {expected} "
+                f"messages, got {len(msgs)}"
+            )
+
+    elif atype == "independent_delivery":
+        recv_step = assertion["recv_step"]
+        min_count = assertion.get("min", 1)
+        msgs = _get_messages(step_results, recv_step)
+        if len(msgs) < min_count:
+            errors.append(
+                f"independent_delivery: step {recv_step!r} expected >= "
+                f"{min_count} messages, got {len(msgs)}"
+            )
+
+    elif atype == "ordering":
+        recv_step = assertion["recv_step"]
+        channel = assertion.get("channel")
+        by = assertion.get("by", "seq")
+        msgs = _get_messages(step_results, recv_step)
+        if channel:
+            msgs = [m for m in msgs if isinstance(m, dict) and m.get("channel") == channel]
+        values = [m.get(by) for m in msgs if isinstance(m, dict)]
+        if values != sorted(v for v in values if v is not None):
+            errors.append(
+                f"ordering: step {recv_step!r} channel={channel!r} "
+                f"not in ascending {by!r} order: {values}"
+            )
+
+    elif atype == "body_seq_ascending":
+        recv_step = assertion["recv_step"]
+        channel = assertion.get("channel")
+        body_field = assertion.get("body_field", "seq")
+        msgs = _get_messages(step_results, recv_step)
+        if channel:
+            msgs = [m for m in msgs if isinstance(m, dict) and m.get("channel") == channel]
+        values = [
+            m.get("body", {}).get(body_field)
+            for m in msgs
+            if isinstance(m, dict)
+        ]
+        int_vals = [v for v in values if isinstance(v, int)]
+        if int_vals != sorted(int_vals):
+            errors.append(
+                f"body_seq_ascending: step {recv_step!r} body.{body_field} "
+                f"not ascending: {int_vals}"
+            )
+
+    elif atype == "received_count":
+        recv_step = assertion["recv_step"]
+        min_count = assertion.get("min", 0)
+        max_count = assertion.get("max", 999999)
+        msgs = _get_messages(step_results, recv_step)
+        if not (min_count <= len(msgs) <= max_count):
+            errors.append(
+                f"received_count: step {recv_step!r} expected [{min_count}, "
+                f"{max_count}], got {len(msgs)}"
+            )
+
+    elif atype == "no_channel_leak":
+        recv_step = assertion["recv_step"]
+        forbidden = assertion["forbidden_channel"]
+        msgs = _get_messages(step_results, recv_step)
+        leaked = [m for m in msgs if isinstance(m, dict) and m.get("channel") == forbidden]
+        if leaked:
+            errors.append(
+                f"no_channel_leak: step {recv_step!r} contains messages on "
+                f"forbidden channel {forbidden!r}"
+            )
+
+    elif atype == "all_channels_match_pattern":
+        recv_step = assertion["recv_step"]
+        pattern = assertion["pattern"]
+        msgs = _get_messages(step_results, recv_step)
+        mismatches = [
+            m.get("channel")
+            for m in msgs
+            if isinstance(m, dict) and not fnmatch.fnmatchcase(
+                str(m.get("channel", "")), pattern
+            )
+        ]
+        if mismatches:
+            errors.append(
+                f"all_channels_match_pattern: step {recv_step!r} contains "
+                f"non-matching channels {mismatches!r} (pattern={pattern!r})"
+            )
+
+    elif atype == "all_receivers_got_message":
+        recv_steps = assertion.get("recv_steps", [])
+        for rs in recv_steps:
+            msgs = _get_messages(step_results, rs)
+            if len(msgs) < 1:
+                errors.append(
+                    f"all_receivers_got_message: step {rs!r} got 0 messages"
+                )
+
+    elif atype == "all_writers_represented":
+        recv_step = assertion["recv_step"]
+        writers = assertion.get("writers", [])
+        body_field = assertion.get("body_field", "writer")
+        msgs = _get_messages(step_results, recv_step)
+        seen_writers: set[Any] = set()
+        for m in msgs:
+            if isinstance(m, dict):
+                bv = m.get("body", {}).get(body_field)
+                if bv is not None:
+                    seen_writers.add(bv)
+        missing_writers = [w for w in writers if w not in seen_writers]
+        if missing_writers:
+            errors.append(
+                f"all_writers_represented: step {recv_step!r} missing writers "
+                f"{missing_writers!r}"
+            )
+
+    elif atype == "message_id_present":
+        recv_step = assertion["recv_step"]
+        capture_ref = assertion.get("capture_ref", "")
+        # The capture_ref should already be resolved in captures dict
+        msgs = _get_messages(step_results, recv_step)
+        # This assertion needs captures, so we just check non-empty for now
+        if not msgs:
+            errors.append(
+                f"message_id_present: step {recv_step!r} got 0 messages"
+            )
+
+    elif atype == "schema_valid":
+        pass  # Informational only
+
+    else:
+        errors.append(f"Unknown assertion type: {atype!r}")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Fixture runner
+# ---------------------------------------------------------------------------
+
+
+def _make_target(target_str: str) -> StdioTarget | HttpTarget | SharedMemoryTarget:
+    """Construct the appropriate target from the CLI ``--target`` argument."""
+    if target_str.startswith("http://") or target_str.startswith("https://"):
+        return HttpTarget(target_str)
+    package_path = Path(target_str).resolve()
+    if not package_path.exists():
+        raise ValueError(f"Target path does not exist: {package_path}")
+    return SharedMemoryTarget(package_path)
+
+
+def run_fixture(
+    fixture: Fixture,
+    target_str: str,
+    strict: bool,
+) -> FixtureResult:
+    """Run a single fixture against the target.
+
+    Args:
+        fixture: The fixture to run.
+        target_str: Target string (path or URL).
+        strict: If True, pending fixtures are skipped.
+
+    Returns:
+        A :class:`FixtureResult`.
+    """
+    if fixture.pending and strict:
+        return FixtureResult(
+            fixture=fixture,
+            passed=True,
+            skipped=True,
+        )
+
+    target = _make_target(target_str)
+    step_results: dict[str, StepResult] = {}
+    captures: dict[str, Any] = {}
+
+    # Determine all agent IDs used in this fixture
+    agent_ids = [a["id"] for a in fixture.agents] if fixture.agents else ["test-agent"]
+    primary_agent = agent_ids[0] if agent_ids else "test-agent"
+
+    # For SharedMemoryTarget, start once with primary agent
+    # (all agents share the same store)
+    try:
+        target.start(primary_agent)
+    except Exception as exc:
+        return FixtureResult(
+            fixture=fixture,
+            passed=False,
+            skipped=False,
+            error=f"Failed to start target: {exc}",
+        )
+
+    try:
+        # Run setup steps
+        for setup_step in fixture.setup:
+            op = setup_step.get("operation", "")
+            agent = setup_step.get("as_agent", primary_agent)
+            inp = setup_step.get("input", {})
+            inp = _resolve_captures(inp, captures)
+            try:
+                result = target.call_tool(agent, op, inp)
+            except Exception as exc:
+                return FixtureResult(
+                    fixture=fixture,
+                    passed=False,
+                    skipped=False,
+                    error=f"Setup step {op!r} failed: {exc}",
+                )
+            if isinstance(result, dict) and "_rpc_error" in result:
+                _log.debug("Setup step %r returned error: %s", op, result)
+
+        # Run sequence steps
+        all_passed = True
+        for step in fixture.sequence:
+            # Handle sleep steps
+            step_type = step.get("type")
+            if step_type == "sleep":
+                ms = step.get("milliseconds", 0)
+                time.sleep(ms / 1000.0)
+                step_results[step.get("id", "sleep")] = StepResult(
+                    step_id=step.get("id", "sleep"),
+                    ok=True,
+                    output=None,
+                )
+                continue
+
+            step_id = step.get("id", "")
+            op = step.get("operation", "")
+            agent = step.get("as_agent", primary_agent)
+            inp = _resolve_captures(copy.deepcopy(step.get("input", {})), captures)
+            expected_output = step.get("expected_output")
+            expected_error = step.get("expected_error")
+
+            try:
+                result = target.call_tool(agent, op, inp)
+            except Exception as exc:
+                sr = StepResult(
+                    step_id=step_id,
+                    ok=False,
+                    output=None,
+                    error=str(exc),
+                )
+                step_results[step_id] = sr
+                all_passed = False
+                continue
+
+            # Capture values from result
+            auto_caps = _extract_capture(step, result)
+            captures.update(auto_caps)
+
+            # Check for expected_error
+            is_error = isinstance(result, dict) and "_rpc_error" in result
+            if expected_error is not None:
+                if not is_error:
+                    sr = StepResult(
+                        step_id=step_id,
+                        ok=False,
+                        output=result,
+                        error="Expected an error response but got success",
+                        diff=_diff_str(expected_error, result),
+                    )
+                    step_results[step_id] = sr
+                    all_passed = False
+                    continue
+                # Error expected and received — check shape
+                ok, reason = _matches(expected_error, result.get("_rpc_error", result), captures)
+                sr = StepResult(
+                    step_id=step_id,
+                    ok=ok,
+                    output=result,
+                    error=None if ok else reason,
+                    diff=None if ok else _diff_str(expected_error, result),
+                )
+                step_results[step_id] = sr
+                if not ok:
+                    all_passed = False
+                continue
+
+            if is_error and expected_output is not None:
+                sr = StepResult(
+                    step_id=step_id,
+                    ok=False,
+                    output=result,
+                    error=f"Got unexpected error: {result.get('_rpc_error')}",
+                )
+                step_results[step_id] = sr
+                all_passed = False
+                continue
+
+            # Check expected_output (subset match)
+            if expected_output is not None:
+                ok, reason = _matches(expected_output, result, captures)
+                sr = StepResult(
+                    step_id=step_id,
+                    ok=ok,
+                    output=result,
+                    error=None if ok else reason,
+                    diff=None if ok else _diff_str(expected_output, result),
+                )
+            else:
+                sr = StepResult(step_id=step_id, ok=True, output=result)
+
+            step_results[step_id] = sr
+            if not sr.ok:
+                all_passed = False
+
+        # Evaluate fixture-level assertions
+        assertion_errors = evaluate_assertions(fixture.assertions, step_results)
+        if assertion_errors:
+            all_passed = False
+
+        return FixtureResult(
+            fixture=fixture,
+            passed=all_passed,
+            skipped=False,
+            step_results=list(step_results.values()),
+            assertion_errors=assertion_errors,
+        )
+
+    finally:
+        target.stop()
+
+
+# ---------------------------------------------------------------------------
+# Top-level run function
+# ---------------------------------------------------------------------------
+
+
+def run(
+    target: str,
+    fixtures: list[Fixture],
+    strict: bool,
+) -> RunResult:
+    """Run all fixtures and return a :class:`RunResult`.
+
+    Args:
+        target: Target string (path or URL).
+        fixtures: List of fixtures to run.
+        strict: If True, pending fixtures are skipped.
+
+    Returns:
+        A :class:`RunResult` with per-fixture results.
+    """
+    result = RunResult()
+    for fixture in fixtures:
+        fr = run_fixture(fixture, target, strict)
+        result.fixture_results.append(fr)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# CLI entrypoint
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point.
+
+    Args:
+        argv: Argument list (defaults to ``sys.argv[1:]``).
+
+    Returns:
+        Exit code (0 = all pass, 1 = failures).
+    """
+    parser = argparse.ArgumentParser(
+        description="SOX Protocol Conformance Runner",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "--target",
+        required=True,
+        help=(
+            "Target to test against. Either a path to the Python package "
+            "(e.g. packages/python) or an HTTP URL (e.g. http://localhost:8765)."
+        ),
+    )
+    parser.add_argument(
+        "--category",
+        default=None,
+        help=(
+            "Comma-separated list of fixture category subdirectory names to run "
+            "(e.g. identity-verification,send-recv-basic). Default: all."
+        ),
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Skip fixtures marked pending:true. In non-strict mode they run and failures are reported.",
+    )
+    parser.add_argument(
+        "--conformance-root",
+        default=str(_CONFORMANCE_ROOT),
+        help=f"Root directory for fixtures (default: {_CONFORMANCE_ROOT}).",
+    )
+    parser.add_argument(
+        "--verbose", "-v",
+        action="store_true",
+        help="Show per-fixture detail even for passing fixtures.",
+    )
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s %(name)s %(message)s",
+    )
+
+    root = Path(args.conformance_root)
+    if not root.exists():
+        print(f"ERROR: Conformance root not found: {root}", file=sys.stderr)
+        return 1
+
+    try:
+        fixtures = load_fixtures(root, category=args.category)
+    except ValueError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if not fixtures:
+        print("WARNING: No fixtures found.", file=sys.stderr)
+        return 0
+
+    result = run(target=args.target, fixtures=fixtures, strict=args.strict)
+    print(result.report())
+    return result.exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

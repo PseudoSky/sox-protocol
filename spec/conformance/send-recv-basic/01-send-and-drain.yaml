@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+name: send-and-drain
+spec_ref: spec/primitives/channels.md#send-recv
+description: >
+  Single-channel send by agent-a; agent-b subscribed receives via recv with seq=1.
+  Verifies the basic round-trip: subscribe, send, recv returns the message with
+  correct sender (server-certified), seq=1, and message_id.
+
+agents:
+  - id: agent-a
+    credential: secret-a
+  - id: agent-b
+    credential: secret-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-b
+    input:
+      pattern: "test:basic"
+
+sequence:
+  - id: send-1
+    as_agent: agent-a
+    operation: send
+    input:
+      channel: "test:basic"
+      body:
+        type: status_update
+        subject: hello world
+      correlation_id: corr-001
+    expected_output:
+      message_id: "{{any_string}}"
+      sent_at: "{{any_number}}"
+      seq: 1
+      backpressure:
+        state: ok
+
+  - id: recv-1
+    as_agent: agent-b
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages:
+        - channel: "test:basic"
+          sender: agent-a
+          seq: 1
+          message_id: "{{any_string}}"
+          body:
+            type: status_update
+            subject: hello world
+          correlation_id: corr-001
+          sent_at: "{{any_number}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-1
+    min: 1
+  - type: no_duplication
+    recv_step: recv-1

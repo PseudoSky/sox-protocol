@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+name: replay-since-seq
+spec_ref: spec/operations/replay.input.schema.json
+description: >
+  replay with since_seq=N returns only messages with seq>=N in monotone order.
+  Sends 4 messages (seq 1..4), then replays since_seq=3 — must return only
+  seq 3 and 4, in ascending order.
+
+agents:
+  - id: agent-replay-sender
+    credential: secret-replay-sender
+  - id: agent-replay-reader
+    credential: secret-replay-reader
+
+setup:
+  - operation: subscribe
+    as_agent: agent-replay-reader
+    input:
+      pattern: "test:replay"
+
+sequence:
+  - id: rp-send-1
+    as_agent: agent-replay-sender
+    operation: send
+    input:
+      channel: "test:replay"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: rp-send-2
+    as_agent: agent-replay-sender
+    operation: send
+    input:
+      channel: "test:replay"
+      body: {n: 2}
+    expected_output:
+      seq: 2
+
+  - id: rp-send-3
+    as_agent: agent-replay-sender
+    operation: send
+    input:
+      channel: "test:replay"
+      body: {n: 3}
+    expected_output:
+      seq: 3
+
+  - id: rp-send-4
+    as_agent: agent-replay-sender
+    operation: send
+    input:
+      channel: "test:replay"
+      body: {n: 4}
+    expected_output:
+      seq: 4
+
+  - id: rp-replay
+    as_agent: agent-replay-reader
+    operation: replay
+    input:
+      channel: "test:replay"
+      since_seq: 3
+    expected_output:
+      messages: "{{any_array}}"
+      has_more: false
+
+assertions:
+  - type: ordering
+    recv_step: rp-replay
+    channel: "test:replay"
+    by: seq
+  - type: received_count
+    recv_step: rp-replay
+    min: 2
+    max: 2

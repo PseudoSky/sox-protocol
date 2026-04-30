@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+name: deep-thread
+spec_ref: spec/primitives/threads.md
+description: >
+  3-level deep thread; thread_depth=2 returns 2 ancestors.
+  Verifies that nested reply_to chains are correctly stored and
+  that thread_depth parameter on recv surfaces ancestor context.
+
+agents:
+  - id: agent-deep-a
+    credential: secret-deep-a
+  - id: agent-deep-b
+    credential: secret-deep-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-deep-b
+    input:
+      pattern: "test:deep-thread"
+  - operation: subscribe
+    as_agent: agent-deep-a
+    input:
+      pattern: "test:deep-thread"
+
+sequence:
+  - id: send-level-1
+    as_agent: agent-deep-a
+    operation: send
+    input:
+      channel: "test:deep-thread"
+      body:
+        type: clarification_request
+        subject: level 1
+    expected_output:
+      seq: 1
+
+  - id: recv-l1
+    as_agent: agent-deep-b
+    operation: recv
+    input: {}
+
+  - id: send-level-2
+    as_agent: agent-deep-b
+    operation: send
+    input:
+      channel: "test:deep-thread"
+      body:
+        type: clarification_reply
+        subject: level 2
+      reply_to: "{{capture:send-level-1.message_id}}"
+    expected_output:
+      seq: 2
+
+  - id: recv-l2
+    as_agent: agent-deep-a
+    operation: recv
+    input: {}
+
+  - id: send-level-3
+    as_agent: agent-deep-a
+    operation: send
+    input:
+      channel: "test:deep-thread"
+      body:
+        type: clarification_reply
+        subject: level 3
+      reply_to: "{{capture:send-level-2.message_id}}"
+    expected_output:
+      seq: 3
+
+  - id: recv-deep
+    as_agent: agent-deep-b
+    operation: recv
+    input:
+      thread_depth: 2
+    expected_output:
+      messages:
+        - seq: 3
+          reply_to: "{{capture:send-level-2.message_id}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-deep
+    min: 1

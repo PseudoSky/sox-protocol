@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+name: collect-n-replies
+spec_ref: spec/operations/channels_collect.input.schema.json
+description: >
+  [pending] channels_collect returns when N replies arrive on the broadcast
+  thread; SSE progress events emitted en route. Marked pending because
+  channels_collect is x-status: planned in v1.0 — skipped in --strict mode.
+pending: true
+
+agents:
+  - id: agent-collect-orchestrator
+    credential: secret-collect-orchestrator
+  - id: agent-collect-worker-1
+    credential: secret-collect-worker-1
+  - id: agent-collect-worker-2
+    credential: secret-collect-worker-2
+
+setup:
+  - operation: subscribe
+    as_agent: agent-collect-worker-1
+    input:
+      pattern: "test:collect"
+  - operation: subscribe
+    as_agent: agent-collect-worker-2
+    input:
+      pattern: "test:collect"
+
+sequence:
+  - id: collect-broadcast
+    as_agent: agent-collect-orchestrator
+    operation: send
+    input:
+      channel: "test:collect"
+      body:
+        type: clarification_request
+        question: respond please
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: collect-reply-1
+    as_agent: agent-collect-worker-1
+    operation: send
+    input:
+      channel: "test:collect"
+      body:
+        type: clarification_reply
+        answer: worker 1 ready
+      reply_to: "{{capture:collect-broadcast.message_id}}"
+
+  - id: collect-reply-2
+    as_agent: agent-collect-worker-2
+    operation: send
+    input:
+      channel: "test:collect"
+      body:
+        type: clarification_reply
+        answer: worker 2 ready
+      reply_to: "{{capture:collect-broadcast.message_id}}"
+
+  - id: collect-call
+    as_agent: agent-collect-orchestrator
+    operation: channels_collect
+    input:
+      reply_to: "{{capture:collect-broadcast.message_id}}"
+      count: 2
+      timeout: 10
+    expected_output:
+      received: "{{any_array}}"
+      missing: "{{any_array}}"
+      timed_out: false
+
+assertions: []

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+name: sorted-pair-naming
+spec_ref: spec/primitives/dms.md
+description: >
+  DM channel name is dm/<sorted-pair>; same channel regardless of which agent
+  sent first. agent-alpha and agent-beta: dm/agent-alpha~agent-beta (sorted).
+  Both agents subscribe and can recv from the canonical sorted-pair channel.
+
+agents:
+  - id: agent-alpha
+    credential: secret-alpha
+  - id: agent-beta
+    credential: secret-beta
+
+setup:
+  - operation: subscribe
+    as_agent: agent-alpha
+    input:
+      pattern: "dm/agent-alpha~agent-beta"
+  - operation: subscribe
+    as_agent: agent-beta
+    input:
+      pattern: "dm/agent-alpha~agent-beta"
+
+sequence:
+  - id: dm-send-alpha
+    as_agent: agent-alpha
+    operation: send
+    input:
+      channel: "dm/agent-alpha~agent-beta"
+      body:
+        type: clarification_request
+        question: hello beta
+    expected_output:
+      seq: 1
+      message_id: "{{any_string}}"
+
+  - id: dm-recv-beta
+    as_agent: agent-beta
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "dm/agent-alpha~agent-beta"
+          sender: agent-alpha
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: dm-recv-beta
+    min: 1

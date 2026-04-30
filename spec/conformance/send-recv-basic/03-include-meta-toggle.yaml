@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+name: include-meta-toggle
+spec_ref: spec/protocol.md#observability-extension-_meta
+description: >
+  include_meta:false omits _meta block; include_meta:true includes trace_id.
+  Verifies the observability extension toggle on recv.
+
+agents:
+  - id: agent-meta-sender
+    credential: secret-meta-sender
+  - id: agent-meta-recv
+    credential: secret-meta-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-meta-recv
+    input:
+      pattern: "test:meta"
+
+sequence:
+  - id: send-meta-1
+    as_agent: agent-meta-sender
+    operation: send
+    input:
+      channel: "test:meta"
+      body:
+        type: status_update
+        subject: meta test
+
+  - id: recv-with-meta
+    as_agent: agent-meta-recv
+    operation: recv
+    input:
+      include_meta: true
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages:
+        - channel: "test:meta"
+          seq: 1
+
+  - id: send-meta-2
+    as_agent: agent-meta-sender
+    operation: send
+    input:
+      channel: "test:meta"
+      body:
+        type: status_update
+        subject: meta test 2
+
+  - id: recv-without-meta
+    as_agent: agent-meta-recv
+    operation: recv
+    input:
+      include_meta: false
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages:
+        - channel: "test:meta"
+          seq: 2
+
+assertions:
+  - type: no_loss
+    recv_step: recv-with-meta
+    min: 1
+  - type: no_loss
+    recv_step: recv-without-meta
+    min: 1
