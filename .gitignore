@@ -1,3 +1,5 @@
 .cto/
 __pycache__
 *.pyc
+.gitnexus
+.sox/

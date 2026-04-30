@@ -102,6 +102,7 @@ class SqliteStore(BackingStore):
         Must be called before any other method.  Idempotent — safe to call
         multiple times (schema uses ``CREATE TABLE IF NOT EXISTS``).
         """
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)
         self._conn.row_factory = aiosqlite.Row
         # Enable WAL mode for concurrent reads alongside a single writer.
