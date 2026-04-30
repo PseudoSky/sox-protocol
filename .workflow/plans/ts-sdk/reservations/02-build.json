@@ -1,0 +1,29 @@
+{
+  "phase_id": "02-build",
+  "engagement": "ts-sdk",
+  "source_run": "planner-run3",
+  "files": [
+    "packages/typescript/package.json",
+    "packages/typescript/tsconfig.json",
+    "packages/typescript/tsup.config.ts",
+    "packages/typescript/vitest.config.ts",
+    "packages/typescript/.eslintrc.cjs",
+    "packages/typescript/README.md",
+    "packages/typescript/.npmignore",
+    "packages/typescript/src/index.ts",
+    "packages/typescript/src/client.ts",
+    "packages/typescript/src/transport.ts",
+    "packages/typescript/src/helpers.ts",
+    "packages/typescript/src/dm.ts",
+    "packages/typescript/src/errors.ts",
+    "packages/typescript/src/validate.ts",
+    "packages/typescript/src/generated/",
+    "packages/typescript/src/testing/in-memory-transport.ts",
+    "packages/typescript/tests/client.test.ts",
+    "packages/typescript/tests/helpers.test.ts",
+    "packages/typescript/tests/dm.test.ts",
+    "packages/typescript/tests/codegen.test.ts",
+    "packages/typescript/tests/integration.test.ts",
+    "tools/ts_codegen.ts"
+  ]
+}

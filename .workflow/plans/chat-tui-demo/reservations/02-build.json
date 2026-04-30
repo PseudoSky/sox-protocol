@@ -1,0 +1,33 @@
+{
+  "phase_id": "02-build",
+  "engagement": "chat-tui-demo",
+  "source_run": "planner-run3",
+  "files": [
+    "packages/python/src/sox_protocol/tui/__init__.py",
+    "packages/python/src/sox_protocol/tui/app.py",
+    "packages/python/src/sox_protocol/tui/state.py",
+    "packages/python/src/sox_protocol/tui/widgets/channel_list.py",
+    "packages/python/src/sox_protocol/tui/widgets/message_feed.py",
+    "packages/python/src/sox_protocol/tui/widgets/agent_roster.py",
+    "packages/python/src/sox_protocol/tui/widgets/compose_bar.py",
+    "packages/python/src/sox_protocol/tui/commands.py",
+    "packages/python/src/sox_protocol/tui/dm.py",
+    "packages/python/src/sox_protocol/tui/watch_loop.py",
+    "packages/python/src/sox_protocol/cli/chat.py",
+    "packages/python/tests/tui/__init__.py",
+    "packages/python/tests/tui/test_state.py",
+    "packages/python/tests/tui/test_commands.py",
+    "packages/python/tests/tui/test_dm.py",
+    "packages/python/tests/tui/test_watch_loop.py",
+    "packages/python/tests/tui/test_widgets.py",
+    "examples/two-agents-talking/__init__.py",
+    "examples/two-agents-talking/demo.py",
+    "examples/two-agents-talking/agent_a.py",
+    "examples/two-agents-talking/agent_b.py",
+    "examples/two-agents-talking/README.md",
+    "examples/two-agents-talking/run_demo.sh",
+    "docs/media/demo.cast",
+    "docs/media/demo.gif",
+    "docs/media/demo.tape"
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "phase_id": "02-build",
+  "engagement": "reference-agent",
+  "source_run": "planner-run3",
+  "files": [
+    "examples/reference-agent/agent.py",
+    "examples/reference-agent/cli.py",
+    "examples/reference-agent/state.py",
+    "examples/reference-agent/README.md",
+    "examples/reference-agent/run_standalone.sh",
+    "examples/reference-agent/.claude-agent.md",
+    "examples/reference-agent/pyproject.toml",
+    "packages/python/tests/reference_agent/__init__.py",
+    "packages/python/tests/reference_agent/test_bootstrap.py",
+    "packages/python/tests/reference_agent/test_main_loop.py",
+    "packages/python/tests/reference_agent/test_thread_handling.py",
+    "packages/python/tests/reference_agent/test_ack_nack.py",
+    "packages/python/tests/reference_agent/test_presence.py",
+    "packages/python/tests/reference_agent/test_recovery.py",
+    "packages/python/tests/reference_agent/test_integration.py"
+  ]
+}

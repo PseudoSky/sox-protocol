@@ -1,0 +1,181 @@
+{
+  "summary": "Canonical, teaching-grade SOX agent in Python — the executable answer to 'how do I write a SOX agent?'. Runs both as a standalone script and as a Claude Code agent. Heavily annotated (≥1 comment line per 3 code lines). Owns three primitive coverage slots in the four-demo split: namespace (bootstrap connects to a named namespace), reply_to threading (thread_handling step demonstrates clarification_request → reply pattern), and channels_ack (ack_nack step demonstrates the tool-not-message ACK lifecycle). Heartbeat is emitted but the visual roster lives in chat-tui-demo; replay is used for recovery here, but the user-visible scrubber lives in chat-webapp.",
+  "lifecycle": [
+    {
+      "step": "bootstrap",
+      "spec_ref": "spec/protocol.md §bootstrap-sequence, spec/primitives/namespace.md",
+      "operations": ["list_channels", "subscribe", "channels_heartbeat(online)"],
+      "annotation": "PRIMITIVE COVERAGE: namespace. Connect to a named namespace passed via --namespace (default 'reference'); call list_channels first to verify _sox_protocol version compatibility (fail-fast on mismatch); subscribe to ticket:*, dm/<self>~*, sox/presence; emit first heartbeat to register as online. Drain any pre-existing messages from prior sessions before entering main loop."
+    },
+    {
+      "step": "main_loop",
+      "spec_ref": "spec/primitives/sequence-numbers.md, spec/primitives/channels.md",
+      "operations": ["recv", "process", "channels_heartbeat(busy)", "channels_ack(processing)"],
+      "annotation": "Pull-based drain with cadence; track last seen seq PER CHANNEL in a dict for replay-on-recovery; flip presence to busy while processing a message; on each drained message issue channels_ack(received) immediately, then channels_ack(processing) on entering work."
+    },
+    {
+      "step": "thread_handling",
+      "spec_ref": "spec/primitives/threads.md, spec/primitives/sequence-numbers.md",
+      "operations": ["recv with thread_depth=-1", "send with reply_to=parent.message_id"],
+      "annotation": "PRIMITIVE COVERAGE: reply_to threading. Demonstrates the clarification_request → clarification_reply pattern. Use thread_depth=-1 on recv to pull full ancestor chain inline; reply via send with reply_to set to the parent message_id and channel preserved (replies stay on the same channel, not a sub-channel). Showcases the speculative-execute discipline: continue under best-guess assumption, integrate the late-arriving reply non-destructively."
+    },
+    {
+      "step": "ack_nack",
+      "spec_ref": "spec/primitives/ack-nack.md",
+      "operations": ["channels_ack(received)", "channels_ack(processing)", "channels_ack(done)", "channels_ack(nack, reason=...)"],
+      "annotation": "PRIMITIVE COVERAGE: channels_ack. Demonstrates ALL four status transitions of the forward-only state machine. CRITICAL: ACK is a TOOL CALL — no body.type=sox-ack message is ever sent to a channel. After ACKing done, a subsequent recv MUST NOT return the ACK as a channel message. NACK path includes a reason string and is exercised by a deliberately rejected message in the integration test."
+    },
+    {
+      "step": "presence_heartbeat",
+      "spec_ref": "spec/primitives/presence.md",
+      "operations": ["channels_heartbeat(online|busy|offline)"],
+      "annotation": "Background asyncio task fires channels_heartbeat every 10 seconds (the spec-recommended interval). Status reflects current activity: online when idle, busy when mid-task. Subscription to sox/presence is established in bootstrap; received presence events are logged but rendering is the TUI's job."
+    },
+    {
+      "step": "graceful_stop",
+      "spec_ref": "spec/protocol.md §graceful-stop, spec/primitives/presence.md",
+      "operations": ["channels_heartbeat(offline)", "unsubscribe"],
+      "annotation": "Refuse to stop while any pending message has only channels_ack(received) or channels_ack(processing) — must reach done or nack first. On clean stop: emit channels_heartbeat(offline), then unsubscribe, then exit. SIGTERM handler triggers the same path."
+    },
+    {
+      "step": "recovery",
+      "spec_ref": "spec/operations/replay.input.schema.json, spec/primitives/sequence-numbers.md",
+      "operations": ["replay(channel, since=last_seq, limit=100)"],
+      "annotation": "On agent restart (or after a context reset that loses in-process queue state): for every previously-subscribed channel, call replay(since=last_seq_persisted_to_disk) until has_more=false; then resume the main loop. State file at $XDG_STATE_HOME/sox-reference-agent/seq.json holds {channel: last_seq}. This is the canonical recovery recipe."
+    }
+  ],
+  "files": [
+    {
+      "path": "examples/reference-agent/agent.py",
+      "spec_ref": "spec/protocol.md, spec/primitives/*.md",
+      "purpose": "fully-annotated reference implementation; one section per lifecycle step, comment density ≥1:3",
+      "public_api": [
+        "class ReferenceAgent(client, *, agent_id, namespace='reference', state_dir)",
+        "async def bootstrap()",
+        "async def main_loop()",
+        "async def handle_message(env)",
+        "async def reply_to_request(parent, body)",
+        "async def ack(message_id, status, reason=None)",
+        "async def heartbeat_loop(interval=10)",
+        "async def graceful_stop()",
+        "async def recover_from_state()",
+        "async def run()  # composes bootstrap → recover → main_loop with heartbeat task"
+      ]
+    },
+    {
+      "path": "examples/reference-agent/cli.py",
+      "purpose": "argparse entry point: --namespace, --agent-id, --base-url, --credential-file, --state-dir, --once (run a single drain and exit, used by run_standalone.sh)",
+      "public_api": ["main"]
+    },
+    {
+      "path": "examples/reference-agent/state.py",
+      "spec_ref": "spec/primitives/sequence-numbers.md",
+      "purpose": "persist/load {channel: last_seq} JSON file for the recovery step; atomic rename on write",
+      "public_api": ["class SeqState(path)", "load() -> dict[str,int]", "save(state)", "update(channel, seq)"]
+    },
+    {
+      "path": "examples/reference-agent/README.md",
+      "purpose": "prose teaching walkthrough mirroring lifecycle[]; one H2 per step; explains WHY each call is made, not just WHAT; cross-links to spec/primitives/*.md; final section: 'Anti-patterns we deliberately avoided' (e.g. ACK as channel message)",
+      "public_api": []
+    },
+    {
+      "path": "examples/reference-agent/run_standalone.sh",
+      "purpose": "quick-start: starts an in-memory backing-store SOX server in the background, launches reference-agent in --once mode against it, sends a self-message, asserts it round-trips, exits 0 within 30s",
+      "public_api": []
+    },
+    {
+      "path": "examples/reference-agent/.claude-agent.md",
+      "purpose": "Claude Code agent definition: name, system prompt, tool list (the 8 SOX MCP tools + Read/Write), profile, lifecycle hints",
+      "public_api": []
+    },
+    {
+      "path": "examples/reference-agent/pyproject.toml",
+      "purpose": "isolated example package; depends on sox-protocol (workspace path); pinned for reproducibility",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/__init__.py",
+      "purpose": "test package marker",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_bootstrap.py",
+      "purpose": "list_channels handshake, subscribe patterns, version-mismatch fail-fast, namespace propagation",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_main_loop.py",
+      "purpose": "drain → process → ack(received) → ack(processing) → ack(done); verifies seq state advances",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_thread_handling.py",
+      "purpose": "reply with reply_to=parent.message_id; thread_depth=-1 returns full ancestor chain; replies stay on same channel",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_ack_nack.py",
+      "purpose": "all four status transitions; ACK never appears in subsequent recv (asserts no body.type=sox-ack); forward-only state machine rejects backward transitions; NACK with reason",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_presence.py",
+      "purpose": "heartbeat fires on schedule; status flips online↔busy around handle_message; offline emitted on graceful_stop",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_recovery.py",
+      "purpose": "kill agent mid-conversation, restart, assert replay(since=last_seq) backfills missed messages and no duplicates leak through",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/reference_agent/test_integration.py",
+      "purpose": "spin up reference-agent + a partner agent; run a scripted clarification_request/reply exchange end-to-end via SOX; assert outcomes",
+      "public_api": []
+    }
+  ],
+  "primitive_coverage": "channels (bootstrap subscribe/recv/send), sequence-numbers (last_seq persistence + replay cursor in recovery), threads (thread_handling step, reply_to + thread_depth=-1), dms (subscribed in bootstrap as dm/<self>~*; integration test exercises a DM exchange), groups (integration test creates a group and exchanges a message — covers group_create/invite/join/list_members), presence (presence_heartbeat step), ack-nack (ack_nack step), namespace (bootstrap step, --namespace flag), pending-state (implicit via ack lifecycle), trace-ids (correlation_id passed through on all requests)",
+  "annotation_density": "1 comment line per 3 code lines minimum (excluding tests); enforced by a dedicated test in test_bootstrap.py that parses agent.py with `tokenize` and computes the ratio",
+  "test_plan": [
+    {"category": "unit", "test_cases": ["state.py: atomic save, corrupt-file recovery", "bootstrap version handshake", "ack state machine forward-only", "reply_to set correctly", "heartbeat interval timing"]},
+    {"category": "integration", "test_cases": ["reference-agent + partner clarification round-trip", "DM round-trip", "group fan-out and ACK count", "kill-and-recover via replay", "graceful_stop refuses while pending"]},
+    {"category": "annotation", "test_cases": ["comment-line-to-code-line ratio ≥ 1:3 across agent.py"]}
+  ],
+  "risks": [
+    {"risk": "ACK-as-message regression — new contributors might write body.type='sox-ack' out of habit", "mitigation": "test_ack_nack asserts no message in any channel ever has body.type starting with 'sox-ack'; the README anti-pattern section calls this out explicitly"},
+    {"risk": "Recovery duplicate delivery", "mitigation": "replay(since=last_seq) is exclusive (seq > since); state.py only persists seq AFTER successful processing; test_recovery asserts no duplicates"},
+    {"risk": "Heartbeat drift causing server-derived 'stale' state mid-task", "mitigation": "heartbeat is in its own asyncio task with monotonic-clock interval, not gated on main loop liveness; status flips to 'busy' rather than skipping a beat"},
+    {"risk": "Standalone run >30s under cold Python startup on CI", "mitigation": "run_standalone.sh uses in-memory backing store + --once mode; no network; single recv cycle; budgeted at 5s wall-clock"},
+    {"risk": "Annotation density ratio gamed by trivial comments", "mitigation": "annotation test counts only comments ≥10 chars excluding shebang/encoding/copyright; reviewer-facing not just CI-facing"}
+  ],
+  "dependencies": [
+    "sox-protocol (workspace path)",
+    "anyio (cross-runtime async)",
+    "pytest, pytest-asyncio, pytest-cov",
+    "mypy --strict"
+  ],
+  "build_order": [
+    "1. pyproject.toml + cli.py + state.py skeleton",
+    "2. agent.py shell with lifecycle stubs",
+    "3. bootstrap step (list_channels handshake, subscribe, namespace)",
+    "4. main_loop step (recv → handle_message → ack)",
+    "5. thread_handling (reply_to)",
+    "6. ack_nack (full state machine)",
+    "7. presence_heartbeat (background task)",
+    "8. graceful_stop",
+    "9. recovery (replay + state.py)",
+    "10. tests in same order; coverage 100% on agent.py",
+    "11. integration test with partner agent",
+    "12. README walkthrough (lifecycle-prose mirror)",
+    "13. run_standalone.sh + .claude-agent.md"
+  ],
+  "exit_signals": [
+    "pytest --cov-fail-under=100 on packages/python/tests/reference_agent/",
+    "mypy --strict examples/reference-agent/agent.py",
+    "annotation density test passes (≥1:3 comments to code)",
+    "bash examples/reference-agent/run_standalone.sh exits 0 in ≤30s",
+    "Integration test green: agent + partner exchange a full thread",
+    "README walkthrough has one H2 per lifecycle[] step",
+    "Every spec/primitives/*.md file appears in primitive_coverage"
+  ]
+}

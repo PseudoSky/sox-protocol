@@ -1,0 +1,277 @@
+{
+  "summary": "TypeScript SDK for SOX Protocol v1.0. Mirrors the Python client surface and is the sole client dependency of chat-webapp. Ships browser+Node ESM/CJS bundles, generated TS types from spec/operations and spec/envelopes (covering all 16 schemas including the 8 added by 03-reconcile: channels_ack, channels_heartbeat, channels_collect, replay, plus updated send/recv/list_channels and the group lifecycle), and a small set of higher-level helpers (askAndWait, reply, drain, bootstrap) sized to back the chat-webapp component tree. Public API is intentionally aligned with the React component props in the chat-webapp plan to avoid adapter shims.",
+  "package_layout": {
+    "workspace": "packages/typescript/",
+    "package_name": "@sox-protocol/client",
+    "entry_points": {
+      "esm": "dist/index.js",
+      "cjs": "dist/index.cjs",
+      "types": "dist/index.d.ts"
+    },
+    "exports": {
+      ".": "main client + helpers",
+      "./types": "generated types only (zero runtime)",
+      "./testing": "in-memory transport for vitest"
+    },
+    "tsconfig": "extends repo base; target ES2022; module NodeNext; lib DOM,ES2022; strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes"
+  },
+  "codegen": {
+    "tool": "tools/ts_codegen.ts",
+    "input": "spec/operations/*.json + spec/envelopes/*.json",
+    "output": "packages/typescript/src/generated/",
+    "approach": "json-schema-to-typescript invoked programmatically; one .ts per schema file; barrel index.ts re-exports; emits ajv-compatible JSON copies under generated/schemas/ for runtime validation",
+    "note": "MUST cover all 28 schema files in spec/operations + 4 in spec/envelopes. Specifically: channels_ack.{input,output}, channels_heartbeat.{input,output}, channels_collect.{input,output}, replay.{input,output}, list_channels.{input,output} (with _sox_protocol block), recv.{input,output} (with seq, ts, ancestors, _meta), send.{input,output} (with seq + backpressure), subscribe, unsubscribe, group_create, group_invite, group_join, group_leave, group_list_members, plus envelopes sox-ack/sox-nack/sox-error/sox-invite. Run as a prebuild step; CI checks the directory is up-to-date with `git diff --exit-code packages/typescript/src/generated/`.",
+    "determinism": "stable property ordering; header banner with schema $id and SHA"
+  },
+  "files": [
+    {
+      "path": "packages/typescript/package.json",
+      "purpose": "package manifest with ESM+CJS exports, peerDeps, scripts (build, test, codegen, lint)",
+      "public_api": ["@sox-protocol/client name; exports map; types entry"]
+    },
+    {
+      "path": "packages/typescript/tsconfig.json",
+      "purpose": "strict TS config; references base; emits dist/",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/tsup.config.ts",
+      "purpose": "bundler config — dual ESM/CJS, .d.ts, sourcemaps, treeshake; target browser+node",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/vitest.config.ts",
+      "purpose": "test runner config; coverage thresholds=100; jsdom env for SSE tests",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/.eslintrc.cjs",
+      "purpose": "eslint config; bans `any` outside generated/",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/README.md",
+      "purpose": "install + quickstart for SDK consumers (chat-webapp + external users)",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/.npmignore",
+      "purpose": "exclude src/, tests/, configs from npm tarball; ship dist/ only",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/src/index.ts",
+      "spec_ref": "spec/protocol.md",
+      "purpose": "public barrel — re-exports SoxClient, helpers, generated types, errors",
+      "public_api": [
+        "class SoxClient",
+        "createClient(opts)",
+        "askAndWait, reply, drain, bootstrap",
+        "type Envelope, SendInput, SendOutput, RecvOutput, AckInput, HeartbeatInput, ReplayInput, ListChannelsOutput, GroupCreateInput, ...",
+        "class SoxError, SoxBackpressureError, SoxAuthError, SoxVersionMismatchError, SoxDmMembershipError, SoxGroupMembershipError"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/client.ts",
+      "spec_ref": "spec/protocol.md, spec/operations/*.json",
+      "purpose": "SoxClient — one strongly-typed method per protocol operation; HTTP transport with EventSource for live recv stream",
+      "public_api": [
+        "class SoxClient(opts: { baseUrl, credential, fetch?, eventSource?, namespace? })",
+        "send(input: SendInput): Promise<SendOutput>",
+        "recv(input?: RecvInput): Promise<RecvOutput>  // includes seq on every message",
+        "subscribe(input: SubscribeInput): Promise<SubscribeOutput>",
+        "unsubscribe(input: UnsubscribeInput): Promise<UnsubscribeOutput>",
+        "listChannels(): Promise<ListChannelsOutput>  // reads _sox_protocol block, throws SoxVersionMismatchError on incompatibility",
+        "channelsAck(input: AckInput): Promise<AckOutput>  // tool, NOT a body.type message",
+        "channelsHeartbeat(input: HeartbeatInput): Promise<HeartbeatOutput>",
+        "channelsCollect(input: CollectInput): Promise<CollectOutput>  // SSE-streamed",
+        "replay(input: ReplayInput): Promise<ReplayOutput>  // since=seq cursor",
+        "groupCreate, groupInvite, groupJoin, groupLeave, groupListMembers",
+        "watch(pattern: string): AsyncIterable<Envelope>  // SSE-backed live stream; resumes from last seq on reconnect",
+        "close(): Promise<void>"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/transport.ts",
+      "spec_ref": "spec/ports/transport.md",
+      "purpose": "HTTP transport implementation: fetch for unary calls, EventSource for SSE watch stream; CORS-friendly; reconnect with backoff; resumes via last-seen seq",
+      "public_api": [
+        "class HttpTransport implements Transport",
+        "interface Transport { call(op, input): Promise<unknown>; stream(op, input): AsyncIterable<unknown> }"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/helpers.ts",
+      "spec_ref": "spec/protocol.md §bootstrap-sequence, spec/primitives/threads.md, spec/primitives/sequence-numbers.md",
+      "purpose": "ergonomic compositions on top of SoxClient; sized to back chat-webapp components",
+      "public_api": [
+        "bootstrap(client, { patterns, namespace? }): Promise<{ protocolVersion, lastSeqByChannel }>  // calls listChannels (version handshake) then subscribe; returns per-channel seq cursor map for replay-on-reconnect",
+        "askAndWait(client, { channel, body, timeoutMs, correlationId? }): Promise<Envelope>  // sends; resolves on first matching reply (matches via reply_to == sent message_id)",
+        "reply(client, parent: Envelope, body): Promise<SendOutput>  // sets reply_to=parent.message_id, channel=parent.channel; auto-correlation_id passthrough",
+        "drain(client, { onMessage, signal? }): Promise<void>  // pulls recv in a loop, surfaces seq, exits on signal abort",
+        "openDm(client, peerAgentId): { channel: string }  // canonicalises dm/<sorted-pair> name (lex sort, ~ separator) — used by webapp DM view + reference-agent"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/dm.ts",
+      "spec_ref": "spec/primitives/dms.md",
+      "purpose": "pure helpers for dm/<sorted-pair> name canonicalisation; shared by webapp ChannelSidebar and helpers.openDm",
+      "public_api": [
+        "canonicalDmName(self: string, peer: string): string  // lex sort + ~",
+        "isDmChannel(name: string): boolean",
+        "parseDmChannel(name: string): { a: string; b: string } | null"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/errors.ts",
+      "spec_ref": "spec/protocol.md, spec/envelopes/sox-error.schema.json",
+      "purpose": "typed error hierarchy mapping wire error codes to JS classes",
+      "public_api": [
+        "class SoxError(code, message, details)",
+        "SoxBackpressureError, SoxAuthError, SoxVersionMismatchError, SoxDmMembershipError, SoxGroupMembershipError, SoxNackError",
+        "fromWireError(json): SoxError"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/validate.ts",
+      "spec_ref": "spec/operations/*.json",
+      "purpose": "ajv runtime validation against generated/schemas/; opt-in (off by default in production); used in vitest",
+      "public_api": [
+        "validateInput(op: OperationName, input: unknown): asserts input is OpInput<op>",
+        "validateOutput(op: OperationName, output: unknown): asserts output is OpOutput<op>"
+      ]
+    },
+    {
+      "path": "packages/typescript/src/generated/",
+      "purpose": "schemas → TS types (committed, regenerated by tools/ts_codegen.ts; CI verifies up-to-date)",
+      "public_api": ["all OpInput/OpOutput interfaces; envelope body type unions"]
+    },
+    {
+      "path": "packages/typescript/src/testing/in-memory-transport.ts",
+      "purpose": "deterministic transport for unit tests; assigns seq, models DM membership, supports replay range queries",
+      "public_api": [
+        "class InMemoryTransport implements Transport",
+        "createTestClient(opts?): SoxClient"
+      ]
+    },
+    {
+      "path": "packages/typescript/tests/client.test.ts",
+      "purpose": "unit tests for every SoxClient method against InMemoryTransport",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/tests/helpers.test.ts",
+      "purpose": "askAndWait timeout, reply threading, drain cancellation, bootstrap version handshake",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/tests/dm.test.ts",
+      "purpose": "canonicalisation: lex sort, identical IDs, unicode IDs, parse roundtrip",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/tests/codegen.test.ts",
+      "purpose": "asserts every spec/operations/*.json + spec/envelopes/*.json has a generated TS type",
+      "public_api": []
+    },
+    {
+      "path": "packages/typescript/tests/integration.test.ts",
+      "purpose": "spins up packages/python HTTP server in a child process; exercises send/recv/subscribe/heartbeat/ack/replay over real wire (SSE)",
+      "public_api": []
+    },
+    {
+      "path": "tools/ts_codegen.ts",
+      "purpose": "executable codegen: read spec/operations + spec/envelopes, emit packages/typescript/src/generated/",
+      "public_api": ["pnpm codegen"]
+    }
+  ],
+  "test_plan": [
+    {
+      "spec_section": "spec/operations/send + spec/primitives/sequence-numbers",
+      "test_cases": ["send returns seq, message_id, sent_at, backpressure", "successive sends to same channel return monotone seq", "different channels have independent seq"]
+    },
+    {
+      "spec_section": "spec/operations/recv + spec/primitives/sequence-numbers",
+      "test_cases": ["recv output messages each carry seq", "messages within a channel are ascending by seq", "thread_depth>0 inlines ancestors", "include_meta:false omits _meta"]
+    },
+    {
+      "spec_section": "spec/primitives/ack-nack",
+      "test_cases": ["channelsAck is a tool call, body never appears in subsequent recv", "forward-only state machine: done after received ok; received after done rejected", "nack with reason surfaces in result"]
+    },
+    {
+      "spec_section": "spec/primitives/presence",
+      "test_cases": ["channelsHeartbeat with online/busy/offline", "watch('sox/presence') yields coalesced transition events"]
+    },
+    {
+      "spec_section": "spec/primitives/dms",
+      "test_cases": ["canonicalDmName lex sort", "openDm + send routes to dm/<sorted-pair>", "wildcard subscribe('dm/*') rejected by server, error surfaces as SoxError"]
+    },
+    {
+      "spec_section": "spec/operations/replay",
+      "test_cases": ["replay since=0 returns from beginning", "replay since=last seq returns missed messages only", "has_more pagination loop"]
+    },
+    {
+      "spec_section": "spec/operations/list_channels",
+      "test_cases": ["bootstrap reads _sox_protocol block", "version mismatch raises SoxVersionMismatchError"]
+    },
+    {
+      "spec_section": "spec/primitives/groups",
+      "test_cases": ["group_create/invite/join/leave/list_members happy path", "send to group/<id> as non-member raises SoxGroupMembershipError"]
+    },
+    {
+      "category": "integration",
+      "test_cases": [
+        "live recv via SSE against running Python HTTP transport",
+        "watch reconnect after server restart resumes from last seen seq via replay",
+        "askAndWait against real partner agent process"
+      ]
+    },
+    {
+      "category": "codegen",
+      "test_cases": ["every schema file produces a TS type", "regeneration is deterministic (idempotent)", "no `any` introduced outside generated/"]
+    }
+  ],
+  "risks": [
+    {"risk": "Browser EventSource cannot send custom auth headers", "mitigation": "fall back to query-param token on SSE endpoints; document threat model; encourage reverse proxy in production"},
+    {"risk": "Bundle size creep from ajv runtime validator", "mitigation": "validate.ts is opt-in via separate import path; tree-shaken from default bundle; <50KB minified target verified in CI"},
+    {"risk": "Codegen drift between Python and TS types", "mitigation": "single source = spec/*.json; CI runs ts_codegen.ts and asserts no diff"},
+    {"risk": "ack-as-tool vs ack-as-message confusion in user code", "mitigation": "no body.type='sox-ack' literal in any TS type; client.channelsAck is the only entry point; doc snippet warns against legacy pattern"},
+    {"risk": "DM name canonicalisation mismatch between client and server", "mitigation": "shared canonicalDmName helper; integration test asserts server accepts the client-canonicalised form; unicode test vector"}
+  ],
+  "dependencies": [
+    "typescript ^5.4",
+    "tsup ^8 (bundler)",
+    "vitest ^1 + @vitest/coverage-v8",
+    "ajv ^8 (runtime schema validation, opt-in)",
+    "json-schema-to-typescript ^14 (codegen)",
+    "eventsource ^2 (Node EventSource shim; browser uses native)",
+    "eslint ^8 + @typescript-eslint",
+    "execa ^8 (integration tests — spawn Python server)"
+  ],
+  "build_order": [
+    "1. package.json + tsconfig + bundler + lint configs",
+    "2. tools/ts_codegen.ts and run it to populate src/generated/",
+    "3. errors.ts (no deps)",
+    "4. dm.ts (pure helpers)",
+    "5. transport.ts (HttpTransport + Transport interface)",
+    "6. testing/in-memory-transport.ts (test fixture)",
+    "7. client.ts (SoxClient methods)",
+    "8. helpers.ts (composed on client)",
+    "9. validate.ts (ajv)",
+    "10. index.ts barrel",
+    "11. unit tests; coverage to 100%",
+    "12. integration tests against Python server",
+    "13. tsup build pipeline; bundle-size assertion",
+    "14. README + .npmignore + npm pack --dry-run"
+  ],
+  "exit_signals": [
+    "tsc --noEmit --strict clean",
+    "vitest run --coverage with 100% thresholds",
+    "eslint --max-warnings=0 clean",
+    "no ': any' in src/ outside src/generated/",
+    "npm pack --dry-run succeeds",
+    "bundle ≤50KB minified (default entry; validate.ts excluded)",
+    "integration suite green against running Python HTTP transport",
+    "tools/ts_codegen.ts re-run produces no git diff"
+  ]
+}

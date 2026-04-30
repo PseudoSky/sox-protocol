@@ -1,0 +1,161 @@
+{
+  "summary": "Single-page web app for SOX Protocol — visual companion to the TUI demo. Consumes @sox-protocol/client (the only client dependency) and exercises the primitives that benefit most from a graphical surface: visible per-channel seq numbers in MessageThread, channel taxonomy distinguishing group/, dm/, and sox/ prefixes in ChannelSidebar, dm/<sorted-pair> rendering in a DM view, and a replay scrubber feature flag. Distributed two ways: standalone static deployment and a `sox ui` CLI subcommand that bundles assets into the Python wheel and serves them via the HTTP transport on a free local port.",
+  "stack": {
+    "framework": "React 18 + Vite — chosen over Next.js because the app is a static SPA bundled into a Python wheel (no SSR, no server-side routing); Vite gives fast HMR and a tiny production bundle that fits the 250KB gzipped budget",
+    "state": "Zustand — chosen over Jotai/TanStack Query because: (1) the SDK already provides AsyncIterable streams via watch(), so server-state caching is unnecessary; (2) Zustand's middleware composes cleanly with the SDK's drain helper; (3) lowest bundle cost (~1KB) of the three candidates",
+    "styling": "Tailwind CSS (JIT) — chosen for zero runtime cost, predictable bundle size via purge, and good a11y defaults via @tailwindcss/forms"
+  },
+  "deployment": {
+    "static": "Cloudflare Pages — chosen for free SSL, global edge cache, and Pages-native preview deployments per PR; the static bundle is also re-shipped inside the Python wheel for offline `sox ui` use",
+    "rationale": "Two-pronged distribution: (1) public hosted demo at sox-protocol.dev/ui pointing at a public read-only namespace; (2) `pip install sox-protocol[ui]` bundles the same artifacts under packages/python/src/sox_protocol/ui_assets/ so `sox ui` works air-gapped"
+  },
+  "component_tree": [
+    {"component": "App", "children": ["TopBar", "ChannelSidebar", "MessageThread", "AgentPanel", "ComposeBar", "ReplayDrawer (flag)", "GraphView (flag)"], "props": ["client: SoxClient"]},
+    {
+      "component": "TopBar",
+      "props": ["selfAgentId", "presenceState", "onHeartbeat"],
+      "spec_ref": "spec/primitives/presence.md",
+      "note": "self-presence indicator + manual heartbeat trigger; auto-heartbeat every 10s via store middleware"
+    },
+    {
+      "component": "ChannelSidebar",
+      "props": ["channels: ChannelInfo[]", "active", "onSelect"],
+      "spec_ref": "spec/primitives/channels.md, spec/primitives/groups.md, spec/primitives/dms.md",
+      "note": "groups channels into three sections — Groups (group/ prefix), DMs (dm/<sorted-pair> rendered as 'peer name'), System (sox/ prefix); free-form channels under a fourth Channels section. Resolves dm/<a>~<b> back to peer ID via dm helpers from SDK."
+    },
+    {
+      "component": "MessageThread",
+      "props": ["channel: string", "messages: Envelope[]", "selfAgentId", "replayCursor?: number"],
+      "spec_ref": "spec/primitives/sequence-numbers.md, spec/primitives/threads.md",
+      "note": "renders seq number on each message bubble (visible affordance — this is the demo vehicle for sequence-numbers); reply_to draws a thread-link to parent in-view; uses thread_depth=1 when ancestor not in current window. Live updates via SDK watch() — no polling."
+    },
+    {
+      "component": "AgentPanel",
+      "props": ["agents: AgentPresence[]"],
+      "spec_ref": "spec/primitives/presence.md",
+      "note": "subscribes to sox/presence via SDK watch(); renders online/busy/stale/offline badges; coalesced events only (no per-heartbeat flicker)"
+    },
+    {
+      "component": "ComposeBar",
+      "props": ["channel: string", "replyTo?: string", "onSend"],
+      "spec_ref": "spec/operations/send.input.schema.json",
+      "note": "supports reply_to (set when user clicks Reply on a message); generates correlation_id; surfaces backpressure state from send response"
+    },
+    {
+      "component": "ReplayDrawer",
+      "props": ["channel: string", "onScrub(seq: number)"],
+      "spec_ref": "spec/operations/replay.input.schema.json",
+      "note": "FEATURE FLAG replay_mode — slider over 1..currentSeq; calls SDK replay(channel, since, limit) with pagination; THIS is the webapp's primary replay coverage"
+    },
+    {
+      "component": "GraphView",
+      "props": ["agents", "messages"],
+      "spec_ref": "spec/protocol.md (delivered_to + reply_to)",
+      "note": "FEATURE FLAG graph_view — force-directed graph of agents and reply_to edges; uses delivered_to to draw wait-graph"
+    },
+    {
+      "component": "DmView",
+      "props": ["selfAgentId", "peerAgentId"],
+      "spec_ref": "spec/primitives/dms.md",
+      "note": "wraps MessageThread with channel resolved via SDK canonicalDmName(self,peer); renders 'peer name' header instead of raw dm/<sorted-pair>"
+    }
+  ],
+  "files": [
+    {"path": "packages/ui/package.json", "purpose": "manifest; depends on @sox-protocol/client (workspace:*); scripts for dev/build/test/lhci", "public_api": []},
+    {"path": "packages/ui/tsconfig.json", "purpose": "extends repo base; jsx react-jsx; strict", "public_api": []},
+    {"path": "packages/ui/vite.config.ts", "purpose": "Vite config; outputs to dist/; copied into Python ui_assets at pack time", "public_api": []},
+    {"path": "packages/ui/tailwind.config.ts", "purpose": "Tailwind config; purge over src/", "public_api": []},
+    {"path": "packages/ui/postcss.config.cjs", "purpose": "PostCSS pipeline for Tailwind", "public_api": []},
+    {"path": "packages/ui/.eslintrc.cjs", "purpose": "lint config; bans `any`", "public_api": []},
+    {"path": "packages/ui/vitest.config.ts", "purpose": "test config with jsdom + @testing-library/react; coverage thresholds=100 on logic dirs (state/, hooks/, lib/)", "public_api": []},
+    {"path": "packages/ui/index.html", "purpose": "Vite SPA entry shell", "public_api": []},
+    {"path": "packages/ui/src/main.tsx", "purpose": "ReactDOM render; pulls client config from sessionStorage credential", "public_api": []},
+    {"path": "packages/ui/src/App.tsx", "purpose": "top-level layout: sidebar + thread + agent panel + compose; mounts feature-flag drawers", "public_api": ["App"]},
+    {"path": "packages/ui/src/components/ChannelSidebar.tsx", "spec_ref": "spec/primitives/channels.md", "purpose": "channel taxonomy renderer", "public_api": ["ChannelSidebar"]},
+    {"path": "packages/ui/src/components/MessageThread.tsx", "spec_ref": "spec/primitives/sequence-numbers.md", "purpose": "message bubbles with visible seq", "public_api": ["MessageThread"]},
+    {"path": "packages/ui/src/components/AgentPanel.tsx", "spec_ref": "spec/primitives/presence.md", "purpose": "presence roster", "public_api": ["AgentPanel"]},
+    {"path": "packages/ui/src/components/ComposeBar.tsx", "spec_ref": "spec/operations/send.input.schema.json", "purpose": "compose + reply UI", "public_api": ["ComposeBar"]},
+    {"path": "packages/ui/src/components/TopBar.tsx", "spec_ref": "spec/primitives/presence.md", "purpose": "self-presence + namespace label", "public_api": ["TopBar"]},
+    {"path": "packages/ui/src/components/DmView.tsx", "spec_ref": "spec/primitives/dms.md", "purpose": "DM-specialised thread", "public_api": ["DmView"]},
+    {"path": "packages/ui/src/components/ReplayDrawer.tsx", "spec_ref": "spec/operations/replay.input.schema.json", "purpose": "replay scrubber (feature flag)", "public_api": ["ReplayDrawer"]},
+    {"path": "packages/ui/src/components/GraphView.tsx", "spec_ref": "spec/protocol.md", "purpose": "force-directed graph (feature flag)", "public_api": ["GraphView"]},
+    {"path": "packages/ui/src/state/store.ts", "purpose": "Zustand store: channels, messages by channel, agents, self, feature flags, last-seen seq map", "public_api": ["useStore", "type AppState"]},
+    {"path": "packages/ui/src/state/middleware.ts", "purpose": "auto-heartbeat timer; subscribe-on-connect; reconcile incoming watch() messages by seq", "public_api": ["installMiddleware"]},
+    {"path": "packages/ui/src/hooks/useWatch.ts", "purpose": "React hook wrapping SDK watch(); cleans up AsyncIterable on unmount", "public_api": ["useWatch"]},
+    {"path": "packages/ui/src/hooks/usePresence.ts", "purpose": "subscribe to sox/presence and update store", "public_api": ["usePresence"]},
+    {"path": "packages/ui/src/hooks/useReplay.ts", "purpose": "paginated replay loader for ReplayDrawer", "public_api": ["useReplay"]},
+    {"path": "packages/ui/src/lib/featureFlags.ts", "purpose": "URL-param + sessionStorage feature flag resolver (graph_view, replay_mode)", "public_api": ["useFlag", "FLAGS"]},
+    {"path": "packages/ui/src/lib/credential.ts", "purpose": "sessionStorage-only credential read/write; never persists to localStorage", "public_api": ["loadCredential", "saveCredential"]},
+    {"path": "packages/ui/src/lib/clientFactory.ts", "purpose": "constructs SoxClient from runtime config (baseUrl, namespace, credential)", "public_api": ["makeClient"]},
+    {"path": "packages/ui/tests/ChannelSidebar.test.tsx", "purpose": "groups channels by prefix; resolves dm/<sorted-pair> to peer ID", "public_api": []},
+    {"path": "packages/ui/tests/MessageThread.test.tsx", "purpose": "renders seq, threads via reply_to, shows ancestor indicator", "public_api": []},
+    {"path": "packages/ui/tests/AgentPanel.test.tsx", "purpose": "renders presence transitions from sox/presence events", "public_api": []},
+    {"path": "packages/ui/tests/store.test.ts", "purpose": "100% coverage on reducer logic, seq-based merge, dedup", "public_api": []},
+    {"path": "packages/ui/tests/middleware.test.ts", "purpose": "auto-heartbeat timing; replay-on-reconnect using stored last seq", "public_api": []},
+    {"path": "packages/ui/tests/useReplay.test.ts", "purpose": "pagination loop until has_more=false", "public_api": []},
+    {"path": "packages/ui/tests/featureFlags.test.ts", "purpose": "URL > session > default precedence", "public_api": []},
+    {"path": "packages/ui/tests/credential.test.ts", "purpose": "asserts no localStorage writes", "public_api": []},
+    {"path": "packages/ui/tests/clientFactory.test.ts", "purpose": "client construction, namespace propagation", "public_api": []},
+    {"path": "packages/python/src/sox_protocol/cli/__init__.py", "purpose": "CLI entry; registers `ui` subcommand", "public_api": ["main"]},
+    {"path": "packages/python/src/sox_protocol/cli/ui.py", "purpose": "`sox ui` subcommand: pick free port, start HTTP transport with permissive localhost CORS, mount /ui/ static assets, open browser", "public_api": ["ui_command"]},
+    {"path": "packages/python/src/sox_protocol/ui_assets/.gitkeep", "purpose": "placeholder; `pnpm build && cp -r packages/ui/dist/* packages/python/src/sox_protocol/ui_assets/` populates at pack time; included in wheel via setuptools package_data", "public_api": []}
+  ],
+  "feature_flags": {
+    "graph_view": "force-directed agent/message graph using reply_to + delivered_to edges; off by default; URL param ?ff=graph_view",
+    "replay_mode": "MessageThread history scrubber using replay operation with seq cursor; off by default; URL param ?ff=replay_mode — this is the webapp's primary replay primitive coverage"
+  },
+  "cli_subcommand": {
+    "name": "sox ui",
+    "behavior": "pick a free local port, start HTTP transport (CORS allow-list = http://localhost:* + http://127.0.0.1:*), mount packages/python/src/sox_protocol/ui_assets/ at /ui/, open default browser to http://127.0.0.1:<port>/ui/, accept --port, --namespace, --no-browser, --bind flags"
+  },
+  "test_plan": [
+    {"category": "unit", "test_cases": ["state reducers", "seq-based dedup/merge", "DM channel name resolution", "feature-flag precedence", "credential session-only persistence"]},
+    {"category": "component", "test_cases": ["MessageThread renders seq", "ChannelSidebar three-section grouping", "AgentPanel reflects sox/presence transitions", "ReplayDrawer pagination", "ComposeBar reply_to set on Reply"]},
+    {"category": "hook", "test_cases": ["useWatch cancels on unmount", "usePresence updates store", "useReplay paginates"]},
+    {"category": "e2e", "test_cases": ["sox ui boots, browser hits /ui/, sends a message, sees own message back via watch with seq=1", "DM round-trip between two browser sessions"]},
+    {"category": "performance", "test_cases": ["Lighthouse perf ≥ 80, a11y ≥ 95"]}
+  ],
+  "risks": [
+    {"risk": "CORS in dev when SDK is on a different port than the static dev server", "mitigation": "HTTP transport advertises permissive CORS for http://localhost:* and http://127.0.0.1:* by default; document allow-list extension"},
+    {"risk": "Auth credential leak via localStorage", "mitigation": "credential lives in sessionStorage only; lib/credential.ts has lint rule + test asserting no window.localStorage write"},
+    {"risk": "EventSource cannot send Authorization header from browser", "mitigation": "fall back to query-param token on the SSE endpoint; documented as localhost-only; use reverse proxy in production"},
+    {"risk": "Bundle size blow-out from GraphView's force-directed library", "mitigation": "GraphView is dynamically imported behind feature flag; default bundle stays ≤250KB gzipped; ci asserts size"},
+    {"risk": "Stale UI on reconnect (missed messages)", "mitigation": "store middleware persists last-seen seq per channel; on watch reconnect, calls SDK replay(since=lastSeq) before resubscribing — same recovery pattern as reference-agent"},
+    {"risk": "Coverage 100% impractical on rendering glue", "mitigation": "configure vitest coverage to omit src/components/*.tsx jsx return statements; documented in vitest.config.ts; logic dirs (state/, hooks/, lib/) keep 100%"}
+  ],
+  "dependencies": [
+    "react ^18, react-dom ^18",
+    "zustand ^4",
+    "@sox-protocol/client (workspace:*)",
+    "vite ^5, @vitejs/plugin-react ^4",
+    "tailwindcss ^3, @tailwindcss/forms",
+    "vitest ^1, @testing-library/react, jsdom",
+    "eslint, @typescript-eslint, eslint-plugin-react-hooks, eslint-plugin-jsx-a11y",
+    "@lhci/cli (Lighthouse CI)",
+    "d3-force (dynamically imported behind graph_view flag only)"
+  ],
+  "build_order": [
+    "1. package + Vite + Tailwind + lint scaffolding",
+    "2. lib/credential.ts, lib/clientFactory.ts, lib/featureFlags.ts (no UI deps)",
+    "3. state/store.ts + state/middleware.ts (Zustand + SDK glue)",
+    "4. hooks/useWatch, usePresence, useReplay",
+    "5. components/ in dependency order: TopBar, ChannelSidebar, MessageThread, AgentPanel, ComposeBar, DmView",
+    "6. App.tsx wiring",
+    "7. ReplayDrawer + GraphView (feature-flagged, dynamically imported)",
+    "8. unit + component + hook tests to coverage",
+    "9. CLI subcommand sox ui in packages/python/src/sox_protocol/cli/ui.py",
+    "10. wheel packaging: copy dist/ into ui_assets/, add to setup package_data",
+    "11. Lighthouse CI run; bundle-size assertion",
+    "12. e2e via Playwright against `sox ui`"
+  ],
+  "exit_signals": [
+    "tsc --noEmit --strict clean",
+    "vitest with 100% coverage on state/, hooks/, lib/ (rendering glue documented as omitted)",
+    "eslint --max-warnings=0",
+    "no `any` in src/",
+    "Lighthouse perf ≥ 80, a11y ≥ 95",
+    "default bundle ≤ 250KB gzipped (excluding dynamically imported GraphView)",
+    "sox ui --help wired in CLI",
+    "sox ui boots, serves /ui/, browser round-trips a message end-to-end"
+  ]
+}
