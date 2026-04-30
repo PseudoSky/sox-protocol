@@ -15,9 +15,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from textwrap import dedent
 
-import pytest
-
-import workflow_lint as wl
+from tools import workflow_lint as wl
 
 # ---------------------------------------------------------------------------
 # Corpus helpers
@@ -286,7 +284,7 @@ def test_next_action_not_ready(tmp_path: Path) -> None:
     assert any(e.check == "next_action_not_ready" for e in result.errors)
 
 
-def test_unknown_agent_warns(tmp_path: Path) -> None:
+def test_unknown_agent_emits_info(tmp_path: Path) -> None:
     workflow = tmp_path / ".workflow"
     plans = workflow / "plans"
     plans.mkdir(parents=True)
@@ -295,7 +293,8 @@ def test_unknown_agent_warns(tmp_path: Path) -> None:
     }
     _make_engagement(plans, "unkagent", phases, next_action="01-x")
     result = wl.lint(workflow)
-    assert any(w.check == "unknown_agent" for w in result.warnings)
+    assert any(i.check == "unknown_agent" for i in result.infos)
+    assert not any(w.check == "unknown_agent" for w in result.warnings)
 
 
 def test_invalid_writes_type_fails(tmp_path: Path) -> None:
@@ -359,7 +358,7 @@ def test_planning_no_consumer_warns(tmp_path: Path) -> None:
     assert any(w.check == "planning_no_consumer" for w in result.warnings)
 
 
-def test_inputs_path_missing_warns(tmp_path: Path) -> None:
+def test_inputs_path_missing_emits_info(tmp_path: Path) -> None:
     workflow = tmp_path / ".workflow"
     plans = workflow / "plans"
     plans.mkdir(parents=True)
@@ -367,7 +366,8 @@ def test_inputs_path_missing_warns(tmp_path: Path) -> None:
     phases = {"01-x": _phase("01-x", inputs_section=inputs)}
     _make_engagement(plans, "inputs", phases, next_action="01-x")
     result = wl.lint(workflow)
-    assert any(w.check == "input_path_missing" for w in result.warnings)
+    assert any(i.check == "input_path_missing" for i in result.infos)
+    assert not any(w.check == "input_path_missing" for w in result.warnings)
 
 
 def test_plans_dir_missing(tmp_path: Path) -> None:
@@ -434,7 +434,8 @@ def test_main_strict_promotes_warnings(tmp_path: Path, monkeypatch) -> None:
     workflow = tmp_path / ".workflow"
     plans = workflow / "plans"
     plans.mkdir(parents=True)
-    phases = {"01-x": _phase("01-x", agent="totally-made-up-agent")}
+    # empty_writes is a real warning (not info-demoted).
+    phases = {"01-x": _phase("01-x", profile="code-python", writes=[])}
     _make_engagement(plans, "eng", phases, next_action="01-x")
     monkeypatch.setattr(
         sys,
@@ -668,6 +669,36 @@ def test_skips_readme_and_non_dirs_in_plans(tmp_path: Path) -> None:
     _make_engagement(plans, "real", phases, next_action="01-x")
     result = wl.lint(workflow)
     assert not result.errors
+
+
+def test_analyzer_only_engagement_skips_state_checks(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Engagements without phases/ are analyzer-only: emit INFO, no errors."""
+    workflow = tmp_path / ".workflow"
+    plans = workflow / "plans"
+    plans.mkdir(parents=True)
+    eng = plans / "analyzer-only"
+    eng.mkdir()
+    (eng / "status.md").write_text("# status\n")
+    (eng / "analysis.md").write_text("# analysis\n")
+
+    result = wl.lint(workflow)
+    assert not result.errors
+    assert not result.warnings
+    assert len(result.infos) == 1
+    assert result.infos[0].check == "analyzer_only_engagement"
+
+    # Strict mode must still pass for analyzer-only engagements.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["workflow_lint.py", str(workflow), "--strict"],
+    )
+    rc = wl.main()
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "INFO" in captured.out
 
 
 def test_invoke_as_module_subprocess() -> None:

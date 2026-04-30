@@ -3,3 +3,5 @@ __pycache__
 *.pyc
 .gitnexus
 .sox/
+.coverage
+htmlcov/

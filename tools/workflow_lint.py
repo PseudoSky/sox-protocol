@@ -74,7 +74,7 @@ KNOWN_AGENTS: set[str] = {
 
 @dataclass
 class LintIssue:
-    severity: str  # "error" | "warning"
+    severity: str  # "error" | "warning" | "info"
     engagement: str
     phase_id: str | None
     check: str
@@ -110,6 +110,13 @@ class LintResult:
             LintIssue("warning", engagement, phase_id, check, message)
         )
 
+    def info(
+        self, engagement: str, phase_id: str | None, check: str, message: str
+    ) -> None:
+        self.issues.append(
+            LintIssue("info", engagement, phase_id, check, message)
+        )
+
     @property
     def errors(self) -> list[LintIssue]:
         return [i for i in self.issues if i.severity == "error"]
@@ -117,6 +124,10 @@ class LintResult:
     @property
     def warnings(self) -> list[LintIssue]:
         return [i for i in self.issues if i.severity == "warning"]
+
+    @property
+    def infos(self) -> list[LintIssue]:
+        return [i for i in self.issues if i.severity == "info"]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -312,14 +323,25 @@ def lint_engagement(
     phases_dir = engagement_dir / "phases"
     state_path = engagement_dir / "STATE.md"
 
+    # Analyzer-only engagements have no phases/ directory by design — they
+    # produce read-only artifacts (status.md, analysis.md) and never
+    # decompose into phases. Skip phase/STATE-dependent checks (i), (j),
+    # (l) for these engagements.
+    if not phases_dir.exists():
+        result.info(
+            slug, None, "analyzer_only_engagement",
+            "analyzer-only engagement, no phase decomposition"
+        )
+        result.checks_run += 1
+        return
+
     # Collect phase files
     phase_files: dict[str, Path] = {}
-    if phases_dir.exists():
-        for p in sorted(phases_dir.glob("*.md")):
-            # Skip feedback files
-            if ".feedback-" in p.name:
-                continue
-            phase_files[p.stem] = p
+    for p in sorted(phases_dir.glob("*.md")):
+        # Skip feedback files
+        if ".feedback-" in p.name:
+            continue
+        phase_files[p.stem] = p
 
     # Parse all phase frontmatters
     phase_fms: dict[str, dict[str, Any]] = {}
@@ -371,9 +393,12 @@ def lint_engagement(
                     f"agent must be a non-empty string, got: {agent_val!r}"
                 )
             elif agent_val not in KNOWN_AGENTS:
-                result.warning(
+                # Per phase prompt (g): "warn-only if matches a known list".
+                # The KNOWN_AGENTS list is informational — emit INFO so
+                # --strict does not promote to error for unrecognized agents.
+                result.info(
                     slug, phase_id, "unknown_agent",
-                    f"agent '{agent_val}' not in known agent registry (warn-only)"
+                    f"agent '{agent_val}' not in known agent registry (info-only)"
                 )
         result.checks_run += 1
 
@@ -501,9 +526,12 @@ def lint_engagement(
                 for path_match in re.finditer(r"`(/[^`]+)`", line):
                     cited_path = Path(path_match.group(1))
                     if not cited_path.exists():
-                        result.warning(
+                        # Future artifacts are expected; emit INFO so --strict
+                        # does not promote these to errors. (Check (k) is
+                        # documented as warn-only / informational.)
+                        result.info(
                             slug, phase_id, "input_path_missing",
-                            f"Inputs cites path '{cited_path}' which does not exist (warn-only — may be future artifact)"
+                            f"Inputs cites path '{cited_path}' which does not exist (info — may be future artifact)"
                         )
                     result.checks_run += 1
 
@@ -592,7 +620,12 @@ def main() -> int:
                 loc = f"{issue.engagement}"
                 if issue.phase_id:
                     loc += f"/{issue.phase_id}"
-                prefix = "ERROR" if issue.severity == "error" else "WARN "
+                if issue.severity == "error":
+                    prefix = "ERROR"
+                elif issue.severity == "warning":
+                    prefix = "WARN "
+                else:
+                    prefix = "INFO "
                 print(f"[{prefix}] {loc}: [{issue.check}] {issue.message}")
         else:
             print(f"OK — {result.checks_run} checks passed in {result.elapsed_ms:.0f}ms")
