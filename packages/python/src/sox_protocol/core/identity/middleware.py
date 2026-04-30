@@ -1,24 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Standalone identity middleware adapter.
+"""MIGRATION SHIM — identity middleware compatibility layer.
 
-This module provides :class:`IdentityMiddleware`, which wraps
-:class:`~sox_protocol.core.identity.verifier.IdentityVerifier` with a
-``handle(request, call_next)`` signature compatible with the upcoming
-middleware pipeline defined in ``spec/ports/middleware.md``.
+After the hooks-middleware engagement, :class:`AuthMiddleware` in
+``sox_protocol.core.middleware.plugins.auth`` is the canonical middleware for
+the pipeline. This module provides:
 
-Migration seam
---------------
-During the **hooks-middleware** engagement, this module will be rewritten as a
-re-export shim::
+1. :data:`IdentityMiddleware` — a backward-compatible wrapper that accepts the
+   OLD dict-based ``(request: dict, call_next: Callable) -> dict`` signature
+   so that existing code calling ``IdentityMiddleware(verifier)(request, call_next)``
+   continues to work unchanged.
 
-    from sox_protocol.core.middleware.plugins.auth import AuthMiddleware as IdentityMiddleware
-    __all__ = ["IdentityMiddleware"]
+2. :func:`make_identity_error_response` — convenience helper kept for
+   transport-layer callers.
 
-Existing imports of ``sox_protocol.core.identity.middleware.IdentityMiddleware``
-will continue to work unchanged.  New code MUST import
-``AuthMiddleware`` from ``sox_protocol.core.middleware.plugins.auth``.
+.. deprecated::
+    :class:`IdentityMiddleware` is a compatibility shim.  New code MUST import
+    :class:`~sox_protocol.core.middleware.plugins.auth.AuthMiddleware` directly::
 
-Spec reference: ``spec/ports/identity.md §4``; ``spec/ports/middleware.md §4 (auth)``
+        from sox_protocol.core.middleware.plugins.auth import AuthMiddleware
+
+Spec reference: ``spec/ports/middleware.md §4 (auth)``; ``spec/ports/identity.md §4``
 """
 
 from __future__ import annotations
@@ -31,17 +32,6 @@ from sox_protocol.core.identity.verifier import IdentityVerifier
 
 
 def _make_identity_error(reason: str) -> dict[str, object]:
-    """Build a sox-error envelope for an identity failure.
-
-    The message deliberately omits internal details to avoid leaking
-    implementation specifics (``spec/ports/identity.md §5``).
-
-    Args:
-        reason: Short human-readable explanation.
-
-    Returns:
-        Dict conforming to ``spec/envelopes/sox-error.schema.json``.
-    """
     return {
         "error_code": "identity_failure",
         "message": reason,
@@ -50,35 +40,27 @@ def _make_identity_error(reason: str) -> dict[str, object]:
     }
 
 
-_IDENTITY_ENFORCED_OPERATIONS = {"send", "recv", "subscribe"}
-"""Operations that require identity verification per ``spec/ports/identity.md §4``."""
+_IDENTITY_ENFORCED_OPERATIONS: frozenset[str] = frozenset({"send", "recv", "subscribe"})
 
 
 class IdentityMiddleware:
-    """Short-circuit middleware that enforces identity on every mutating call.
+    """Backward-compatible dict-based identity middleware shim.
 
-    For operations listed in ``spec/ports/identity.md §4`` (``send``,
-    ``subscribe``, ``recv``), a :class:`SignedRequest` MUST be present in
-    ``request["signed_request"]``.  If verification fails, the response is a
-    sox-error and ``call_next`` is never awaited — ensuring no backing-store
-    access occurs on rejection.
+    Accepts the OLD calling convention::
 
-    For ``list_channels`` (informational), verification is RECOMMENDED but not
-    required (``spec/ports/identity.md §4``).  This middleware passes
-    ``list_channels`` through without checking credentials.
-
-    For ``send`` operations, the verified ``agent_id`` is injected into
-    ``request["sender"]`` via
-    :meth:`~sox_protocol.core.identity.verifier.IdentityVerifier.bind_for_send`.
-
-    Usage::
-
-        verifier = IdentityVerifier(registry, audit)
         mw = IdentityMiddleware(verifier)
         response = await mw(request_dict, call_next)
 
+    where ``request_dict`` is a plain :class:`dict` with at least
+    ``"operation"`` and optionally ``"signed_request"``.
+
+    .. deprecated::
+        Use :class:`~sox_protocol.core.middleware.plugins.auth.AuthMiddleware`
+        with the pipeline instead.  This class exists only for backward
+        compatibility with pre-migration call sites.
+
     Args:
-        verifier: The configured :class:`IdentityVerifier`.
+        verifier: The configured :class:`~sox_protocol.core.identity.verifier.IdentityVerifier`.
     """
 
     def __init__(self, verifier: IdentityVerifier) -> None:
@@ -89,19 +71,15 @@ class IdentityMiddleware:
         request: dict[str, object],
         call_next: Callable[[dict[str, object]], Awaitable[dict[str, object]]],
     ) -> dict[str, object]:
-        """Process *request* through identity verification then forward to *call_next*.
+        """Process *request* through identity verification then forward.
 
         Args:
-            request: Tool-call input dict.  Must contain:
-                - ``"operation"`` (str): the SOX operation name.
-                - ``"signed_request"``: a
-                  :class:`~sox_protocol.core.identity.envelope.SignedRequest`
-                  instance (required for enforced operations).
-            call_next: Async callable that forwards the (possibly mutated)
-                request to the next pipeline stage.
+            request: Tool-call input dict.  Must contain ``"operation"`` and,
+                for enforced operations, ``"signed_request"``.
+            call_next: Async callable forwarding to the next pipeline stage.
 
         Returns:
-            The response from ``call_next``, or a sox-error dict on rejection.
+            Response from *call_next*, or a sox-error dict on rejection.
         """
         from sox_protocol.core.identity.envelope import SignedRequest
 
@@ -109,7 +87,6 @@ class IdentityMiddleware:
         connection_id = request.get("connection_id")
         conn_str = str(connection_id) if connection_id is not None else None
 
-        # Informational operations pass through without credential check.
         if operation not in _IDENTITY_ENFORCED_OPERATIONS:
             return await call_next(request)
 
@@ -138,6 +115,10 @@ def make_identity_error_response(message: str) -> str:
 
     Convenience helper for transports that need a pre-serialised error body.
 
+    .. deprecated::
+        Build the envelope directly or use
+        :func:`sox_protocol.core.middleware.errors.make_internal_error`.
+
     Args:
         message: Human-readable failure message.
 
@@ -145,3 +126,6 @@ def make_identity_error_response(message: str) -> str:
         JSON string of the sox-error envelope.
     """
     return json.dumps(_make_identity_error(message))
+
+
+__all__ = ["IdentityMiddleware", "make_identity_error_response"]
