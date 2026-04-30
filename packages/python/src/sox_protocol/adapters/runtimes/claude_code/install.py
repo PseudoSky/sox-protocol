@@ -269,7 +269,6 @@ def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
             "args": ["-m", "sox_protocol.core.mcp_server"],
             "env": {
                 "SOX_BACKING_STORE": f"sqlite:///{db_path}",
-                "SOX_AGENT_ID_SOURCE": "env:CLAUDE_AGENT_NAME",
             },
         }
 

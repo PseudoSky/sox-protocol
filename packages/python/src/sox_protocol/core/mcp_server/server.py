@@ -213,12 +213,11 @@ def create_server() -> FastMCP[dict[str, object]]:
         SystemExit: If ``SOX_AGENT_ID`` is unset or ``SOX_BACKING_STORE``
             has an unrecognised URI scheme.
     """
-    agent_id = os.environ.get("SOX_AGENT_ID", "").strip()
-    if not agent_id:
-        _log.error(
-            "SOX_AGENT_ID environment variable is required but not set."
-        )
-        sys.exit(1)
+    agent_id = (
+        os.environ.get("SOX_AGENT_ID", "").strip()
+        or os.environ.get("CLAUDE_AGENT_NAME", "").strip()
+        or "default"
+    )
 
     backing_store_uri = os.environ.get("SOX_BACKING_STORE", "memory://")
     _log.info(

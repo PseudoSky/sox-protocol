@@ -43,8 +43,7 @@
         "sox_protocol.core.mcp_server"
       ],
       "env": {
-        "SOX_BACKING_STORE": "sqlite:////Users/nix/dev/ai/sox-protocol/.sox/messages.db",
-        "SOX_AGENT_ID_SOURCE": "env:CLAUDE_AGENT_NAME"
+        "SOX_BACKING_STORE": "sqlite:////Users/nix/dev/ai/sox-protocol/.sox/messages.db"
       }
     }
   }
