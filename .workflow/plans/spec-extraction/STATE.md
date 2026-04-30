@@ -13,11 +13,12 @@ orchestrator_protocol: v1
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
-| 02-review | Architectural review of spec/ | `READY` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
+| 03-reconcile | Reconcile spec with architecture decisions | `READY` | api-designer | 0 | 2026-04-30T00:00:00Z |
+| 02-review | Architectural review of spec/ | `BLOCKED` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
 
-`02-review` is `READY`. Spawn `architect-reviewer`.
+`03-reconcile` is `READY`. Spawn `api-designer`.
 
 ## Transitions
 
@@ -26,8 +27,12 @@ orchestrator_protocol: v1
 
 ## Termination targets
 
-- [ ] Both phases DONE
-- [ ] `spec/protocol.md` and `spec/ports/{transport,backing-store,identity,middleware}.md` exist
+- [ ] All three phases DONE
+- [ ] `spec/protocol.md` envelope carries seq, reply_to, delivered_to, origin_server
+- [ ] `spec/operations/` has 8 operation pairs (send, recv, subscribe, list_channels, channels_ack, channels_heartbeat, channels_collect, replay)
 - [ ] `spec/operations/*.json` JSON Schemas all valid 2020-12
+- [ ] All 5 conflict primitives rewritten (dms, ack-nack, groups, sequence-numbers, presence)
+- [ ] `spec/ports/backing-store.md` has namespace + schema registry + idempotency sweep
 - [ ] `docs/adr/0001-protocol-vs-implementation-split.md` exists
+- [ ] `docs/V1-SCOPE.md` exists — canonical v1 reference for downstream planners
 - [ ] No `packages/` references inside `spec/`
