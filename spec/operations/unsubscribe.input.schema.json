@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/unsubscribe.input.schema.json",
+  "title": "unsubscribe — input",
+  "description": "Input schema for the SOX unsubscribe operation. Removes channel subscriptions matching the provided channel names or glob patterns. Uses the same pattern syntax as the subscribe operation. Queued-but-unread messages for the removed subscriptions are discarded from the calling agent's mailbox. Normative reference: spec/primitives/channels.md §3.",
+  "type": "object",
+  "required": ["channels"],
+  "additionalProperties": false,
+  "properties": {
+    "channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "description": "Channel names or glob patterns to unsubscribe from. Supports the same two forms as subscribe.input: (1) Exact match — full channel name. (2) Glob — pattern with '*' wildcards using Unix glob rules. Pattern matching is case-sensitive. Each entry is matched against the agent's current subscriptions; non-matching entries are silently ignored."
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "default": "default",
+      "description": "Namespace scope for the unsubscribe operation. Defaults to 'default'."
+    }
+  },
+  "examples": [
+    {
+      "channels": ["ticket:ENGI-0042"]
+    },
+    {
+      "channels": ["ticket:ENGI-*", "broadcast:*"],
+      "namespace": "default"
+    },
+    {
+      "channels": ["group/eng-team", "dm/agent-alpha~agent-beta"]
+    }
+  ]
+}

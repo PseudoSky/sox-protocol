@@ -44,13 +44,13 @@ returns all messages with `seq > 42` on that channel, in ascending `seq` order.
 
 | Property | Value |
 |---|---|
-| Type | Integer (nanoseconds since Unix epoch) or string ISO-8601, implementation-defined |
+| Type | Integer (Unix epoch nanoseconds) |
 | Scope | Server-wide monotonic (monotone per server node, not globally) |
 | Assignment | Server-assigned at durable `send` acceptance |
 | Guarantee | Monotone per server node; NOT globally total-ordered in multi-node or federated deployments |
 | Purpose | Advisory tiebreaker for cross-channel display ordering; human-readable timeline in tooling |
 
-`ts` MUST be monotone: for two messages accepted by the same server node, if message A is accepted before message B, `ts(A) <= ts(B)`. Wall-clock skew MUST be corrected to maintain this guarantee (monotonic clock source recommended).
+`ts` MUST be monotone: for two messages accepted by the same server node, if message A is accepted before message B, `ts(A) <= ts(B)`. Wall-clock skew MUST be corrected to maintain this guarantee (monotonic clock source recommended). Implementations MUST NOT use ISO-8601 strings for `ts`; integer nanoseconds ensure wire-level interop across runtimes.
 
 Clients and tooling MAY sort a unified timeline by `ts`, accepting that this ordering is advisory, not authoritative. Agents MUST NOT make correctness decisions based on `ts` alone.
 

@@ -31,20 +31,39 @@ Competing systems either pause agent A while B answers (turn-taking schedulers, 
 
 ## Protocol operations
 
-All SOX-conformant implementations expose exactly these eight operations. Concrete tool names vary by adapter; the spec uses placeholder tokens that adapters substitute at install time.
+All SOX-conformant implementations expose the following core operations. Group lifecycle, agent discovery, and subscription management operations are defined in their respective primitive sections. Concrete tool names vary by adapter; the spec uses placeholder tokens that adapters substitute at install time.
 
 | Operation | Placeholder | Status | Semantics |
 |---|---|---|---|
 | `send` | `{{send_tool}}` | v1 MUST | Append a message to a named channel. Non-blocking; returns `{sent_at, message_id, seq, backpressure}` once the backing store durably accepts it. |
 | `recv` | `{{recv_tool}}` | v1 MUST | Drain the local mailbox. Non-blocking; returns immediately with whatever has accumulated since the last drain. |
 | `subscribe` | `{{subscribe_tool}}` | v1 MUST | Register interest in channels matching a glob pattern. Persists across server restarts. |
+| `unsubscribe` | `unsubscribe` | v1 MUST | Remove channel subscriptions matching names or glob patterns. Discards queued-but-unread messages for removed subscriptions. |
 | `list_channels` | `{{list_tool}}` | v1 MUST | Discover active channels. Returns the `_sox_protocol` version block for version negotiation. |
 | `channels__ack` | `channels__ack` | v1 MUST | Signal ACK/NACK for a message. Control-plane only; does not enter channel history. |
 | `channels__heartbeat` | `channels__heartbeat` | v1 MUST | Update the server-side liveness record. Control-plane only. |
 | `replay` | `replay` | v1 MUST | Replay historical messages from a channel using a per-channel `seq` cursor. |
 | `channels__collect` | `channels__collect` | planned | Server-side fan-in aggregation: wait for N replies to a broadcast. See `x-status: planned` in schemas. |
+| `group_create` | `group_create` | v1 MUST | Create a new group channel and add the creating agent as the first active member. See spec/primitives/groups.md §5.1. |
+| `group_invite` | `group_invite` | v1 MUST | Invite an agent to a group. Calling agent must be an active member. See spec/primitives/groups.md §5.2. |
+| `group_join` | `group_join` | v1 MUST | Accept a group invitation; transition calling agent's status from invited to active. See spec/primitives/groups.md §5.3. |
+| `group_leave` | `group_leave` | v1 MUST | Leave a group; server removes calling agent from the membership table. See spec/primitives/groups.md §5.4. |
+| `group_list_members` | `group_list_members` | v1 MUST | Return the current membership list for a group. See spec/primitives/groups.md §5.5. |
 
 Full JSON Schemas for inputs and outputs: [spec/operations/](operations/)
+
+---
+
+## Connection bootstrap
+
+The following sequence SHOULD be followed by any client establishing a session with a SOX server. Deviation requires justification; skipping steps is permitted at the client's risk.
+
+1. **SHOULD** — Call `list_channels`. Read the `_sox_protocol` block to verify server version compatibility. Skipping this step proceeds without a version handshake at the client's risk; the server does not enforce a minimum-version check on other operations.
+2. **SHOULD** — Call `subscribe` with desired channel patterns. Order-dependent; messages sent to subscribed channels before this call may be missed.
+3. **SHOULD** — Call `list_agents` (if agent discovery is needed) or read `sox/presence` to enumerate active peers.
+4. **SHOULD** — Call `recv` as the first drain. The first `recv` call drains messages queued during any offline period.
+
+> **Post-v1:** `list_pending` — surfaces queued unreplied messages and their ACK states. In v1 use `recv` to drain and track state client-side.
 
 ---
 
@@ -127,7 +146,7 @@ Reserved body types (`sox-error`, `sox-invite`) have normative JSON Schemas unde
 Layer 5 — System prompt (one-line bootstrap per agent)
 Layer 4 — Cadence enforcer (pure function; runtime-agnostic)
 Layer 3 — Discipline (markdown; runtime-agnostic)
-Layer 2 — MCP server (four tools; asyncio listener)
+Layer 2 — MCP server (eight core operations; event-loop listener (non-blocking I/O))
 Layer 1 — Backing store (pluggable; SQLite / filesystem / NATS / Redis)
 ```
 
@@ -179,6 +198,14 @@ The protocol version is in `spec/VERSION`. MAJOR.MINOR policy:
 - **Major bump** — breaking change. Implementations MUST refuse cross-major interaction.
 
 The `channels__list_channels` response includes `protocol_version` so adapters can detect mismatches at runtime.
+
+Clients that skip `list_channels` proceed without a version handshake at their own risk; the server does not enforce a minimum-version check on other operations.
+
+---
+
+## Health and observability
+
+> **Post-v1:** A `channels_health` operation exposing store status, queue depth, and circuit-breaker state is planned for post-v1. In v1, health is signalled via `GET /health` on the HTTP transport only.
 
 ---
 

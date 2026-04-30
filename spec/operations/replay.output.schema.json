@@ -50,6 +50,34 @@
           },
           "origin_server": {
             "type": ["string", "null"]
+          },
+          "delivered_to": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Agent_ids that have recv'd this message. Null in single-server v1. Populated server-side as agents drain the message; used for deadlock detection wait-graph computation."
+          },
+          "_meta": {
+            "type": ["object", "null"],
+            "description": "Observability metadata. Present when the original recv had include_meta=true; may be absent on replay if the server did not capture it. Null when not available.",
+            "additionalProperties": false,
+            "properties": {
+              "trace_id": {
+                "type": "string",
+                "description": "Distributed trace ID."
+              },
+              "middleware_timings": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Per-middleware timing strings in 'middleware_name:Nms' format."
+              },
+              "server_node_id": {
+                "type": "string",
+                "description": "Identifier of the server node that processed the original send."
+              }
+            }
           }
         }
       }

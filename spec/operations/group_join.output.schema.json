@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_join.output.schema.json",
+  "title": "group_join — output",
+  "description": "Output schema for the SOX group_join operation. Confirms the agent's active membership in the group. Normative reference: spec/primitives/groups.md §5.3.",
+  "type": "object",
+  "required": ["joined", "group_id", "member_count"],
+  "additionalProperties": false,
+  "properties": {
+    "joined": {
+      "type": "boolean",
+      "description": "True when the calling agent's status was successfully transitioned to 'active'."
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name, echoed from the input."
+    },
+    "member_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Current count of active members in the group after the join."
+    }
+  },
+  "examples": [
+    {
+      "joined": true,
+      "group_id": "group/eng-team",
+      "member_count": 3
+    }
+  ]
+}

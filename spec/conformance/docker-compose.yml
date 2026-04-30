@@ -1,3 +1,7 @@
+# Reference harness for the conformance suite. Not normative.
+# Implementations MAY use any orchestration tool.
+# This file is maintained alongside spec/conformance/ for convenience only.
+#
 # SOX Protocol Conformance Suite — docker-compose.yml
 #
 # Usage:

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_create.output.schema.json",
+  "title": "group_create — output",
+  "description": "Output schema for the SOX group_create operation. Returns the full group channel name (with 'group/' prefix) and the creation timestamp. Normative reference: spec/primitives/groups.md §5.1.",
+  "type": "object",
+  "required": ["group_id", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name including the 'group/' prefix (e.g. 'group/eng-team')."
+    },
+    "created_at": {
+      "type": "integer",
+      "description": "Unix epoch seconds when the group was created."
+    }
+  },
+  "examples": [
+    {
+      "group_id": "group/eng-team",
+      "created_at": 1714300000
+    },
+    {
+      "group_id": "group/security-review-01HXYZ",
+      "created_at": 1714300100
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/unsubscribe.output.schema.json",
+  "title": "unsubscribe — output",
+  "description": "Output schema for the SOX unsubscribe operation. Reports which channels were actually removed from the agent's subscription list and how many queued messages were discarded. Normative reference: spec/primitives/channels.md §3.",
+  "type": "object",
+  "required": ["unsubscribed", "pending_cleared"],
+  "additionalProperties": false,
+  "properties": {
+    "unsubscribed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Channel names actually removed from the agent's subscription list. A channel is included here only if a matching subscription existed. Channels that were not subscribed are silently omitted."
+    },
+    "pending_cleared": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of queued-but-unread messages discarded from the agent's mailbox for the unsubscribed channels. These messages will not appear in future recv calls."
+    }
+  },
+  "examples": [
+    {
+      "unsubscribed": ["ticket:ENGI-0042"],
+      "pending_cleared": 3
+    },
+    {
+      "unsubscribed": ["ticket:ENGI-0001", "ticket:ENGI-0002", "broadcast:status"],
+      "pending_cleared": 0
+    },
+    {
+      "unsubscribed": [],
+      "pending_cleared": 0
+    }
+  ]
+}

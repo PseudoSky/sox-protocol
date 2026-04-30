@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/operations/recv.input.schema.json",
+  "$comment": "x-status: partial — v1 omits recv-side filters (since, min_seq, reply_to, sender). Use the replay operation for since-based retrieval. Client-side filtering is the v1 pattern for reply_to/sender. See TODOs: since-parameter-on-recv-accept, filter-recv-by-reply-to-and-sender.",
   "title": "{{recv_tool}} — input",
   "description": "Input schema for the SOX recv (drain) operation. Non-blocking: returns immediately with whatever messages have accumulated in the agent's local mailbox since the last drain. An empty result is always valid. Calling with no arguments drains all subscribed channels. Normative reference: spec/ports/backing-store.md §2.2 and spec/protocol.md.",
   "type": "object",

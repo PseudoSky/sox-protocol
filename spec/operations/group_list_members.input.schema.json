@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_list_members.input.schema.json",
+  "title": "group_list_members — input",
+  "description": "Input schema for the SOX group_list_members operation. Returns the current membership table for a group. The calling agent MUST be an active member. Optionally annotates each member with their current presence state from sox/presence. Normative reference: spec/primitives/groups.md §5.5.",
+  "type": "object",
+  "required": ["group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name including the 'group/' prefix (e.g. 'group/eng-team')."
+    },
+    "include_presence": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, annotate each member with their current presence state read from sox/presence. When false (default), presence_state is null on all member records."
+    }
+  },
+  "examples": [
+    {
+      "group_id": "group/eng-team"
+    },
+    {
+      "group_id": "group/eng-team",
+      "include_presence": true
+    }
+  ]
+}

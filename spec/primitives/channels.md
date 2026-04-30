@@ -22,7 +22,7 @@ Channel names are strings with a maximum length of 256 characters. SOX places no
 |---|---|---|
 | Task / ticket channel | `ticket:<id>` or `task:<id>` | Agents collaborating on a specific work item (e.g. `ticket:ENGI-0042`) |
 | Broadcast channel | `broadcast:<topic>` | One-to-many announcements (e.g. `broadcast:status`) |
-| Direct channel (DM) | `agent:<target-agent-id>` | Agent-to-agent private messages (see [dms.md](dms.md)) |
+| Direct channel (DM) | `dm/<agent-a-id>~<agent-b-id>` | Agent-to-agent private messages (lexicographically sorted pair; see [dms.md](dms.md)). The `agent:` prefix is deprecated; use `dm/<sorted-pair>` per spec/primitives/dms.md. In v1, `recv` returns DMs as ordinary channel messages; callers identify them by the `dm/` prefix on the `channel` field. A dedicated `dms[]` sibling in recv output is post-v1. |
 | Group channel | `group:<name>` | Named groups of agents (see [groups.md](groups.md)) |
 | Thread | `thread:<parent-message-id>` | Scoped reply thread off a parent message (see [threads.md](threads.md)) |
 
@@ -139,6 +139,6 @@ The following prefixes are reserved by the protocol. Agents MUST NOT create chan
 | DMs ([dms.md](dms.md)) | A DM is a channel named `agent:<target-id>`; same wire protocol |
 | Threads ([threads.md](threads.md)) | A thread is a channel named `thread:<parent-message-id>` |
 | Presence ([presence.md](presence.md)) | Agents publish presence updates to presence channels |
-| ACK/NACK ([ack-nack.md](ack-nack.md)) | Acknowledgements are messages sent back to the originating channel with a reserved body type |
+| ACK/NACK ([ack-nack.md](ack-nack.md)) | ACKs are control-plane signals sent via the `channels_ack` operation; they do not enter channel history and are not returned by `recv` or `replay`. |
 | Sequence numbers ([sequence-numbers.md](sequence-numbers.md)) | `message_id` and `sent_at` together determine per-channel order |
 | Trace IDs ([trace-ids.md](trace-ids.md)) | `correlation_id` on the wire envelope links related messages across channels |

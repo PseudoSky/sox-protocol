@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_invite.output.schema.json",
+  "title": "group_invite — output",
+  "description": "Output schema for the SOX group_invite operation. Confirms the invitation was recorded. Normative reference: spec/primitives/groups.md §5.2.",
+  "type": "object",
+  "required": ["invited", "agent_id"],
+  "additionalProperties": false,
+  "properties": {
+    "invited": {
+      "type": "boolean",
+      "description": "True when the invite was successfully recorded. False if the agent was already an active member (idempotent path)."
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The agent_id that was invited, echoed from the input."
+    }
+  },
+  "examples": [
+    {
+      "invited": true,
+      "agent_id": "agent-beta"
+    },
+    {
+      "invited": false,
+      "agent_id": "agent-beta"
+    }
+  ]
+}

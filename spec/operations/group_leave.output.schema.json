@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_leave.output.schema.json",
+  "title": "group_leave — output",
+  "description": "Output schema for the SOX group_leave operation. Confirms the calling agent has been removed from the group membership table. Normative reference: spec/primitives/groups.md §5.4.",
+  "type": "object",
+  "required": ["left", "group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "left": {
+      "type": "boolean",
+      "description": "True when the calling agent was successfully removed from the membership table."
+    },
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name, echoed from the input."
+    }
+  },
+  "examples": [
+    {
+      "left": true,
+      "group_id": "group/eng-team"
+    }
+  ]
+}

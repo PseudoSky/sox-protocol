@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_leave.input.schema.json",
+  "title": "group_leave — input",
+  "description": "Input schema for the SOX group_leave operation. An active member voluntarily leaves a group. The server removes the calling agent from the membership table. Normative reference: spec/primitives/groups.md §5.4.",
+  "type": "object",
+  "required": ["group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name including the 'group/' prefix (e.g. 'group/eng-team')."
+    }
+  },
+  "examples": [
+    {
+      "group_id": "group/eng-team"
+    },
+    {
+      "group_id": "group/security-review-01HXYZ"
+    }
+  ]
+}

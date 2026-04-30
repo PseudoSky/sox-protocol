@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_list_members.output.schema.json",
+  "title": "group_list_members — output",
+  "description": "Output schema for the SOX group_list_members operation. Returns the group_id and the current list of members, optionally annotated with presence state. Normative reference: spec/primitives/groups.md §5.5.",
+  "type": "object",
+  "required": ["group_id", "members"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name, echoed from the input."
+    },
+    "members": {
+      "type": "array",
+      "description": "Current membership list. Each entry represents one agent in the group.",
+      "items": {
+        "type": "object",
+        "required": ["agent_id", "presence_state"],
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The member agent's verified identity."
+          },
+          "presence_state": {
+            "type": ["string", "null"],
+            "description": "Current presence state from sox/presence when include_presence=true; null otherwise or when no presence record exists."
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "group_id": "group/eng-team",
+      "members": [
+        { "agent_id": "agent-alpha", "presence_state": null },
+        { "agent_id": "agent-beta", "presence_state": null }
+      ]
+    },
+    {
+      "group_id": "group/eng-team",
+      "members": [
+        { "agent_id": "agent-alpha", "presence_state": "active" },
+        { "agent_id": "agent-beta", "presence_state": "idle" },
+        { "agent_id": "agent-gamma", "presence_state": null }
+      ]
+    }
+  ]
+}

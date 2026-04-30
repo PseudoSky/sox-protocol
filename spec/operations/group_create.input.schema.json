@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_create.input.schema.json",
+  "title": "group_create — input",
+  "description": "Input schema for the SOX group_create operation. Creates a new group channel under the group/<group-id> prefix and adds the creating agent as the first active member. The caller supplies the bare group ID (without prefix); the server prepends 'group/' to form the full channel name. Normative reference: spec/primitives/groups.md §5.1.",
+  "type": "object",
+  "required": ["group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The bare group identifier without the 'group/' prefix. The server prepends 'group/' to form the full channel name (e.g. 'eng-team' becomes 'group/eng-team'). MUST be unique within the namespace."
+    },
+    "display_name": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Optional human-readable name for tooling display. Not used in routing or membership enforcement."
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "default": "default",
+      "description": "Namespace scope for the group channel. Defaults to 'default'."
+    },
+    "replay_policy": {
+      "type": "string",
+      "enum": ["subscriber", "admin_only", "custom"],
+      "default": "subscriber",
+      "description": "Controls who may call the replay verb on this group channel. 'subscriber': any active member may replay. 'admin_only': requires admin capability. 'custom': channel owner registers a replay-specific middleware sub-chain. See spec/primitives/channels.md §6.1."
+    }
+  },
+  "examples": [
+    {
+      "group_id": "eng-team"
+    },
+    {
+      "group_id": "security-review-01HXYZ",
+      "display_name": "Security Review Pod",
+      "namespace": "default",
+      "replay_policy": "subscriber"
+    },
+    {
+      "group_id": "audit-log-readers",
+      "display_name": "Audit Log Readers",
+      "namespace": "compliance",
+      "replay_policy": "admin_only"
+    }
+  ]
+}

@@ -60,13 +60,13 @@ JSON Schema files under `spec/schemas/` are the authoritative wire definitions. 
 
 The MCP server validates incoming and outgoing tool arguments against `spec/schemas/tools/*.schema.json` at startup and fails fast if the implementation has drifted from the spec.
 
-To regenerate types in the Python package:
+To regenerate types in the Python package (example for the reference Python implementation: `packages/python/src/sox_protocol/core/enforcer/generated_types.py`):
 
 ```sh
 # from repo root
 datamodel-codegen \
   --input spec/schemas/ \
-  --output packages/python/src/sox_protocol/core/enforcer/generated_types.py \
+  --output <output-path> \
   --input-file-type jsonschema
 ```
 

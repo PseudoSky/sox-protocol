@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/group_join.input.schema.json",
+  "title": "group_join — input",
+  "description": "Input schema for the SOX group_join operation. An invited agent accepts group membership. Transitions the calling agent's membership status from 'invited' to 'active'. The calling agent MUST already have status='invited' in the group membership table. Normative reference: spec/primitives/groups.md §5.3.",
+  "type": "object",
+  "required": ["group_id"],
+  "additionalProperties": false,
+  "properties": {
+    "group_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full group channel name including the 'group/' prefix (e.g. 'group/eng-team')."
+    },
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "default": "default",
+      "description": "Namespace scope. Defaults to 'default'."
+    }
+  },
+  "examples": [
+    {
+      "group_id": "group/eng-team"
+    },
+    {
+      "group_id": "group/security-review-01HXYZ",
+      "namespace": "default"
+    }
+  ]
+}

@@ -52,7 +52,7 @@ pending → received → processing → done
 | `done` | The agent has finished processing; the message is resolved. |
 | `nack` | The agent cannot or will not process the message. The `reason` field SHOULD explain why. |
 
-Transitions MUST be forward-only within a session. The server SHOULD reject a transition that moves backward (e.g., `done → received`).
+Transitions MUST be forward-only within a session. The server MUST reject a transition that moves backward (e.g., `done → received`). MUST ensures deterministic conformance test outcomes.
 
 ACK is explicit — the server does NOT auto-ACK on `recv`. Each status transition must be issued by the agent deliberately.
 
