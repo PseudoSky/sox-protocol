@@ -70,19 +70,44 @@ This means:
 
 ---
 
-## 7. v1.0 limitations
+## 7. Identity structure and federation
+
+In v1.0 single-server deployments, agent identities are bare strings (e.g., `agent-alpha`). The protocol reserves a structured form for federated v2 deployments:
+
+```
+<server-id>/<agent-id>
+```
+
+where `<server-id>` is an opaque string identifying the originating SOX server node, and `<agent-id>` is the agent's local identifier within that server.
+
+**v1.0 behaviour:**
+- The `<server-id>/` prefix is implicit (empty); agent IDs are bare strings.
+- The `origin_server` envelope field carries `null` in v1.0.
+- The backing-store credential registry records `(agent_id, public_key, registered_at, revoked_at?)` without a server-id component.
+
+**v2 federation behaviour (reserved slot):**
+- Agent IDs in cross-server messages MUST use the `<server-id>/<agent-id>` form.
+- The `origin_server` envelope field carries the `server-id` of the originating server.
+- A remote server learns a foreign agent's public key via federation key-exchange (deferred to v2 design).
+
+**Reference implementation:** Ed25519 asymmetric keypair per agent (see ADR 0002). The spec describes the guarantee — "the server can verify that a given request originated from the holder of `agent_id`" — and does not mandate Ed25519. Alternative schemes of equivalent cryptographic strength are permitted provided the verified-sender guarantee (§2) is preserved.
+
+---
+
+## 8. v1.0 limitations
 
 The following features are recognised as protocol-level TODOs and are deferred past v1.0:
 
-- **Signed messages** — server signing each persisted message with a per-agent key so receivers can verify provenance independently.
+- **Signed messages** — server signing each persisted message with a per-agent key so receivers can verify provenance independently. (Ed25519 keys from ADR 0002 enable this; the signed-envelope spec is deferred.)
 - **Channel ACLs** — restricting which verified agent IDs can send to or subscribe to which channels.
-- **Credential rotation** — rotating an agent's secret without losing identity or message history.
+- **Credential rotation** — rotating an agent's keypair without losing identity or message history.
+- **Federation key exchange** — how a remote server learns a foreign agent's public key.
 
 These are documented in the `classified.json` protocol TODO list under `post-v1` milestone.
 
 ---
 
-## 8. Conformance
+## 9. Conformance
 
 An identity-implementing SOX server is conformant when:
 

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/channels_heartbeat.output.schema.json",
+  "title": "channels__heartbeat — output",
+  "description": "Output schema for the SOX channels__heartbeat operation. Confirms the server-side liveness record has been updated and returns the server-assigned expiry time. Normative reference: spec/primitives/presence.md.",
+  "type": "object",
+  "required": ["agent_id", "status", "recorded_at", "expires_at"],
+  "additionalProperties": false,
+  "properties": {
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The agent_id whose liveness record was updated. Derived from the authenticated connection identity."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["online", "busy", "offline"],
+      "description": "The status recorded by the server. Echoed from input."
+    },
+    "recorded_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating-point) at which the server recorded this heartbeat."
+    },
+    "expires_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating-point) at which the server will transition this agent to 'stale' if no further heartbeat is received. Derived from the effective TTL (caller-supplied or server default)."
+    }
+  },
+  "examples": [
+    {
+      "agent_id": "agent-alpha",
+      "status": "online",
+      "recorded_at": 1714300100.0,
+      "expires_at": 1714300130.0
+    },
+    {
+      "agent_id": "agent-beta",
+      "status": "busy",
+      "recorded_at": 1714300100.0,
+      "expires_at": 1714300220.0
+    }
+  ]
+}

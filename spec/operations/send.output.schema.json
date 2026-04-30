@@ -2,29 +2,69 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/operations/send.output.schema.json",
   "title": "{{send_tool}} — output",
-  "description": "Output schema for the SOX send operation. Returned as soon as the backing store durably accepts the message. A successful response guarantees the message is immediately visible to all matching watch loops and subsequent recv calls (backing-store send-atomicity contract). Normative reference: CONTRACTS.md §5.1 and spec/ports/backing-store.md §2.1.",
+  "description": "Output schema for the SOX send operation. Returned as soon as the backing store durably accepts the message. A successful response guarantees the message is immediately visible to all matching watch loops and subsequent recv calls (backing-store send-atomicity contract). Normative reference: spec/ports/backing-store.md §2.1 and spec/protocol.md.",
   "type": "object",
-  "required": ["sent_at", "message_id"],
+  "required": ["sent_at", "message_id", "seq", "backpressure"],
   "additionalProperties": false,
   "properties": {
     "sent_at": {
       "type": "number",
-      "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. This is the canonical timestamp used for per-channel ordering in recv responses."
+      "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. Retained for backward compatibility; seq is the authoritative ordering key within a channel."
     },
     "message_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Backing-store-assigned unique identifier for the message just sent. Use this as the correlation_id for thread channels (thread:<message_id>) or as the reference in sox-ack/sox-nack bodies."
+      "description": "Backing-store-assigned unique identifier for the message just sent. Use this as the reply_to value for threaded replies, or as the reference in channels__ack calls."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Per-channel monotone sequence number assigned to this message. Starts at 1 for each channel. Use as the 'since' cursor in replay queries."
+    },
+    "backpressure": {
+      "type": "object",
+      "description": "Backpressure signal for the target channel's recipient queue. Always present regardless of the channel's backpressure_mode. Senders SHOULD use this to self-throttle in advisory mode. In enforced mode (backpressure_mode: enforced), the server returns BACKPRESSURE_OVER_LIMIT error instead of a successful response when state is 'over'.",
+      "required": ["queue_depth", "threshold", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "queue_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Current number of unprocessed messages in the recipient's pending queue for this channel."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The absolute message count at which the queue is considered at capacity. Default: 1000. Per-channel override is configurable."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["ok", "warn", "over"],
+          "description": "Server-computed backpressure state. 'ok': queue_depth < threshold * 0.8. 'warn': queue_depth >= threshold * 0.8 and < threshold. 'over': queue_depth >= threshold. Thresholds are server-computed; senders receive consistent values across all concurrent sends."
+        }
+      }
     }
   },
   "examples": [
     {
       "sent_at": 1714300000.0,
-      "message_id": "msg-0000001"
+      "message_id": "msg-0000001",
+      "seq": 1,
+      "backpressure": {
+        "queue_depth": 0,
+        "threshold": 1000,
+        "state": "ok"
+      }
     },
     {
       "sent_at": 1714300042.815,
-      "message_id": "01HX5Q3YNZJ4KRTMFDBQ8WVCEG"
+      "message_id": "01HX5Q3YNZJ4KRTMFDBQ8WVCEG",
+      "seq": 142,
+      "backpressure": {
+        "queue_depth": 823,
+        "threshold": 1000,
+        "state": "warn"
+      }
     }
   ]
 }

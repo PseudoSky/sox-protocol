@@ -151,18 +151,103 @@ On MCP server shutdown, the `watch` generator MUST be cancelled cleanly. Any mes
 
 ---
 
-## 7. Conformance Checklist
+## 7. Namespace parameterisation
+
+All read/write operations MUST be parameterised by `namespace` (string, default `"default"`). The backing store MUST NOT return records from a different namespace than the one specified.
+
+**Namespace isolation modes** (declared at store construction time, not per-request):
+
+| Mode | Description |
+|---|---|
+| `shared` | Single database; all queries include a `namespace` WHERE clause enforced inside the store. |
+| `isolated` | Each namespace maps to a separate SQLite file or Postgres schema; the store routes per-namespace. |
+
+Both modes present an identical port interface. The SOX server MUST NOT need to know which mode is in use.
+
+The `namespace` parameter is injected by the `namespace_resolver` middleware into the request context before the store is called. Store implementations MUST treat an absent or null namespace as `"default"`.
+
+Stores MUST enforce namespace isolation structurally. Cross-namespace return is a conformance failure.
+
+---
+
+## 8. Schema registry
+
+Each channel MAY have a registered JSON Schema document that governs the shape of `body` payloads sent to that channel. The backing store owns the schema artifact; validation is performed by the `schema_validator` middleware (not the store).
+
+### 8.1 `get_channel_schema`
+
+**Signature:** `get_channel_schema(namespace, channel) -> JSONSchema | null`
+
+Returns the registered JSON Schema for the given channel in the given namespace, or `null` if no schema is registered. The store MUST NOT validate or interpret the schema; it stores and returns it verbatim.
+
+### 8.2 `set_channel_schema`
+
+**Signature:** `set_channel_schema(namespace, channel, schema)`
+
+Registers or replaces the JSON Schema for the given channel. The schema is stored as an opaque JSON document alongside the channel config. Implementations SHOULD compute and store a content hash for schema versioning. Successive calls replace the current schema; the store MAY retain a version history for audit purposes.
+
+---
+
+## 9. Idempotency cache
+
+The backing store MUST support an idempotency cache for `send` operations.
+
+### 9.1 Behaviour
+
+When a `send` call includes an `idempotency_key`:
+
+1. The store checks whether an entry for `(namespace, channel, idempotency_key)` exists in the cache.
+2. If a matching entry exists and has not expired (within the TTL window), the store MUST return the original `(message_id, sent_at, seq)` without re-persisting the message.
+3. If no matching entry exists or the entry has expired, the store persists the message normally and records the `(idempotency_key, message_id, sent_at, seq, expires_at)` tuple in the cache.
+
+The default TTL is **24 hours**. Operators MAY configure a different TTL at the server level. Per-channel TTL override is permitted but not required for v1.
+
+Callers MUST NOT rely on deduplication beyond the configured TTL window. After TTL expiry, a re-sent message with the same `idempotency_key` is treated as a new message.
+
+### 9.2 `sweep_idempotency_cache`
+
+**Signature:** `sweep_idempotency_cache(ttl_seconds: int) -> int` (returns count of evicted entries)
+
+**Mandatory operation.** The SOX server MUST call this periodically (or an equivalent compaction mechanism) to reclaim storage. Implementations MUST support this call and MUST evict all cache entries whose `expires_at` is in the past relative to the call time.
+
+Implementations MAY call this on a background schedule or on-startup; the sweep cadence is implementation-defined. The conformance suite tests that storage does not grow unboundedly after the window expires.
+
+**Conformance note:** The `idempotency_ttl_seconds` value is a server-level configuration field. Implementations MUST document their default.
+
+---
+
+## 10. Per-channel `seq` counter
+
+The backing store MUST maintain a per-channel monotone integer sequence counter (`seq`), incremented atomically with each persisted `send`. The counter starts at 1 for a new channel. Two concurrent `send` calls on the same channel MUST NOT receive the same `seq` value.
+
+The store MUST support range queries by `seq` for the `replay` operation: `get_messages(namespace, channel, since_seq, until_seq, limit)`.
+
+The store MUST also support ancestor-walk queries for thread depth expansion: `get_ancestors(namespace, message_id, max_depth)` — returns the chain of messages linked by `reply_to`, bounded by `max_depth`.
+
+> **Post-v1 upgrade path:** A dedicated `waiting_on` index column may be added to the pending-state record in a future version to make deadlock detection O(1) instead of O(n traversal). The current spec requires no such column; detection is computed at query time from `reply_to` + `delivered_to`. Store authors should leave schema room for this column.
+
+---
+
+## 11. Conformance Checklist
 
 A backing-store implementation is SOX v1.0 conformant when it satisfies all of the following:
 
-- [ ] Implements all five methods: `send`, `recv`, `subscribe`, `list_channels`, `watch`.
+- [ ] Implements all five core methods: `send`, `recv`, `subscribe`, `list_channels`, `watch`.
+- [ ] All operations are parameterised by `namespace`; cross-namespace return is impossible.
 - [ ] `send` is atomic: successful return implies immediate visibility to all subscribers.
+- [ ] `send` assigns a per-channel monotone `seq` atomically.
 - [ ] `recv` is atomic per-agent: returned messages are marked delivered in the same operation.
 - [ ] `recv` never re-delivers a message to the same agent.
 - [ ] `subscribe` is idempotent; subscriptions survive server restart.
 - [ ] `watch` yields each new matching message exactly once per invocation per agent.
-- [ ] Per-channel send-time ordering is preserved in both `recv` responses and `watch` yields.
+- [ ] Per-channel `seq` ordering is preserved in both `recv` responses and `watch` yields.
 - [ ] `watch` can be cancelled cleanly without resource leaks.
+- [ ] `get_channel_schema` / `set_channel_schema` are implemented (may return null for all channels if schema registry is not used).
+- [ ] `sweep_idempotency_cache` is implemented and callable.
+- [ ] Idempotency dedup works within the configured TTL; re-accepts after TTL expiry.
+- [ ] Range queries by `seq` support the `replay` operation.
+- [ ] Ancestor-walk queries support `thread_depth` expansion.
 - [ ] Implementation declares the protocol version it targets.
+- [ ] Implementation documents the namespace isolation mode it supports.
 - [ ] Implementation documents any backend-specific limitations or extensions.
 - [ ] Implementation passes the language-neutral conformance suite at `spec/conformance/`.

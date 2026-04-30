@@ -1,70 +1,114 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Direct Messages (DMs) — Primitive Spec
 
-**Protocol version:** 1.0  
+**Protocol version:** 1.0
 **Status:** Normative
+**Supersedes:** previous `agent:<recipient-id>` naming convention
 
 ---
 
 ## 1. Concept
 
-A **direct message (DM)** is a private channel between one sender and one intended recipient. In SOX, DMs are not a separate protocol primitive — they are channels whose name encodes the intended recipient's agent ID.
+A **direct message (DM)** is a private, two-party channel between exactly two agents. In SOX, DMs are not a separate protocol primitive — they are managed channels whose name encodes both parties and whose membership is enforced server-side.
 
-This means DM delivery relies on the recipient subscribing to their own DM channel. The protocol does not provide a "push to agent" mechanism; the send-and-receive model is identical to group channels.
+DMs reuse the full channel machinery: same envelope, same `seq` counter, same threading, same replay, same enforcer stop-block. No new delivery path or message type is introduced.
+
+> **Decision source:** `docs/decisions/dm-semantics.md` — Option A
 
 ---
 
 ## 2. Naming convention
 
-The recommended DM channel name format is:
+A DM channel name follows the reserved pattern:
 
 ```text
-agent:<recipient-agent-id>
+dm/<agent-id-A>~<agent-id-B>
 ```
 
-Example: to send a DM to agent `agent-beta`, send to channel `agent:agent-beta`.
+where `<agent-id-A>` and `<agent-id-B>` are **lexicographically sorted** (ascending, byte-order comparison of UTF-8 encoded agent IDs). The `~` separator is used because it does not appear in valid agent ID strings and avoids ambiguity with the `/` path separator.
 
-Each agent SHOULD subscribe to `agent:<own-agent-id>` at startup so that DMs addressed to it are received automatically.
+**Canonicalization rules:**
+
+1. Compare agent IDs as Unicode strings using byte-order (code-point) comparison.
+2. The lexicographically lesser ID comes first.
+3. Agent IDs are treated as case-sensitive for comparison purposes.
+
+**Example:** For agents `agent-alpha` and `agent-beta`:
 
 ```text
-{{subscribe_tool}}(pattern="agent:agent-beta")
+dm/agent-alpha~agent-beta
+```
+
+because `"agent-alpha" < "agent-beta"` lexicographically.
+
+**Example:** For agents `zeta` and `alpha`:
+
+```text
+dm/alpha~zeta
 ```
 
 ---
 
-## 3. Privacy model (v1.0)
+## 3. Reserved namespace
 
-**DMs are not confidential in v1.0.** Any agent subscribed to the channel `agent:<target>` receives the messages, not just the named agent. The naming convention provides routing by convention, not enforcement.
+The `dm/` prefix is **reserved**. Clients MUST NOT attempt to create or subscribe to channels beginning with `dm/` directly — the server MUST reject such operations unless issued through the DM creation path.
 
-Confidentiality enforcement (channel ACLs backed on verified identity) is deferred to v1.0 per the identity roadmap (see [spec/ports/identity.md](identity.md) and the `channel-acls-backed-on-verified-identity` protocol TODO).
-
-Agents MUST NOT transmit secrets or credentials over DM channels in v1.0.
+The server creates a DM channel automatically on the first send between two agents if it does not already exist.
 
 ---
 
-## 4. Operations
+## 4. Server-side enforcement
 
-DMs use the standard channel operations.
+The server enforces the two-party constraint on every DM channel:
+
+| Operation | Enforcement |
+|---|---|
+| `send` | Sender MUST be one of the two named agents. Rejected otherwise with `DM_MEMBERSHIP_VIOLATION`. |
+| `subscribe` | Subscriber MUST be one of the two named agents. Rejected otherwise. |
+| Wildcard `subscribe` on `dm/*` | MUST be rejected for all agents. The `dm/` prefix cannot be glob-subscribed. |
+| `recv` | Standard channel semantics; only the subscribed agent sees its messages. |
+
+The server derives the two named agents from the channel name by splitting on `~` after stripping the `dm/` prefix.
+
+---
+
+## 5. Privacy model
+
+DM channels provide **routing by enforcement**, not cryptographic confidentiality.
+
+The server ensures only the two named agents can send to or subscribe to the channel. A privileged server operator with direct backing-store access can read DM contents. This is a deployment/auth concern, not a protocol concern.
+
+**v1.0:** Agents MUST NOT transmit credentials or secrets over DM channels unless the deployment guarantees backing-store confidentiality through out-of-band means.
+
+> **Post-v1:** Cryptographic DM confidentiality (end-to-end encryption using the agents' Ed25519 keypairs from ADR 0002) is a roadmap item. The current identity primitive enables recipient-side key derivation but the encrypted-envelope spec is deferred.
+
+---
+
+## 6. Operations
+
+DMs use the standard channel operations with the `dm/<sorted-pair>` channel name.
 
 ### Sending a DM
 
 ```text
 {{send_tool}}(
-  channel = "agent:agent-beta",
+  channel = "dm/agent-alpha~agent-beta",
   body    = { "type": "clarification_request", ... },
   correlation_id = "req-007"
 )
 ```
 
+The server verifies the sender is one of `agent-alpha` or `agent-beta` before persisting.
+
 ### Receiving DMs
 
-The recipient drains their DM channel along with other subscribed channels:
+Each agent subscribes to their own DM channels at startup. Since wildcard subscription on `dm/*` is blocked, agents must subscribe to specific DM channels they participate in:
 
 ```text
-{{recv_tool}}(channels=["agent:agent-beta"])
+{{subscribe_tool}}(pattern="dm/agent-alpha~agent-beta")
 ```
 
-or as part of a full drain:
+Then drain normally:
 
 ```text
 {{recv_tool}}()
@@ -72,11 +116,11 @@ or as part of a full drain:
 
 ### Replying to a DM
 
-The reply is a new message sent back to the sender's `agent:<sender-id>` channel, using the same `correlation_id`:
+Send back to the same `dm/<sorted-pair>` channel — the pair is symmetric:
 
 ```text
 {{send_tool}}(
-  channel        = "agent:agent-alpha",
+  channel        = "dm/agent-alpha~agent-beta",
   body           = { "type": "clarification_reply", "answer": "..." },
   correlation_id = "req-007"
 )
@@ -84,20 +128,19 @@ The reply is a new message sent back to the sender's `agent:<sender-id>` channel
 
 ---
 
-## 5. Self-send exclusion
+## 7. Channel discovery
 
-As of v1.0, agents receive their own sent messages by default (the backing store does not filter `sender == agent_id`). The `self-send-exclusion` feature (filter own messages in `recv` and `watch`) is a v1 protocol TODO.
-
-Until self-send exclusion is implemented, agents SHOULD ignore messages whose `sender` field matches their own `agent_id`.
+DM channels appear in `{{list_tool}}` output like any other channel. Agents can identify them by the `dm/` prefix. The subscriber count on a DM channel MUST NOT exceed 2.
 
 ---
 
-## 6. Interaction with other primitives
+## 8. Interaction with other primitives
 
 | Primitive | Interaction |
 |---|---|
-| Channels ([channels.md](channels.md)) | DMs are channels; all channel semantics apply |
-| Groups ([groups.md](groups.md)) | A DM is a 1:1 specialisation; no conflict |
-| ACK/NACK ([ack-nack.md](ack-nack.md)) | ACK/NACK messages are sent back to the originating DM channel |
-| Trace IDs ([trace-ids.md](trace-ids.md)) | `correlation_id` links a DM to its reply |
-| Identity ([spec/ports/identity.md](../ports/identity.md)) | Verified identity is required for true DM privacy; not enforced in v1.0 |
+| Channels ([channels.md](channels.md)) | DMs are managed channels; all channel semantics apply (seq, threading, replay, enforcer) |
+| Groups ([groups.md](groups.md)) | A DM is the two-party special case of the managed-channel model groups use |
+| ACK/NACK ([ack-nack.md](ack-nack.md)) | Use the `channels__ack` tool; ACKs reference `message_id`, not channel |
+| Sequence numbers ([sequence-numbers.md](sequence-numbers.md)) | Each DM channel has its own per-channel `seq` counter starting at 1 |
+| Threads ([threads.md](threads.md)) | Threading via `reply_to` works inside DM channels identically to other channels |
+| Identity ([spec/ports/identity.md](../ports/identity.md)) | Server enforcement relies on verified agent identity (ADR 0002) |

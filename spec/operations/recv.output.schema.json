@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/operations/recv.output.schema.json",
   "title": "{{recv_tool}} — output",
-  "description": "Output schema for the SOX recv (drain) operation. Messages are returned in per-channel send-time order (ascending sent_at within each channel). Cross-channel order within a single response is unspecified. Each returned message is atomically marked as delivered to the calling agent — it will not be returned to the same agent again. Normative reference: CONTRACTS.md §5.2, spec/ports/backing-store.md §2.2 and §3.2.",
+  "description": "Output schema for the SOX recv (drain) operation. Messages are returned in per-channel seq order (ascending seq within each channel). Cross-channel order within a single response is unspecified. Each returned message is atomically marked as delivered to the calling agent — it will not be returned to the same agent again. Normative reference: spec/ports/backing-store.md §2.2 and §3.2, spec/protocol.md.",
   "type": "object",
   "required": ["drained_at", "messages"],
   "additionalProperties": false,
@@ -13,10 +13,10 @@
     },
     "messages": {
       "type": "array",
-      "description": "Ordered list of messages drained. Empty array is valid when the mailbox is empty. Within each channel, messages are in ascending sent_at order. Across channels, order is unspecified.",
+      "description": "Ordered list of messages drained. Empty array is valid when the mailbox is empty. Within each channel, messages are in ascending seq order. Across channels, order is unspecified.",
       "items": {
         "type": "object",
-        "required": ["channel", "sender", "body", "sent_at", "message_id"],
+        "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
         "additionalProperties": false,
         "properties": {
           "channel": {
@@ -27,7 +27,7 @@
           "sender": {
             "type": "string",
             "minLength": 1,
-            "description": "agent_id of the agent that sent the message. In v1.0 with identity enforcement, this is a server-certified value. Without identity enforcement, it is self-reported."
+            "description": "agent_id of the agent that sent the message. Server-certified: bound from the verified connection identity, not self-reported by the client."
           },
           "body": {
             "type": "object",
@@ -41,12 +41,47 @@
           },
           "sent_at": {
             "type": "number",
-            "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message."
+            "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. Retained for backward compatibility; seq is the authoritative ordering key."
           },
           "message_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Backing-store-assigned unique identifier for this message."
+            "description": "Backing-store-assigned unique identifier for this message. Use as reply_to when replying, or as the reference in channels__ack calls."
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Per-channel monotone sequence number. Authoritative ordering key within a channel. Use as the 'since' cursor in subsequent replay queries."
+          },
+          "ts": {
+            "type": ["integer", "null"],
+            "description": "Server-assigned monotonic nanosecond timestamp. Advisory tiebreaker for cross-channel display ordering. Not globally total-ordered in multi-node or federated deployments. May be null if the server does not support nanosecond timestamps."
+          },
+          "reply_to": {
+            "type": ["string", "null"],
+            "description": "message_id of the parent message in a thread, or null if this message is not a reply. When thread_depth > 0 was requested on recv, ancestor envelopes are inlined in the 'ancestors' field."
+          },
+          "delivered_to": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "List of agent_ids that have recv'd this message. Server-populated. Used for deadlock detection wait-graph computation (SHOULD-implement). May be null if the server does not track delivery sets."
+          },
+          "origin_server": {
+            "type": ["string", "null"],
+            "description": "server_id in federated deployments. Always null in v1.0 single-server deployments. Reserved for federated v2."
+          },
+          "ancestors": {
+            "type": ["array", "null"],
+            "description": "Inline ancestor envelopes when thread_depth > 0 was requested. Ordered from immediate parent (index 0) to furthest ancestor. Null when thread_depth=0 (the default). Each element is a message object with the same shape as items in this array (minus 'ancestors' to avoid infinite nesting).",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "_meta": {
+            "type": ["object", "null"],
+            "description": "Observability metadata. Present when include_meta=true (default); absent when include_meta=false. Shape: {trace_id: string, middleware_timings: string[], server_node_id: string}.",
+            "additionalProperties": true
           }
         }
       }
@@ -71,22 +106,18 @@
           },
           "correlation_id": "req-001",
           "sent_at": 1714300000.0,
-          "message_id": "msg-0000001"
-        },
-        {
-          "channel": "agent:agent-beta",
-          "sender": "agent-gamma",
-          "body": {
-            "type": "sox-invite",
-            "channel": "group:security-team",
-            "inviting_agent": "agent-gamma",
-            "purpose": "Security review kick-off.",
-            "pattern": null,
-            "correlation_id": "invite-001"
-          },
-          "correlation_id": "invite-001",
-          "sent_at": 1714300005.0,
-          "message_id": "msg-0000002"
+          "message_id": "msg-0000001",
+          "seq": 1,
+          "ts": 1714300000000000000,
+          "reply_to": null,
+          "delivered_to": ["agent-beta"],
+          "origin_server": null,
+          "ancestors": null,
+          "_meta": {
+            "trace_id": "trace-abc123",
+            "middleware_timings": ["auth:2ms", "schema_validator:1ms"],
+            "server_node_id": "node-1"
+          }
         }
       ]
     }

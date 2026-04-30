@@ -55,13 +55,15 @@ The context object is scoped to a single tool call. It MUST NOT be shared across
 
 ## 4. Middleware ordering convention
 
-The following order is the RECOMMENDED default. Implementations MAY deviate from this order for specific use cases, but MUST document any deviation:
+The following order is the **normative default chain** (per ADR 0003). Implementations MAY deviate for specific use cases but MUST document any deviation. Each link is independently removable; removing `auth` or `namespace_resolver` from a production deployment is a security misconfiguration.
 
-1. **Identity middleware** — verifies agent credential, binds `agent_id` to context, sets `input.sender` for `send` operations. MUST run first. (See `spec/ports/identity.md`)
-2. **Rate-limit middleware** — enforces per-agent and per-channel rate limits. Runs after identity so limits are keyed on verified identity.
-3. **Validation middleware** — validates input arguments against `spec/operations/*.input.schema.json`. Short-circuits with `sox-error` on schema violation.
-4. **Audit middleware** — writes a structured log entry for every tool call (operation, agent_id, timestamp, outcome). SHOULD run after identity; MAY run at the end of the response path.
-5. **BackingStore** — the actual persistence operation.
+1. **`namespace_resolver`** — derives the active namespace from the connection's claimed `agent_id` (pre-auth hint) and attaches it to the request context. MUST run before auth. Removing this middleware breaks namespace routing. (See `spec/primitives/namespace.md`)
+2. **`auth` (Identity middleware)** — verifies the agent credential (Ed25519 signature in the reference implementation), binds the verified `agent_id` to context, sets `input.sender` for `send` operations. MUST run after `namespace_resolver` and before all other chain links. (See `spec/ports/identity.md`, docs/adr/0002)
+3. **`rate_limit`** — enforces per-agent and per-channel rate limits. Runs after auth so limits are keyed on verified identity.
+4. **`schema_validator`** — validates `input.body` against the channel's registered JSON Schema (fetched from the backing store via `get_channel_schema`). Short-circuits with `VALIDATION_FAILED` error on schema violation. **Default-on** in the reference deployment; removable for performance-sensitive deployments where producers are trusted. (See `docs/decisions/schema-validation-layer.md`)
+5. **`idempotency`** — checks the idempotency cache for duplicate `send` calls. Short-circuits with the cached result if a valid entry exists. Runs before `store_dispatch` so duplicate sends never reach the store.
+6. **`store_dispatch`** — calls the backing store. The only chain link that performs persistence.
+7. **`audit_log`** — writes a structured log entry for every tool call (operation, agent_id, namespace, timestamp, outcome). Runs on the response path after `store_dispatch`.
 
 ---
 
@@ -100,13 +102,32 @@ If a middleware unit encounters an unrecoverable internal error (not a caller er
 
 ---
 
-## 8. Conformance
+## 8. `schema_validator` middleware — contract
+
+The `schema_validator` middleware:
+
+1. On each `send` call, fetches the registered schema for the target channel via `get_channel_schema(namespace, channel)`.
+2. If no schema is registered (`null`), passes through without validation.
+3. If a schema is registered, validates `input.body` against it using JSON Schema (draft 2020-12).
+4. On validation failure, short-circuits with error code `VALIDATION_FAILED` and a structured error body listing all violations.
+5. On validation success, passes through to `store_dispatch`.
+
+The backing store is explicitly forbidden from performing body validation — it is schema-agnostic. Only the `schema_validator` middleware enforces channel schemas.
+
+**Default-on:** The reference deployment ships with `schema_validator` enabled. Disabling it silently accepts malformed messages on typed channels; operators MUST document this if they disable it.
+
+---
+
+## 9. Conformance
 
 A middleware pipeline implementation is conformant when:
 
-- [ ] Identity middleware runs first and sets `context.agent_id` from a verified credential.
+- [ ] `namespace_resolver` runs before `auth` in the default chain.
+- [ ] `auth` (identity) middleware runs before all other chain links and sets `context.agent_id` from a verified credential.
+- [ ] `schema_validator` is present in the default chain and defaults to enabled.
 - [ ] No middleware overwrites `correlation_id`.
 - [ ] Short-circuit responses conform to the relevant output schema.
-- [ ] Pipeline order is documented.
+- [ ] Pipeline order is documented; any deviation from the normative default is documented.
 - [ ] Internal errors produce `sox-error` responses, not implementation-specific exceptions.
 - [ ] The pipeline is reentrant: concurrent tool calls MUST NOT share context objects.
+- [ ] The conformance suite asserts the default chain refuses an unauthenticated `send`.

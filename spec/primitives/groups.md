@@ -1,97 +1,158 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Groups — Primitive Spec
 
-**Protocol version:** 1.0  
+**Protocol version:** 1.0
 **Status:** Normative
+**Supersedes:** previous model where groups had no membership list and membership was implicit via subscription
 
 ---
 
 ## 1. Concept
 
-A **group** is a named set of agents that collaborate over a shared channel. Groups are the primary topology for N:N messaging — multiple senders, multiple receivers, one channel.
+A **group** is a managed channel under the `group/<group-id>` prefix whose membership is maintained by the server in a dedicated membership table. Groups are the primary topology for N:N messaging — one sender, multiple receivers, one channel — and are the fan-out primitive for orchestrator-to-worker patterns.
 
-SOX has no separate "group object" at the protocol layer. A group is realised by:
+Groups reuse the full channel machinery: same envelope, same `seq` counter, same threading, same replay, same enforcer. Messaging verbs (`channels__send`, `channels__recv`) are unchanged. Group lifecycle (create, invite, join, leave, list members) uses dedicated tools that mutate the server-side membership table.
 
-1. A conventionally named channel (e.g. `group:<name>` or `ticket:<id>`).
-2. All participating agents subscribing to that channel pattern.
-
-The protocol does not maintain a membership list for groups. Membership is implicit: an agent is "in" a group when it has an active subscription that matches the group's channel name.
+> **Decision source:** `docs/decisions/groups-model.md` — Option A (managed channel)
 
 ---
 
-## 2. Naming
+## 2. Naming convention
 
-Recommended naming conventions:
+Group channel names follow the reserved pattern:
 
-| Use case | Pattern | Example |
+```text
+group/<group-id>
+```
+
+`<group-id>` MAY be human-chosen (e.g., `group/eng-team`) or a server-assigned opaque identifier (e.g., `group/01HXYZ...`). The server determines the assignment strategy at group creation time based on the `id_mode` parameter.
+
+The `group/` prefix is **reserved**. Clients MUST NOT create or subscribe to channels beginning with `group/` directly outside of the lifecycle verbs below.
+
+---
+
+## 3. Reserved prefixes summary
+
+| Prefix | Type | Enforcement |
 |---|---|---|
-| Named persistent group | `group:<name>` | `group:security-team` |
-| Task-scoped group | `ticket:<id>` | `ticket:ENGI-0042` |
-| Broadcast group (one-to-many) | `broadcast:<topic>` | `broadcast:cto-announcements` |
-
-All of these are ordinary channels. The prefix is advisory only.
+| `dm/` | DM channels | Two-party only; server-enforced |
+| `group/` | Group channels | Membership-table enforced |
+| `sox/` | Server-derived channels | Server-emitted only; agents cannot write |
 
 ---
 
-## 3. Operations
+## 4. Membership table contract
 
-Groups use the standard channel operations. No additional operations are required.
+The server maintains a membership table with the following structure per group:
 
-### Joining a group
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | string | Channel name without the `group/` prefix |
+| `agent_id` | string | Member agent's verified identity |
+| `joined_at` | number | Unix epoch seconds when membership was established |
+| `status` | string | `active` or `invited` |
 
-An agent joins a group by subscribing to the group's channel pattern:
+**Enforcement on every `send` and `subscribe`:** The server MUST verify the calling agent is an `active` member of the group. Non-members receive a `GROUP_MEMBERSHIP_REQUIRED` error.
 
-```text
-{{subscribe_tool}}(pattern="ticket:ENGI-0042")
-```
-
-or, for all tickets:
-
-```text
-{{subscribe_tool}}(pattern="ticket:*")
-```
-
-### Sending to a group
-
-```text
-{{send_tool}}(channel="ticket:ENGI-0042", body={...})
-```
-
-All subscribed agents receive the message on their next `recv` call.
-
-### Discovering groups
-
-```text
-{{list_tool}}()
-```
-
-Returns all active channels, from which group channels can be identified by name prefix.
+**Enforcement on wildcard subscribe:** Agents CANNOT glob-subscribe to `group/*`. Wildcard patterns that would match `group/` channels are rejected.
 
 ---
 
-## 4. State
+## 5. Lifecycle verbs
 
-A group has no protocol-level state object. The effective state is:
+Group lifecycle is managed through the following tools. All lifecycle tools require a verified agent identity.
 
-- **Subscribers** — agents with an active subscription matching the group's channel. Visible via `subscriber_count` in `{{list_tool}}` output.
-- **Message backlog** — messages stored in the backing store not yet drained by each subscriber.
+### 5.1 `group_create`
+
+Creates a new group channel and adds the creating agent as the first `active` member.
+
+**Parameters:**
+- `group_id` (string, optional): desired group ID. If omitted, server assigns an opaque ID.
+- `display_name` (string, optional): human-readable name for tooling display.
+
+**Returns:** `{ channel: "group/<group-id>", created_at: <number> }`
+
+### 5.2 `group_invite`
+
+Invites an agent to a group. The inviting agent MUST be an `active` member. The invited agent's status is set to `invited`.
+
+**Parameters:**
+- `channel` (string): the `group/<group-id>` channel.
+- `agent_id` (string): the agent to invite.
+
+**Returns:** `{ channel: <string>, invited_agent: <string>, invited_at: <number> }`
+
+### 5.3 `group_join`
+
+An invited agent accepts membership. Transitions the calling agent's status from `invited` to `active`.
+
+**Parameters:**
+- `channel` (string): the `group/<group-id>` channel.
+
+**Returns:** `{ channel: <string>, joined_at: <number> }`
+
+### 5.4 `group_leave`
+
+An active member leaves the group. The server removes the agent from the membership table.
+
+**Parameters:**
+- `channel` (string): the `group/<group-id>` channel.
+
+**Returns:** `{ channel: <string>, left_at: <number> }`
+
+### 5.5 `group_list_members`
+
+Returns the current membership table for a group. Caller MUST be an `active` member.
+
+**Parameters:**
+- `channel` (string): the `group/<group-id>` channel.
+
+**Returns:** Array of `{ agent_id, joined_at, status }` objects.
+
+> **Post-v1:** Member roles (owner, admin, member, observer) are out of scope for v1. All `active` members have equal permissions within the group. Role-based access is a middleware/hook layer concern deferred to v1.x.
 
 ---
 
-## 5. Group membership invariants
+## 6. Fan-out semantics
 
-- **No forced membership.** The protocol does not support "adding" an agent to a group. Agents self-subscribe.
-- **No forced removal.** The protocol does not support removing an agent from a group. An agent may unsubscribe by stopping its subscription pattern (subscription removal is implementation-defined; see backing-store port).
-- **No membership enumeration.** The protocol exposes `subscriber_count` (an integer) but not the identities of subscribers. Identity enumeration is an implementation extension, not part of v1.0.
+Sending to a group channel delivers the message to all `active` members — this is the fan-out primitive. No separate `channels__fanout` tool exists; `channels__send` to a `group/<group-id>` channel IS the fan-out.
+
+```text
+{{send_tool}}(
+  channel = "group/eng-team",
+  body    = { "type": "clarification_request", ... }
+)
+```
+
+The server delivers to all active members' subscriber queues atomically. Members receive it on their next `recv` drain.
 
 ---
 
-## 6. Interaction with other primitives
+## 7. Collect (fan-in)
+
+After broadcasting to a group, an orchestrator may wait for replies using `channels__collect`. See `spec/operations/channels_collect.input.schema.json` for the full schema.
+
+```text
+channels__collect(
+  reply_to = "<message_id of the broadcast>",
+  count    = 3,
+  timeout  = 30
+)
+```
+
+Returns `{ received: [...], missing: [...], timed_out: bool }`.
+
+> **Post-v1:** `channels__collect` is marked `x-status: planned`. Quorum semantics, cancel verb, and multiple-collector semantics are open questions documented in the schema.
+
+---
+
+## 8. Interaction with other primitives
 
 | Primitive | Interaction |
 |---|---|
-| Channels ([channels.md](channels.md)) | A group channel is an ordinary channel; all channel semantics apply |
-| DMs ([dms.md](dms.md)) | An agent may DM a specific group member; requires knowing their `agent_id` |
-| Threads ([threads.md](threads.md)) | A thread can be spawned off any group message via `correlation_id` |
-| Presence ([presence.md](presence.md)) | Agents may publish presence to a group channel; receivers interpret it |
-| ACK/NACK ([ack-nack.md](ack-nack.md)) | Group members acknowledge messages by sending back to the originating channel |
+| Channels ([channels.md](channels.md)) | Groups are managed channels; all channel semantics apply (seq, threading, replay) |
+| DMs ([dms.md](dms.md)) | DMs and groups follow the same managed-channel model with different membership policies |
+| ACK/NACK ([ack-nack.md](ack-nack.md)) | Group messages require one ACK per recipient via `channels__ack`; tracked individually |
+| Sequence numbers ([sequence-numbers.md](sequence-numbers.md)) | Each group channel has its own per-channel `seq` counter |
+| Threads ([threads.md](threads.md)) | Threading via `reply_to` works inside group channels identically to other channels |
+| Presence ([presence.md](presence.md)) | Members publish presence via `channels__heartbeat`; `sox/presence` reflects group member states |

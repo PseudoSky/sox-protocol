@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/replay.input.schema.json",
+  "title": "replay — input",
+  "description": "Input schema for the SOX replay operation. Returns historical messages from a channel using a per-channel seq cursor. Access is gated by the channel's replay_policy (subscriber | admin_only | custom); the default is 'subscriber', meaning the same auth chain as recv applies. Normative reference: spec/primitives/channels.md (replay_policy), spec/primitives/sequence-numbers.md, docs/decisions/replay-access-control.md.",
+  "type": "object",
+  "required": ["channel", "since", "limit"],
+  "additionalProperties": false,
+  "properties": {
+    "channel": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The channel to replay from. The calling agent must satisfy the channel's replay_policy."
+    },
+    "since": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Return messages with seq > since. Use 0 to replay from the beginning of the channel. Use the seq of the last message seen to replay only missed messages. This is the per-channel cursor — it refers only to seq values on the specified channel."
+    },
+    "until": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Return messages with seq <= until. When null, replay continues to the current head of the channel. Combined with 'since', defines the inclusive range (since, until].",
+      "default": null
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 100,
+      "description": "Maximum number of messages to return in a single replay call. When the range contains more messages than limit, has_more=true and the caller should paginate using the seq of the last returned message as the next 'since'."
+    }
+  },
+  "examples": [
+    {
+      "channel": "ticket:ENGI-0042",
+      "since": 0,
+      "until": null,
+      "limit": 100
+    },
+    {
+      "channel": "ticket:ENGI-0042",
+      "since": 42,
+      "until": null,
+      "limit": 50
+    },
+    {
+      "channel": "group/eng-team",
+      "since": 100,
+      "until": 200,
+      "limit": 100
+    }
+  ]
+}

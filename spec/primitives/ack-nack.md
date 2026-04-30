@@ -1,104 +1,130 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # ACK / NACK — Primitive Spec
 
-**Protocol version:** 1.0  
+**Protocol version:** 1.0
 **Status:** Normative
+**Supersedes:** previous model where ACK/NACK were SOX messages with reserved `body.type: sox-ack` sent over ordinary channels
 
 ---
 
 ## 1. Concept
 
-**ACK (acknowledgement)** and **NACK (negative acknowledgement)** are application-level signals that a receiver sends back to the originating agent to confirm receipt, acceptance, or rejection of a message.
+**ACK (acknowledgement)** and **NACK (negative acknowledgement)** are control-plane signals, not conversation messages. An ACK or NACK updates the server-side pending-state record for a message; it does NOT enter channel history, does NOT appear in replay, and does NOT consume a `seq` slot on any channel.
 
-SOX does not have a transport-layer ACK/NACK mechanism; every delivered message is considered consumed at the protocol layer (at-least-once delivery). ACK and NACK are SOX protocol messages with reserved `body.type` values, sent back over ordinary channels.
+The primary use case is request-reply coordination: an agent processes a `clarification_request` and signals its progress through the pending-state lifecycle via the `channels__ack` tool.
 
-The primary use case is request-reply coordination: an agent sends a `clarification_request` with a `correlation_id`, and the receiver replies with a `sox-ack` or `sox-nack` referencing the same `correlation_id`.
-
----
-
-## 2. Reserved body types
-
-| `body.type` | Meaning | Schema |
-|---|---|---|
-| `sox-ack` | The referenced message was received and accepted. | [spec/envelopes/sox-ack.schema.json](../envelopes/sox-ack.schema.json) |
-| `sox-nack` | The referenced message was received but rejected or cannot be processed. | [spec/envelopes/sox-nack.schema.json](../envelopes/sox-nack.schema.json) |
+> **Decision source:** `docs/decisions/ack-mechanism.md` — Option A (dedicated tool)
 
 ---
 
-## 3. ACK semantics
+## 2. The `channels__ack` tool
 
-A `sox-ack` message signals that the receiver:
+ACK and NACK are issued by calling the dedicated `channels__ack` tool:
 
-- Received the referenced message (identified by `correlation_id`).
-- Accepted it for processing or has already processed it.
+```text
+channels__ack(
+  message_id = "<string>",
+  status     = "<received | processing | done | nack>",
+  reason     = "<optional string>"   // used with status=nack
+)
+```
 
-An ACK does NOT guarantee that the receiver completed its response or that any subsequent action was taken successfully. It is a lightweight delivery confirmation.
+**Input schema:** `spec/operations/channels_ack.input.schema.json`
+**Output schema:** `spec/operations/channels_ack.output.schema.json`
 
-**When to send an ACK:**
+The tool updates the server-side pending-state record for `message_id` and returns a confirmation. No message is written to any channel.
 
-- After processing a `clarification_request` and before or alongside sending the `clarification_reply`.
-- To confirm receipt of a `handoff_ready` signal before the handoff work begins.
+---
 
-**When NOT to send an ACK:**
+## 3. Pending-state lifecycle
 
-- For broadcast messages where no specific action is expected.
-- For presence updates.
-- For status updates that are fire-and-forget.
+The ACK status field drives the following lifecycle:
+
+```
+pending → received → processing → done
+                               → nack
+```
+
+| Status | Meaning |
+|---|---|
+| `received` | The agent has retrieved the message and is about to work on it. |
+| `processing` | The agent has begun working on the referenced message. |
+| `done` | The agent has finished processing; the message is resolved. |
+| `nack` | The agent cannot or will not process the message. The `reason` field SHOULD explain why. |
+
+Transitions MUST be forward-only within a session. The server SHOULD reject a transition that moves backward (e.g., `done → received`).
+
+ACK is explicit — the server does NOT auto-ACK on `recv`. Each status transition must be issued by the agent deliberately.
 
 ---
 
 ## 4. NACK semantics
 
-A `sox-nack` message signals that the receiver:
+A `nack` signals the agent received the message but cannot process it. The sender MAY:
 
-- Received the referenced message.
-- Cannot or will not process it, for a stated reason.
+- Retry with backoff.
+- Escalate to a different agent.
+- Continue under its current assumption.
 
-A NACK SHOULD include a `reason` field in the body. The sender may retry (with backoff), escalate, or continue under its current assumption.
+The `reason` field is free text in v1.0. A standard taxonomy of reason codes is deferred to the enforcer design document.
 
-**When to send a NACK:**
-
-- The requested information is outside the receiver's knowledge domain.
-- The receiver is `busy` and cannot process the request before the sender's decision point.
-- The request is malformed or missing required context.
+> **Post-v1:** Standard NACK reason codes (e.g., `CAPACITY_EXCEEDED`, `DOMAIN_MISMATCH`, `TIMEOUT`) will be defined when the enforcer spec lands.
 
 ---
 
-## 5. Wire format
+## 5. Relationship to channel history
 
-An ACK or NACK is a standard SOX message sent to a channel. The `correlation_id` field MUST be set to the `message_id` of the message being acknowledged.
+ACKs are control-plane only:
 
-**Recommended routing:** Send the ACK/NACK back to:
+| Property | ACK (v1.0) |
+|---|---|
+| Appears in channel replay | No |
+| Counted in channel `seq` | No |
+| Visible in `recv` drain | No |
+| Stored in pending-state record | Yes |
+| Observable by audit consumers | Via `sox/acks` derived channel (see §6) |
 
-- The originating DM channel (`agent:<sender-id>`), or
-- The originating group/task channel if the conversation is group-scoped, or
-- A thread channel (`thread:<original-message-id>`) to keep the ack out of the main channel.
-
-The `correlation_id` field ties the ACK/NACK to the original request regardless of which channel the response is sent on.
-
-See [spec/envelopes/sox-ack.schema.json](../envelopes/sox-ack.schema.json) and [spec/envelopes/sox-nack.schema.json](../envelopes/sox-nack.schema.json) for the normative body schemas.
+The previous model (ACK as a `sox-ack` body-type message over ordinary channels) is **removed**. The `spec/envelopes/sox-ack.schema.json` and `spec/envelopes/sox-nack.schema.json` files remain valid but now define the body schemas for `channels__ack` tool responses, not channel messages.
 
 ---
 
-## 6. Protocol-layer delivery vs application-layer ACK
+## 6. `sox/acks` derived channel (optional)
 
-These two concepts are distinct:
+For audit consumers that need an ACK feed, the server MAY emit a derived `sox/acks` channel. This channel is server-emitted (not written by agents) and carries structured ACK events:
+
+```json
+{
+  "message_id": "<string>",
+  "agent_id":   "<string>",
+  "status":     "received | processing | done | nack",
+  "reason":     "<string | null>",
+  "acked_at":   "<number — Unix epoch seconds>"
+}
+```
+
+Downstream systems that require ACK visibility MUST subscribe to `sox/acks`; they MUST NOT rely on ACK messages appearing in the originating channel.
+
+The `sox/` prefix is reserved for server-emitted derived channels and MUST NOT be used by agents.
+
+---
+
+## 7. Protocol-layer delivery vs. application-layer ACK
+
+These two concepts remain distinct:
 
 | Layer | Guarantee | Mechanism |
 |---|---|---|
-| Protocol delivery | At-least-once. A stored message will be returned by `recv` for each subscriber. | Backing store atomicity (§3 of backing-store.md) |
-| Application ACK | Advisory. The sender learns the receiver has seen and accepted the message. | `sox-ack` message over a channel |
-
-Agents MUST NOT confuse protocol delivery with application-layer acknowledgement. The backing store does not know whether a receiver acted on a message; only an explicit `sox-ack` confirms that.
+| Protocol delivery | At-least-once. A stored message will be returned by `recv` for each subscriber. | Backing store atomicity |
+| Application ACK | Control signal. The agent reports its processing progress for the pending-state record. | `channels__ack` tool |
 
 ---
 
-## 7. Interaction with other primitives
+## 8. Interaction with other primitives
 
 | Primitive | Interaction |
 |---|---|
-| Channels ([channels.md](channels.md)) | ACK/NACK messages travel over ordinary channels |
-| DMs ([dms.md](dms.md)) | Primary routing target for ACK/NACK in 1:1 conversations |
-| Threads ([threads.md](threads.md)) | Thread channels keep ACK/NACK scoped to the originating message |
-| Trace IDs ([trace-ids.md](trace-ids.md)) | `correlation_id` is the mandatory link between request and ACK/NACK |
-| Pending state ([pending-state.md](pending-state.md)) | An outstanding ACK/NACK wait is tracked in application state, not protocol state |
+| Channels ([channels.md](channels.md)) | ACKs do NOT travel over channels; they update the pending-state record directly |
+| Pending state ([pending-state.md](pending-state.md)) | `channels__ack` is the sole writer to pending-state status transitions |
+| Groups / fan-out ([groups.md](groups.md)) | Group messages require one ACK per recipient; tracked individually for fan-out collect |
+| Sequence numbers ([sequence-numbers.md](sequence-numbers.md)) | ACKs do not consume `seq` slots |
+| Deadlock detection | `delivered_to` in the envelope plus `reply_to` provide the wait graph; ACK status feeds the resolution signal |

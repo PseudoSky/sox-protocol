@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/replay.output.schema.json",
+  "title": "replay — output",
+  "description": "Output schema for the SOX replay operation. Returns historical messages in ascending seq order. has_more=true signals that more messages exist beyond the returned set; paginate by using the seq of the last returned message as the next 'since'. Normative reference: spec/primitives/sequence-numbers.md and docs/decisions/replay-access-control.md.",
+  "type": "object",
+  "required": ["messages", "has_more"],
+  "additionalProperties": false,
+  "properties": {
+    "messages": {
+      "type": "array",
+      "description": "Historical messages in ascending seq order. Each message has the same envelope shape as recv output items. Empty array is valid when no messages exist in the requested range.",
+      "items": {
+        "type": "object",
+        "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
+        "additionalProperties": true,
+        "properties": {
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sender": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "correlation_id": {
+            "type": ["string", "null"]
+          },
+          "sent_at": {
+            "type": "number"
+          },
+          "message_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Per-channel monotone sequence number. Use as the 'since' cursor for the next replay page."
+          },
+          "ts": {
+            "type": ["integer", "null"]
+          },
+          "reply_to": {
+            "type": ["string", "null"]
+          },
+          "origin_server": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "has_more": {
+      "type": "boolean",
+      "description": "True if additional messages exist beyond the returned set within the requested range (or beyond 'since' when 'until' is null). When true, paginate by calling replay again with since=<last returned message seq>."
+    }
+  },
+  "examples": [
+    {
+      "messages": [],
+      "has_more": false
+    },
+    {
+      "messages": [
+        {
+          "channel": "ticket:ENGI-0042",
+          "sender": "agent-alpha",
+          "body": { "type": "clarification_request", "question": "Target v2 or v3?" },
+          "correlation_id": "req-001",
+          "sent_at": 1714300000.0,
+          "message_id": "msg-0000001",
+          "seq": 43,
+          "ts": 1714300000000000000,
+          "reply_to": null,
+          "origin_server": null
+        },
+        {
+          "channel": "ticket:ENGI-0042",
+          "sender": "agent-beta",
+          "body": { "type": "clarification_reply", "answer": "Target v3." },
+          "correlation_id": "req-001",
+          "sent_at": 1714300005.0,
+          "message_id": "msg-0000002",
+          "seq": 44,
+          "ts": 1714300005000000000,
+          "reply_to": "msg-0000001",
+          "origin_server": null
+        }
+      ],
+      "has_more": true
+    }
+  ]
+}

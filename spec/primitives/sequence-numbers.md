@@ -1,61 +1,95 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Sequence Numbers — Primitive Spec
 
-**Protocol version:** 1.0  
+**Protocol version:** 1.0
 **Status:** Normative
+**Supersedes:** previous spec that stated "SOX does not use explicit integer sequence numbers in v1.0"
 
 ---
 
 ## 1. Concept
 
-SOX does not use explicit integer sequence numbers in v1.0. Instead, the combination of **`sent_at`** (Unix epoch seconds, floating-point) and **`message_id`** (backing-store-assigned unique identifier) serves as the ordering key within a channel.
+Every SOX message carries a **per-channel monotone integer sequence number** (`seq`) assigned by the server at the moment the message is durably accepted. Sequence numbers start at 1 for each channel and increment by 1 for each new message. They are the authoritative ordering key within a channel and the cursor for replay queries.
 
-This section specifies the ordering guarantees SOX provides, the limitations of the v1.0 ordering model, and the intended evolution toward stronger ordering.
+A separate, optional **server-assigned monotonic timestamp** (`ts`) is included in the envelope as a tiebreaker for cross-channel display ordering. `ts` is advisory, not authoritative.
 
----
-
-## 2. Ordering fields
-
-### 2.1 `sent_at`
-
-- Type: `number` (JSON), floating-point, Unix epoch seconds.
-- Assigned by the backing store at the moment it durably accepts the message.
-- Used to sort messages within a single channel in ascending order.
-
-### 2.2 `message_id`
-
-- Type: `string`, non-empty.
-- Assigned by the backing store; unique within the store.
-- Used as a tie-break when two messages in the same channel have identical `sent_at` values.
-- Also used by threads and trace IDs to reference a specific message.
+> **Decision source:** `docs/decisions/seq-ordering-scope.md` — Option B (per-channel seq)
 
 ---
 
-## 3. Per-channel ordering guarantee
+## 2. `seq` — per-channel monotone counter
 
-Within a single channel, the backing store MUST return messages to a given agent in ascending `sent_at` order. When two messages share the same `sent_at` timestamp (same-millisecond concurrent sends from different agents), the store's internal tie-break order applies and MUST be consistent across all `recv` calls to the same agent.
+| Property | Value |
+|---|---|
+| Type | Integer (≥ 1) |
+| Scope | Per channel. Each channel has an independent counter. |
+| Assignment | Server-assigned at durable `send` acceptance. |
+| Starting value | 1 (first message on any channel) |
+| Increment | Strictly +1 per message within a channel |
+| Cross-channel ordering | Not defined by `seq`. Use `ts` for display ordering across channels. |
+
+The backing store MUST assign `seq` atomically with message persistence. Two messages on the same channel MUST NOT share a `seq` value.
+
+Clients use `seq` as a **cursor** for replay:
+
+```text
+replay(channel="ticket:ENGI-0042", since=42, until=null, limit=100)
+```
+
+returns all messages with `seq > 42` on that channel, in ascending `seq` order.
 
 ---
 
-## 4. Cross-channel ordering guarantee
+## 3. `ts` — server-assigned monotonic timestamp
 
-**None.** Messages across different channels in a single `recv` response may appear in any order. Agents MUST NOT assume any cross-channel ordering.
+| Property | Value |
+|---|---|
+| Type | Integer (nanoseconds since Unix epoch) or string ISO-8601, implementation-defined |
+| Scope | Server-wide monotonic (monotone per server node, not globally) |
+| Assignment | Server-assigned at durable `send` acceptance |
+| Guarantee | Monotone per server node; NOT globally total-ordered in multi-node or federated deployments |
+| Purpose | Advisory tiebreaker for cross-channel display ordering; human-readable timeline in tooling |
+
+`ts` MUST be monotone: for two messages accepted by the same server node, if message A is accepted before message B, `ts(A) <= ts(B)`. Wall-clock skew MUST be corrected to maintain this guarantee (monotonic clock source recommended).
+
+Clients and tooling MAY sort a unified timeline by `ts`, accepting that this ordering is advisory, not authoritative. Agents MUST NOT make correctness decisions based on `ts` alone.
 
 ---
 
-## 5. v1.0 limitations
+## 4. Per-channel ordering guarantee
 
-- **No vector clocks.** SOX v1.0 uses wall-clock time (`sent_at`) for ordering. In a distributed deployment with multiple backing-store nodes, clock skew can produce inconsistent ordering. Vector-clock or hybrid-logical-clock causality tracking is a post-v1 item.
-- **No global sequence number.** There is no monotonically increasing integer sequence number across channels or across all messages in the store.
-- **No causal ordering.** SOX does not guarantee that a message sent in response to another message appears after it in any global ordering.
+Within a single channel:
+
+- Messages are returned by `recv` and `replay` in ascending `seq` order.
+- `seq` ordering is the authoritative order; `sent_at` (the legacy float timestamp field) is retained for backward compatibility but `seq` supersedes it for ordering purposes.
+- The backing store MUST perform atomic increment of the per-channel `seq` counter; no two concurrent `send` calls on the same channel may receive the same `seq`.
 
 ---
 
-## 6. Interaction with other primitives
+## 5. Cross-channel ordering guarantee
+
+**None.** Messages across different channels have no protocol-level total order. Agents MUST NOT assume cross-channel ordering.
+
+For display-time ordering across channels, sort by `ts` and treat the result as advisory.
+
+---
+
+## 6. Federation-aware design
+
+Per-channel `seq` is federation-shaped by design:
+
+- A federated v2 deployment can maintain per-channel `seq` independently on each server node.
+- The `origin_server` envelope field (see `spec/protocol.md`) disambiguates messages that share a `seq` value across federated channels.
+- No global counter must be unwound in a v2 migration.
+
+---
+
+## 7. Interaction with other primitives
 
 | Primitive | Interaction |
 |---|---|
-| Channels ([channels.md](channels.md)) | Per-channel `sent_at` ordering is the channel delivery contract |
-| Threads ([threads.md](threads.md)) | Thread channels have independent per-channel ordering; thread order is independent of parent channel order |
-| Trace IDs ([trace-ids.md](trace-ids.md)) | `correlation_id` links related messages but does not impose an ordering constraint |
-| Pending state ([pending-state.md](pending-state.md)) | `sent_at` is used for timeout tracking in application-level pending state |
+| Channels ([channels.md](channels.md)) | Each channel has an independent `seq` counter; `seq` is the per-channel ordering key |
+| Replay | `since` parameter is a per-channel `seq` cursor; see `spec/operations/replay.input.schema.json` |
+| Threads ([threads.md](threads.md)) | Thread channels have independent `seq` counters; thread order is independent of parent channel `seq` |
+| ACK/NACK ([ack-nack.md](ack-nack.md)) | ACKs do not consume `seq` slots (ACKs are control-plane, not channel messages) |
+| Pending state ([pending-state.md](pending-state.md)) | `seq` is used as replay cursor for recovering missed messages after reconnection |

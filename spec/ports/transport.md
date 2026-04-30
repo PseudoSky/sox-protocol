@@ -75,7 +75,39 @@ Authentication of the MCP server to the backing store is implementation-defined.
 
 ---
 
-## 4. Conformance
+## 4. HTTP binding — CORS requirements
+
+When the transport is bound to HTTP (as opposed to stdio), the server MUST implement CORS handling to enable browser-based clients (including the `sox-ui` web application).
+
+**Required CORS behaviour:**
+
+- The server MUST respond to preflight `OPTIONS` requests with the appropriate `Access-Control-Allow-*` headers before credentials are checked.
+- The server MUST support a configurable origin allow-list. The default allow-list MUST include `http://localhost:*` and `http://127.0.0.1:*` for local development.
+- The server MUST NOT include `Access-Control-Allow-Origin: *` when credentials (Authorization headers, cookies) are present in the request — this is a browser security constraint.
+- The allow-list is a deployment configuration parameter (not a protocol field). Operators extending the allow-list beyond localhost MUST document their trust model.
+
+> **Warning:** Exposing the SOX HTTP endpoint to the public internet without a reverse proxy is not recommended. Auth tokens travel in browser-visible headers. Document this clearly in deployment guides.
+
+> **Decision source:** `docs/decisions/webapp-deployment-model.md`
+
+---
+
+## 5. HTTP binding — streaming for `channels__collect`
+
+The `channels__collect` operation may block for up to the configured timeout (maximum 300 seconds). HTTP transport bindings MUST support one of the following efficient streaming mechanisms for collect responses:
+
+- **Server-Sent Events (SSE):** The server opens an SSE stream and pushes collect progress events, closing the stream when count is reached or timeout elapses.
+- **Long-poll:** The server holds the HTTP connection open until the collect condition is satisfied, then returns the full response.
+
+Implementations that support neither SSE nor long-poll MAY implement collect by polling internally and returning a regular HTTP response, but this degrades efficiency for long timeout windows and is NOT RECOMMENDED for production deployments.
+
+**Stdio binding:** The stdio transport satisfies `channels__collect` via asyncio blocking (the tool call blocks until completion). No additional transport mechanism is required for the stdio binding.
+
+> **Decision source:** `docs/decisions/fanout-collect.md`
+
+---
+
+## 6. Conformance
 
 A transport implementation is conformant when:
 
@@ -85,4 +117,7 @@ A transport implementation is conformant when:
 - [ ] Outbound buffer overflow is surfaced as an error.
 - [ ] Shutdown is clean; no resource leaks.
 - [ ] All messages serialise and deserialise conformantly against `spec/schemas/message.schema.json`.
+- [ ] HTTP binding: CORS preflight is handled; origin allow-list is configurable; localhost is in the default allow-list.
+- [ ] HTTP binding: `channels__collect` is served via SSE or long-poll (or documented degraded mode).
+- [ ] Stdio binding: `channels__collect` blocks via asyncio (no extra transport needed).
 - [ ] The implementation passes the standard conformance suite at `spec/conformance/`.

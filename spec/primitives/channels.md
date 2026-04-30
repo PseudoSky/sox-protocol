@@ -83,7 +83,54 @@ The channel primitive has no concept of "open" or "closed"; there is no channel 
 
 ---
 
-## 6. Interaction with other primitives
+## 6. Channel configuration
+
+Channels carry a server-side configuration record. The following fields are normative in v1.0:
+
+### 6.1 `replay_policy`
+
+Controls who may call the `replay` verb on this channel.
+
+| Value | Meaning |
+|---|---|
+| `subscriber` (default) | Any agent that can `recv` from this channel may also `replay` it. The same middleware auth chain is invoked for both verbs. |
+| `admin_only` | Replay requires a principal whose credential carries an `admin` capability (definition supplied by the auth middleware in use). |
+| `custom` | The channel owner registers a replay-specific middleware sub-chain. The recv chain is still invoked; the custom sub-chain runs additionally. |
+
+Default: `subscriber`. This keeps the v1.0 demo experience friction-free while providing a clear upgrade path for compliance deployments.
+
+> **Decision source:** `docs/decisions/replay-access-control.md`
+
+### 6.2 `backpressure_mode`
+
+Controls how the server responds when the recipient's pending queue exceeds its threshold.
+
+| Value | Meaning |
+|---|---|
+| `advisory` (default) | `send` always succeeds. The response carries a `backpressure` object with `state: ok|warn|over`. Senders MAY self-throttle based on `state`. |
+| `enforced` | `send` returns a `BACKPRESSURE_OVER_LIMIT` error when `queue_depth >= threshold`. No message is persisted. |
+
+The `backpressure` object is **always present** in `send` output regardless of mode. The `state` field tells senders the queue health even in advisory mode.
+
+Enforcement, when enabled, is a server-side check at `store_dispatch` time — NOT a middleware concern — because queue depth must be read atomically with the write decision.
+
+Threshold default: 1000 messages (absolute count). Per-channel override is configurable.
+
+> **Decision source:** `docs/decisions/backpressure-model.md`
+
+### 6.3 Reserved channel name prefixes
+
+The following prefixes are reserved by the protocol. Agents MUST NOT create channels with these prefixes directly:
+
+| Prefix | Owner | Access restriction |
+|---|---|---|
+| `dm/` | Protocol | Two-party only; server-enforced. Created on first send between the two named agents. |
+| `group/` | Protocol | Membership-table enforced. Created via `group_create` lifecycle verb. |
+| `sox/` | Server | Server-emitted derived channels only. Agents cannot write. |
+
+---
+
+## 7. Interaction with other primitives
 
 | Primitive | Interaction |
 |---|---|

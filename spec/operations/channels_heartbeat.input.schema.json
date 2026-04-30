@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/channels_heartbeat.input.schema.json",
+  "title": "channels__heartbeat — input",
+  "description": "Input schema for the SOX channels__heartbeat operation. Heartbeat is a control-plane verb that updates the server-side liveness record for the calling agent. It does NOT produce a message in any channel and does NOT appear in replay. The agent_id is derived from the authenticated connection — it is NOT a parameter. Normative reference: spec/primitives/presence.md and docs/decisions/heartbeat-mechanism.md.",
+  "type": "object",
+  "required": ["status"],
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["online", "busy", "offline"],
+      "description": "The agent's self-reported presence status hint. 'online': agent is running and available. 'busy': agent is mid-task and may not drain promptly. 'offline': agent is shutting down. The server may derive additional states (stale, server-offline) from timeout logic regardless of the reported status."
+    },
+    "ttl": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Optional override for the liveness TTL in seconds. When provided, the server treats the agent as 'stale' if no heartbeat is received within ttl seconds. When null, the server default applies (stale threshold: 30s, offline threshold: 90s). Useful for agents with known long processing gaps.",
+      "default": null
+    }
+  },
+  "examples": [
+    {
+      "status": "online"
+    },
+    {
+      "status": "busy",
+      "ttl": 120
+    },
+    {
+      "status": "offline",
+      "ttl": null
+    }
+  ]
+}

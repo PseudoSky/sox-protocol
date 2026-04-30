@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/channels_ack.output.schema.json",
+  "title": "channels__ack — output",
+  "description": "Output schema for the SOX channels__ack operation. Confirms the pending-state record has been updated. No channel message is created. Normative reference: spec/primitives/ack-nack.md.",
+  "type": "object",
+  "required": ["message_id", "status", "acked_at"],
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The message_id that was acknowledged. Echoed from input."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["received", "processing", "done", "nack"],
+      "description": "The new pending-state status recorded by the server. Echoed from input."
+    },
+    "acked_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating-point) at which the server recorded this status transition."
+    }
+  },
+  "examples": [
+    {
+      "message_id": "msg-0000001",
+      "status": "done",
+      "acked_at": 1714300050.0
+    },
+    {
+      "message_id": "msg-0000002",
+      "status": "nack",
+      "acked_at": 1714300051.5
+    }
+  ]
+}

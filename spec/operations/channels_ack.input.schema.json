@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/operations/channels_ack.input.schema.json",
+  "title": "channels__ack — input",
+  "description": "Input schema for the SOX channels__ack operation. ACK is a control-plane verb: it updates the server-side pending-state record for a message and does NOT write to any channel, does NOT appear in channel replay, and does NOT consume a seq slot. Normative reference: spec/primitives/ack-nack.md and docs/decisions/ack-mechanism.md.",
+  "type": "object",
+  "required": ["message_id", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The message_id of the message being acknowledged. Must match a message previously delivered to the calling agent."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["received", "processing", "done", "nack"],
+      "description": "The new pending-state status for this message. Lifecycle: pending → received → processing → done | nack. Transitions MUST be forward-only within a session. 'received': agent has the message and is about to work on it. 'processing': agent has begun work. 'done': agent has finished. 'nack': agent cannot or will not process the message."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "maxLength": 512,
+      "description": "Optional human-readable reason. SHOULD be provided when status='nack'. Free text in v1.0; a standard taxonomy of reason codes is deferred to the enforcer design document.",
+      "default": null
+    }
+  },
+  "examples": [
+    {
+      "message_id": "msg-0000001",
+      "status": "received",
+      "reason": null
+    },
+    {
+      "message_id": "msg-0000001",
+      "status": "processing",
+      "reason": null
+    },
+    {
+      "message_id": "msg-0000001",
+      "status": "done",
+      "reason": null
+    },
+    {
+      "message_id": "msg-0000002",
+      "status": "nack",
+      "reason": "Request is outside my knowledge domain for this task."
+    }
+  ]
+}

@@ -13,17 +13,18 @@ orchestrator_protocol: v1
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
-| 03-reconcile | Reconcile spec with architecture decisions | `IN_PROGRESS` | api-designer | 1 | 2026-04-30T00:00:00Z |
+| 03-reconcile | Reconcile spec with architecture decisions | `REVIEW` | api-designer | 2 | 2026-04-30T00:00:00Z |
 | 02-review | Architectural review of spec/ | `BLOCKED` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
 
-`03-reconcile` is `READY`. Spawn `api-designer`.
+`03-reconcile` is `REVIEW`. Awaiting user feedback at `.workflow/plans/spec-extraction/phases/03-reconcile.feedback-1.md` before re-dispatch.
 
 ## Transitions
 
 - 2026-04-29T00:00:00Z 02-review — initialized (BLOCKED)
 - 2026-04-29T00:00:00Z 01-extract — initialized (READY)
+- 2026-04-30T00:00:00Z 03-reconcile — IN_PROGRESS → REVIEW (attempt 2; 3 exit criteria failed: ajv x-status, packages/ grep, markdownlint 29 errors)
 
 ## Termination targets
 
