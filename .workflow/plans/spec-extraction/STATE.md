@@ -13,7 +13,7 @@ orchestrator_protocol: v1
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
-| 03-reconcile | Reconcile spec with architecture decisions | `READY` | api-designer | 0 | 2026-04-30T00:00:00Z |
+| 03-reconcile | Reconcile spec with architecture decisions | `IN_PROGRESS` | api-designer | 1 | 2026-04-30T00:00:00Z |
 | 02-review | Architectural review of spec/ | `BLOCKED` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
