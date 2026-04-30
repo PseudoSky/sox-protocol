@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: list-agents-returns-liveness-table
+spec_ref: spec/primitives/presence.md
+description: >
+  list_agents returns the server-tracked liveness table. After agent-hb-sender
+  sends a heartbeat with status=online, list_agents (called by agent-hb-watcher)
+  returns at least one entry for agent-hb-sender with presence_state=online.
+  Filtering by status_filter=["online"] returns only online agents.
+
+agents:
+  - id: agent-hb-sender
+    credential: secret-hb-sender
+  - id: agent-hb-watcher
+    credential: secret-hb-watcher
+
+sequence:
+  - id: send-heartbeat
+    as_agent: agent-hb-sender
+    operation: channels_heartbeat
+    input:
+      status: online
+    expected_output:
+      recorded_at: "{{any_number}}"
+
+  - id: list-all
+    as_agent: agent-hb-watcher
+    operation: list_agents
+    input: {}
+    expected_output:
+      agents: "{{any_array}}"
+
+  - id: list-filtered
+    as_agent: agent-hb-watcher
+    operation: list_agents
+    input:
+      status_filter: ["online"]
+    expected_output:
+      agents: "{{any_array}}"
+
+assertions:
+  - type: contains_agent
+    step: list-all
+    agent_id: agent-hb-sender
+    presence_state: online
+
+  - type: contains_agent
+    step: list-filtered
+    agent_id: agent-hb-sender
+    presence_state: online

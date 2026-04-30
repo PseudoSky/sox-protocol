@@ -611,6 +611,9 @@ class SharedMemoryTarget:
         # When set, only agent IDs in this set may call operations.
         # None means no enforcement (fixtures without an agents[] list).
         self._registered_agents: set[str] | None = None
+        # In-memory liveness table for list_agents support.
+        # Maps agent_id → {"last_heartbeat_at_ns": int, "status": str, "namespace": str|None}
+        self._liveness: dict[str, dict[str, Any]] = {}
 
     def register_agents(self, agents: list[dict[str, Any]]) -> None:
         """Register the set of known agents for identity enforcement.
@@ -793,6 +796,13 @@ class SharedMemoryTarget:
             return {"acked_at": time.time(), "status": args.get("status", "received")}
 
         if operation == "channels_heartbeat":
+            # Record into in-memory liveness table
+            import time as _time_hb
+            self._liveness[agent_id] = {
+                "last_heartbeat_at_ns": _time_hb.time_ns(),
+                "status": args.get("status", "online"),
+                "namespace": args.get("namespace"),
+            }
             # Emit presence event
             presence_body = {
                 "event": f"agent_{args.get('status', 'online')}",
@@ -840,6 +850,42 @@ class SharedMemoryTarget:
                         if len(msgs_out) >= limit:
                             break
             return {"messages": msgs_out, "has_more": False}
+
+        if operation == "list_agents":
+            import time as _time_la
+            _STALE_S = 30.0
+            _OFFLINE_S = 90.0
+            status_filter = args.get("status_filter")
+            ns_filter = args.get("namespace")
+            now_ns = _time_la.time_ns()
+            result_agents: list[dict[str, Any]] = []
+            for aid, rec in list(self._liveness.items()):
+                hb_ns = rec["last_heartbeat_at_ns"]
+                reported = rec["status"]
+                ns = rec.get("namespace")
+                if reported == "offline":
+                    state = "offline"
+                else:
+                    age_s = (now_ns - hb_ns) / 1_000_000_000
+                    if age_s >= _OFFLINE_S:
+                        state = "offline"
+                    elif age_s >= _STALE_S:
+                        state = "stale"
+                    elif reported == "busy":
+                        state = "busy"
+                    else:
+                        state = "online"
+                if status_filter is not None and state not in status_filter:
+                    continue
+                if ns_filter is not None and ns != ns_filter:
+                    continue
+                result_agents.append({
+                    "agent_id": aid,
+                    "presence_state": state,
+                    "last_heartbeat_at": hb_ns,
+                    "namespace": ns,
+                })
+            return {"agents": result_agents}
 
         if operation in ("group_create", "group_invite", "group_join",
                          "group_leave", "group_list_members"):
@@ -1129,6 +1175,34 @@ def _eval_one_assertion(
 
     elif atype == "schema_valid":
         pass  # Informational only
+
+    elif atype == "contains_agent":
+        # Assert that a list_agents step result contains a specific agent.
+        step = assertion["step"]
+        target_agent_id = assertion["agent_id"]
+        expected_state = assertion.get("presence_state")
+        result = step_results.get(step)
+        if result is None:
+            errors.append(f"contains_agent: step {step!r} not found in results")
+        else:
+            output = result.output or {}
+            agents_list = output.get("agents", [])
+            matching = [
+                a for a in agents_list
+                if isinstance(a, dict) and a.get("agent_id") == target_agent_id
+            ]
+            if not matching:
+                errors.append(
+                    f"contains_agent: step {step!r} agents list does not contain "
+                    f"agent_id={target_agent_id!r}; got {[a.get('agent_id') for a in agents_list]}"
+                )
+            elif expected_state is not None:
+                actual_state = matching[0].get("presence_state")
+                if actual_state != expected_state:
+                    errors.append(
+                        f"contains_agent: step {step!r} agent {target_agent_id!r} "
+                        f"has presence_state={actual_state!r}, expected {expected_state!r}"
+                    )
 
     else:
         errors.append(f"Unknown assertion type: {atype!r}")
