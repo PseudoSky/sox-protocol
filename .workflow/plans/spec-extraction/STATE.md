@@ -14,11 +14,11 @@ orchestrator_protocol: v1
 |---|---|---|---|---|---|
 | 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
 | 03-reconcile | Reconcile spec with architecture decisions | `DONE` | api-designer | 3 | 2026-04-30T00:00:00Z |
-| 02-review | Architectural review of spec/ | `IN_PROGRESS` | architect-reviewer | 1 | 2026-04-30T00:00:00Z |
+| 02-review | Architectural review of spec/ | `DONE` | architect-reviewer | 1 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
 
-`02-review` is `IN_PROGRESS` (attempt 1). Awaiting architect-reviewer.
+All phases DONE. Engagement complete. Verdict: PASS-WITH-NOTES (0 blocking, 14 warning, 8 nit). Planners may now consume spec/.
 
 ## Transitions
 
@@ -28,6 +28,7 @@ orchestrator_protocol: v1
 - 2026-04-30T00:00:00Z 03-reconcile — REVIEW → IN_PROGRESS (attempt 3; re-dispatch with feedback-1.md)
 - 2026-04-30T00:00:00Z 03-reconcile — IN_PROGRESS → DONE (all exit criteria pass; 02-review promoted BLOCKED → READY)
 - 2026-04-30T00:00:00Z 02-review — READY → IN_PROGRESS (attempt 1)
+- 2026-04-30T00:00:00Z 02-review — IN_PROGRESS → DONE (PASS-WITH-NOTES; 0 blocking, 14 warning, 8 nit)
 
 ## Termination targets
 
