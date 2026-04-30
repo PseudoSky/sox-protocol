@@ -12,14 +12,15 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-bootstrap | Build lint tool, system prompt, hook opt-out | `IN_PROGRESS` | python-pro | 1 | 2026-04-30T18:00:00Z |
+| 01-bootstrap | Build lint tool, system prompt, hook opt-out | `REVIEW` | python-pro | 1 | 2026-04-30T19:00:00Z |
 
 ## Currently next action
 
-`01-bootstrap` is `IN_PROGRESS`. python-pro is dispatched. Awaiting return + exit-criteria verification.
+`01-bootstrap` is `REVIEW`. Three exit-criteria failures; feedback written to `phases/01-bootstrap.feedback-1.md`. Awaiting re-dispatch.
 
 ## Transitions
 
+- 2026-04-30T19:00:00Z 01-bootstrap — REVIEW (failed verification: ruff F401, --cov module path, lint tool errors on analyzer-engagement)
 - 2026-04-30T18:00:00Z 01-bootstrap — IN_PROGRESS (orchestrator: workflow-architect)
 - 2026-04-30T00:00:00Z 01-bootstrap — initialized (READY)
 

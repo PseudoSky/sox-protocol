@@ -9,6 +9,7 @@ Before entering the main loop, verify:
 1. **Working directory.** `git rev-parse --show-toplevel` ends in `sox-protocol`. If not, stop.
 2. **Working tree clean.** `git status --porcelain` is empty. If not, stop and prompt user to commit/stash. The orchestrator commits after every transition; a dirty tree creates ambiguity about authorship.
 3. **Tool probes.** Probe for `git`, `python3`, `pytest`, `mypy`, `npx ajv`, `lint-imports`, `jq`, plus any phase-specific tools the engagement's planned phases will need. Missing tools are not fatal until that phase runs; report what's missing in the preamble.
+4. **Orchestrator-mode hook opt-out.** Set `SOX_ORCHESTRATOR_MODE=1` in the orchestrator's shell environment so SOX cadence-enforcer hooks don't re-inject inbox reminders during bash exit-criterion runs.
 
 ## Main loop (serial mode — default)
 

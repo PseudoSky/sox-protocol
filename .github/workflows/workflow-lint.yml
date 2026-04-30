@@ -1,0 +1,25 @@
+name: workflow-lint
+
+on:
+  pull_request:
+    paths:
+      - ".workflow/**"
+      - "tools/workflow_lint.py"
+      - "tools/workflow_lint_tests/**"
+      - ".github/workflows/workflow-lint.yml"
+
+jobs:
+  lint:
+    name: Validate .workflow/ engagement consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run workflow_lint --strict
+        run: python3 tools/workflow_lint.py --strict

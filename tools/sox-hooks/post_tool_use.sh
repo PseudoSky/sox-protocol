@@ -16,6 +16,10 @@
 
 set -euo pipefail
 
+if [ "${SOX_ORCHESTRATOR_MODE:-0}" = "1" ]; then
+  exit 0
+fi
+
 SOX_LOG_DIR="${SOX_LOG_DIR:-${HOME}/.sox/logs}"
 
 _log_error() {
