@@ -12,7 +12,7 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-housekeeping | License switch + SWHID + signed commits + OIN tracker | `READY` | general-purpose | 0 | 2026-04-29T00:00:00Z |
+| 01-housekeeping | License switch + SWHID + signed commits + OIN tracker | `IN_PROGRESS` | general-purpose | 1 | 2026-04-30T00:00:00Z |
 | 02-preprint | arXiv preprint draft | `BLOCKED` | content-marketer | 0 | 2026-04-29T00:00:00Z |
 
 ## Currently next action
