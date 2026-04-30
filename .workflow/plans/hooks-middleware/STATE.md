@@ -12,14 +12,14 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-adr | Resolve hooks vs middleware (ADR) | `IN_PROGRESS` | architect-reviewer | 1 | 2026-04-30T00:00:00Z |
-| 02-plan | Implementation plan | `BLOCKED` | sox-cto-system:planner | 0 | 2026-04-29T00:00:00Z |
+| 01-adr | Resolve hooks vs middleware (ADR) | `DONE` | architect-reviewer | 1 | 2026-04-30T00:00:00Z |
+| 02-plan | Implementation plan | `READY` | sox-cto-system:planner | 0 | 2026-04-30T00:00:00Z |
 | 03-implement | Build pipeline + migrate identity plugin | `BLOCKED` | python-pro | 0 | 2026-04-29T00:00:00Z |
 | 04-review | Code review | `BLOCKED` | code-reviewer | 0 | 2026-04-29T00:00:00Z |
 
 ## Currently next action
 
-`01-adr` is `READY`. Spawn `architect-reviewer`.
+`02-plan` is `READY`. Spawn `sox-cto-system:planner`.
 
 ## Transitions
 
