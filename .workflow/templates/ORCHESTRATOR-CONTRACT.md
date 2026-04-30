@@ -85,11 +85,12 @@ Examples:
    ```
    chore(orchestrator): begin parallel batch [<slug1>:<phase1>, <slug2>:<phase2>, ...]
    ```
-2. **Dispatch all batch members in a single assistant message.** Issue one `Agent` tool call per phase in the same message — Claude Code runs them concurrently.
-3. **Optional: worktree isolation.** For batches with potential filesystem contention (declared writes touch shared parents like `packages/**`), pass `isolation: "worktree"` to each Agent tool call. Each phase runs in its own worktree; the orchestrator merges branches back after all return.
-4. **Await all returns.** Do not advance until every dispatched phase has reported.
-5. **Run all exit criteria sequentially.** Per phase, run that phase's checkbox commands. Capture pass/fail per phase.
-6. **Atomic STATE.md mutation.** Update every batch member's STATE.md in one orchestrator turn. Commit one summary commit:
+2. **Dispatch all batch members in a single assistant message.** Issue one `Agent` tool call per phase in the same message — Claude Code runs them concurrently. Pass `isolation: "worktree"` only if the batch is operator-flagged or includes a HIGH-tier phase (see §Worktree isolation policy below). Otherwise share the working tree (default).
+3. **Await all returns.** Do not advance until every dispatched phase has reported.
+4. **Completion check** per phase (see §Completion check protocol). Resume any agent whose declared outputs are missing. Cap at 5 resumes per phase before treating that phase as REVIEW.
+5. **Merge resolution** — see §Merge resolution below. If non-worktree: integrity validation. If worktree: sequential merge. Halt batch on conflict.
+6. **Run all exit criteria sequentially.** Per phase (still standing after merge resolution), run that phase's checkbox commands. Capture pass/fail per phase.
+7. **Atomic STATE.md mutation.** Update every batch member's STATE.md in one orchestrator turn. Commit one summary commit:
    ```
    feat(orchestrator): parallel batch complete [<slug1>:<phase1>=DONE, <slug2>:<phase2>=DONE, ...]
 
@@ -100,7 +101,104 @@ Examples:
      - ...
    Spec-version: <git-rev of spec/>   # if any code-* phase in batch
    ```
-7. **Per-phase result-handling.** Each phase's individual outcome (DONE or REVIEW) is recorded in its own STATE.md. A REVIEW result on one phase does not block other DONE phases in the batch. Surface failures to the user as a list.
+8. **Per-phase result-handling.** Each phase's individual outcome (DONE or REVIEW) is recorded in its own STATE.md. A REVIEW result on one phase does not block other DONE phases in the batch. Surface failures to the user as a list.
+
+### Worktree isolation policy
+
+Most parallel batches share one working tree. The writes-glob conflict gate makes that safe. Worktree isolation is opt-in for two cases:
+
+1. **Operator-flagged**: user invokes with `--isolated` or sets `WORKFLOW_PARALLEL_ISOLATION=worktree`.
+2. **Heuristic**: batch contains any HIGH-tier phase (≥9 declared outputs, code-* profile) AND another phase in the batch declares writes under a shared parent directory ≤ 2 levels deep.
+
+Otherwise default to shared-tree.
+
+When isolating: create one worktree per batch member at `.workflow/worktrees/<batch_ts>-<phase_id>/`, on a feature branch `parallel/<batch_ts>-<phase_id>` rooted at the current `HEAD`. Each Agent tool call gets `isolation: "worktree"` (Claude Code handles the cwd switch). After merge resolution, prune worktrees with `git worktree remove`.
+
+### Merge resolution
+
+What the orchestrator does between agent returns and exit-criteria execution. Two paths.
+
+#### Non-worktree path (shared tree) — integrity validation
+
+After all agents return and completion check passes, the orchestrator validates that every modified file belongs to some phase's writes envelope:
+
+```bash
+# Files modified by the batch (all agents shared HEAD)
+modified=$(git diff --name-only HEAD)
+
+# For each phase, compute its claimed envelope
+#   code-with-spec phases: reservations[phase_id].files
+#   other phases: writes globs from frontmatter, expanded against the working tree
+# Build claimed = union of every phase's envelope.
+
+unclaimed = modified - claimed
+if unclaimed != ∅:
+  HALT_BATCH; record violation; mark every phase REVIEW; surface to user
+```
+
+This catches: (a) reservations-narrowing bugs in the orchestrator, (b) agents writing outside their declared envelope, (c) overlapping writes the conflict gate didn't catch (e.g. globs that intersected in practice but not in the static check).
+
+If integrity passes, exit-criteria run on the merged tree as normal.
+
+#### Worktree path — sequential merge
+
+After all agents return + completion check passes:
+
+```bash
+# Each phase committed its work to parallel/<batch_ts>-<phase_id>
+git checkout main
+
+merge_log=()
+for branch in $(git branch --list "parallel/<batch_ts>-*"); do
+  if git merge --no-ff "$branch" -m "merge: $branch into main"; then
+    merge_log+=("$branch: clean")
+  else
+    git merge --abort
+    HALT_BATCH; record conflict on this branch; surface to user
+  fi
+done
+```
+
+On any conflict: `git merge --abort` reverts the in-progress merge. Already-merged phases stay on main. Halt the batch and surface:
+
+```
+Parallel batch halted on merge conflict.
+- Successfully merged: <list>
+- Conflict on: <branch>, conflicting paths: <list>
+- Outstanding (not yet merged): <list>
+
+Options:
+1. Resolve manually: cd to the worktree, fix, git commit, then re-invoke orchestrator with `Resume parallel batch <batch_ts>`
+2. Mark this batch's remaining phases REVIEW and run them serially next session
+3. Discard the conflicting phase's branch and re-dispatch it standalone
+```
+
+The user picks. Orchestrator does NOT auto-resolve merge conflicts.
+
+After all merges succeed, run integrity validation (same check as the non-worktree path) on the merged tree. Then exit criteria.
+
+### Why integrity validation runs in BOTH paths
+
+Worktree merge succeeding is necessary but not sufficient. Two agents can each write to disjoint files within their declared envelopes AND each successfully merge to main, BUT one of them wrote to a file that wasn't in the union of their envelopes (e.g. an agent that touched `package.json` when no phase declared it). The integrity check is the same — only the failure mode differs (worktree halts mid-merge; shared-tree halts before commit).
+
+### Recovery from a halted batch
+
+A halted batch leaves the working tree in a partially-applied state (shared-tree) or on `main` with some merges applied (worktree). The orchestrator records the halt in `.workflow/parallel-batch-<batch_ts>.json`:
+
+```json
+{
+  "batch_ts": "<ISO>",
+  "phases": ["<slug>:<phase_id>", ...],
+  "isolation": "shared|worktree",
+  "halted_at": "merge|integrity|completion",
+  "reason": "<paths>",
+  "successful_phases": [...],
+  "halted_phase": "...",
+  "outstanding_phases": [...]
+}
+```
+
+`Resume parallel batch <batch_ts>` is a recognized invocation pattern (see `tools/orchestrator_prompt.md §Invocation patterns`). It reads the halt-record, applies any user resolutions, retries the remaining phases.
 
 ### Max-parallel cap
 

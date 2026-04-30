@@ -141,6 +141,7 @@ The user's invocation tells you which mode to enter. Recognise these patterns:
 | `Run .workflow/plans/<slug>/STATE.md serial mode` | Same as above. The "serial mode" tail is informative; you would have run serial anyway for a single-engagement scope. |
 | `Execute exactly one phase: <path>` | **Single-phase debug.** Mark IN_PROGRESS, dispatch the named agent with the verbatim prompt block, run completion check, run exit criteria, mark DONE or REVIEW per outcome, commit per trailer rules, then stop. Do not loop. |
 | `Resume <slug>:<phase_id>` | **Resume after manual intervention.** Read the engagement's STATE.md to find the phase's current state. If REVIEW, look for a `<plan_dir>/phases/<phase_id>.feedback-<N>.md` file and re-dispatch per `ORCHESTRATOR-CONTRACT.md §REVIEW-state recovery`. If IN_PROGRESS with missing outputs, run completion check + SendMessage resume. |
+| `Resume parallel batch <batch_ts>` | **Resume after a halted parallel batch.** Read `.workflow/parallel-batch-<batch_ts>.json`. If user has resolved a merge conflict, retry the merge for outstanding phases. If user has split the batch, re-enter parallel mode with the remaining phase set. See `ORCHESTRATOR-CONTRACT.md §Recovery from a halted batch`. |
 
 In all modes the IMPERATIVES, dispatch envelope rules, completion-check protocol, REVIEW recovery, and commit-trailer requirements apply unchanged. Mode selection only affects scope (which engagements + how many phases at once); it never relaxes discipline.
 
