@@ -217,6 +217,69 @@ Status values: `delegated` (an ADR will resolve), `resolved` (decision recorded 
 
 ---
 
+---
+
+## Items learned from the first parallel orchestrator run (2026-04-30)
+
+The first multi-engagement parallel orchestrator run successfully completed `spec-extraction/01-extract`, `identity-primitive/01-adr`, `hooks-middleware/01-adr`, and `defensive-publication/01-housekeeping`. The orchestrator surfaced five contract bugs during the run; some are fixed, some are tracked here.
+
+### TODO-WI-013 — Phase prereqs should encode "touches another engagement's outputs" (FIXED-FORWARD: orchestrator judgment, not contract)
+
+**What:** `defensive-publication/01-housekeeping` wrote SPDX headers across `spec/**/*.md`. It declares `writes:` covering those paths but has no `prereqs:` field encoding the dependency on `spec-extraction/01-extract`. The first orchestrator correctly sequenced it (extract first, then headers) by reasoning, but a blind future orchestrator could dispatch them in parallel with defensive-publication adding headers to files that don't yet exist.
+
+**Why it matters:** The DAG implied by `prereqs:` is the orchestrator's parallelism gate. Cross-engagement file-touching dependencies that are NOT in `prereqs:` are invisible to the gate. The current run got lucky.
+
+**Fix:** Two options:
+1. Declare `prereqs: [spec-extraction:01-extract]` in `defensive-publication/01-housekeeping` (cross-engagement prereqs in slug:phase form). Reduces parallelism but is honest about the dependency. Requires extending the prereq syntax.
+2. Split `defensive-publication/01-housekeeping` into two phases: license/NOTICE/CONTRIBUTING/SWHID first (no spec dependency) → SPDX header pass second (depends on spec-extraction). Preserves parallelism for the first half.
+
+Option 2 is cleaner. Defer until `defensive-publication` is re-run (currently DONE).
+
+**Effort:** 30 minutes if option 2.
+
+### TODO-WI-014 — Risk-tier heuristic missed `spec-extraction/01-extract`
+
+**What:** Phase declared 3 output bullets (`spec/**`, `docs/adr/0001-*`, `README.md`) → LOW tier. Actually wrote 28 files. No partial-completion warning in dispatch envelope. Took ~650 seconds; no resume needed but only by luck.
+
+**Resolved:** PHASE.md §Risk tier now states: "any output bullet that is a directory or glob counts as ≥4 outputs for tier purposes." Commit: see git log. Re-running `spec-extraction/01-extract` would now correctly classify as MEDIUM/HIGH.
+
+### TODO-WI-015 — Cross-reference `docs/decisions/` in every reviewer phase prompt
+
+**What:** Multiple architect decisions may not propagate fully into spec artifacts. The first orchestrator flagged these specific candidates that may have been missed in `spec-extraction/01-extract`:
+- `_sox_protocol` block in list_channels output (version negotiation decision)
+- `origin_server` field in envelope (federation-aware decision)
+- `replay` as a distinct verb in operations
+- `channels__ack` as a dedicated tool
+- `backpressure` field on send output
+
+**Resolved (partially):** `spec-extraction/02-review/phases/02-review.md` now has Review Dimension 7 explicitly cross-referencing docs/decisions/ for these and other decisions. But the same pattern should exist in every reviewer phase. Commit: see git log.
+
+**Remaining:** Add a similar cross-reference dimension to:
+- `identity-primitive/04-review`
+- `hooks-middleware/04-review`
+- `chat-webapp/03-polish`
+- (any future review phase)
+
+**Effort:** 15 minutes (4 phase-file edits, same template).
+
+### TODO-WI-016 — Lint should detect exit-criterion pipe-masking patterns
+
+**What:** Exit criteria like `cmd 2>&1 | head -30 && echo PASS` always pass because `head` exits 0. Real bug encountered during the first parallel run.
+
+**Resolved (partially):** PHASE.md §Exit criteria now documents the hard rule. Commit: see git log.
+
+**Remaining:** `tools/workflow_lint.py` should grep exit-criterion lines for `| (head|tail|grep|awk|cut|tee)\b` patterns (without `pipefail`) and warn. Strict mode could escalate to error.
+
+**Effort:** 20 minutes (workflow_lint addition + tests).
+
+### TODO-WI-017 — `markdownlint` vs `markdownlint-cli2` tool name mismatch
+
+**What:** `UNIVERSAL-CONSTRAINTS.md` previously specified `npx markdownlint`, but the installed package is `markdownlint-cli2` (different binary name). Future orchestrators running the exit criterion verbatim would get `npm error could not determine executable to run` and silently pass if not careful.
+
+**Resolved:** UNIVERSAL-CONSTRAINTS.md `spec` and `docs` profiles now specify `npx markdownlint-cli2` consistently with fallback to `--yes markdownlint-cli2@latest`. Commit: see git log.
+
+---
+
 ## Tracking
 
 When fixed, replace the severity emoji with ✅ and add a `Resolved:` line with the commit SHA. Or — if the protocol matures into a tool — wire these into `tools/workflow_lint.py` so the lint surfaces unresolved TODOs as warnings.

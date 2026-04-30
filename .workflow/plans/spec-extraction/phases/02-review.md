@@ -24,6 +24,7 @@ Independent architectural review of the spec produced by 01-extract. Verify spec
 - `/Users/nix/dev/ai/sox-protocol/docs/adr/0001-protocol-vs-implementation-split.md`
 - `/Users/nix/dev/ai/sox-protocol/docs/CONTRACTS.md`, `docs/DESIGN.md` — original design docs to compare against
 - `/Users/nix/dev/ai/sox-protocol/.workflow/plans/bucket-classification/classified.json` — protocol-tagged items (the spec must cover all of them)
+- `/Users/nix/dev/ai/sox-protocol/docs/decisions/` — architect-question decisions resolved before/during this engagement (if exists). Cross-reference: every decision should manifest somewhere in spec/.
 
 ## Prompt (verbatim)
 
@@ -49,6 +50,14 @@ REVIEW DIMENSIONS:
 5. Ambiguities. Any TODO markers in schemas (deliberately filed by 01)? Any contracts that are "implementation-defined" but vague enough that two impls could disagree?
 
 6. Cross-impl portability test. Mentally pick one item — say "groups" — and ask: could a Rust developer implement it correctly from spec/ alone, without reading packages/python? Repeat for "ack/nack" and "presence". Any "no" answer is a finding.
+
+7. Decisions → spec manifestation. For every architect decision under docs/decisions/ (if any), verify it shows up in spec/. Specifically check (these were flagged during 01-extract as candidates that may have been missed):
+   - **`_sox_protocol` block** in `list_channels` output schema (version negotiation decision)
+   - **`origin_server` field** in the envelope schema (federation-aware decision)
+   - **`replay` as a distinct verb** in `spec/operations/` (or explicit deferral with rationale)
+   - **`channels__ack` as a dedicated tool** in `spec/operations/` (or explicit deferral if reserved-envelope was chosen instead)
+   - **`backpressure` field on send response** in send.output schema (advisory-vs-enforced decision)
+   Any decision in docs/decisions/ that doesn't manifest in spec/ is either a deferral that should be marked explicitly, or a genuine miss. Both warrant a finding.
 
 OUTPUT a review report at /Users/nix/dev/ai/sox-protocol/.workflow/plans/spec-extraction/reviews/01-extract.md with:
 

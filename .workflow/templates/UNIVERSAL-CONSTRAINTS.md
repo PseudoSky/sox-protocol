@@ -63,7 +63,7 @@ Required exit criteria:
 - All JSON Schemas validate as JSON Schema 2020-12: `npx ajv compile -s 'spec/**/*.json' --spec=draft2020`
 - `scripts/lint-discipline.sh` passes (if discipline is touched)
 - No `packages/` references appear in `spec/`: `! grep -rn 'packages/' spec/`
-- All markdown files in `spec/` pass markdown-lint: `npx markdownlint spec/`
+- All markdown files in `spec/` pass markdown-lint. The repo standardizes on **`markdownlint-cli2`** (note the `-cli2` suffix; the bare `markdownlint` is a different package): `npx markdownlint-cli2 'spec/**/*.md'`. If `markdownlint-cli2` is not installed, fall back to `npx --yes markdownlint-cli2@latest 'spec/**/*.md'`.
 - All cross-references to other spec files resolve: `npx markdown-link-check 'spec/**/*.md'`
 
 ---
@@ -158,7 +158,7 @@ Required exit criteria:
 For phases that produce user-facing prose (README, why-X, blog posts, launch narrative).
 
 Required exit criteria:
-- `markdownlint` passes on touched files
+- `markdownlint-cli2` passes on touched files: `npx markdownlint-cli2 '<paths>'`
 - `markdown-link-check` passes (no broken links)
 - Spell-check passes: `cspell '<touched-files>'` (or equivalent)
 - For phases producing the README specifically: an embedded image / asciicast / video reference exists (the demo asset)

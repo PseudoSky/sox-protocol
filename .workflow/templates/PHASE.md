@@ -69,6 +69,33 @@ The orchestrator passes this block verbatim to the agent named in `agent:`. Do n
 
 Verifiable checks the orchestrator runs after the agent reports done. Each must be a concrete command or file-existence check, not a subjective judgment. The phase advances to DONE only if every check passes.
 
+### Hard rule: NEVER pipe exit-criterion commands through filtering tools
+
+A common silent-failure trap. Patterns like:
+
+```bash
+# WRONG — head always exits 0, so the && branch always runs
+some_check 2>&1 | head -30 && echo "PASS"
+
+# WRONG — grep returning 0 lines exits 1, but pipe loses the upstream exit code
+some_check | grep "expected pattern"
+```
+
+…silently swallow upstream failures. Exit-criterion commands must propagate exit codes faithfully. Correct patterns:
+
+```bash
+# Right — direct invocation; orchestrator captures exit
+some_check
+
+# Right — if you need to filter output for display, use set -o pipefail or check the code first
+set -o pipefail; some_check 2>&1 | head -30
+
+# Right — capture explicitly
+some_check; ec=$?; head -30 /tmp/output; test $ec -eq 0
+```
+
+Phase authors writing exit criteria: do NOT pipe through `head`, `tail`, `grep`, `awk`, `cut`, or `tee` unless `pipefail` is explicit. The orchestrator's verification is exit-code based; any pipe that masks the upstream exit is a contract violation.
+
 **Universal checks for this profile** are inherited from `.workflow/templates/UNIVERSAL-CONSTRAINTS.md`. The phase author MUST include the profile's required checks below (verbatim or adapted to the engagement's specific paths). Phase author MAY add engagement-specific checks; MAY NOT remove a universal check without justified exemption in the Notes section.
 
 Universal (from profile):
@@ -122,9 +149,13 @@ A phase's risk tier is derived at dispatch time from output cardinality and prof
 
 | Tier | Criteria |
 |---|---|
-| LOW | profile in {meta, review, planning, release}, OR ≤ 3 declared outputs in the `## Outputs` section |
+| LOW | profile in {meta, review, planning, release}, OR ≤ 3 declared outputs in the `## Outputs` section AND no output is a directory glob |
 | MEDIUM | profile in {docs, spec, test-harness, code-python, code-typescript} AND 4–8 declared outputs |
 | HIGH | profile in {code-with-spec, code-python, code-typescript, test-harness, spec} AND ≥9 declared outputs |
+
+**Directory-glob multiplier (real-world correction):** any output bullet that is a directory or glob (e.g. `spec/**`, `packages/python/src/sox_protocol/core/identity/**`) counts as **≥4 outputs** for tier purposes. A phase declaring `spec/**` + a single ADR + a README update counts as 4+1+1 = 6 outputs (MEDIUM), not 3 (LOW). This was learned the hard way when `spec-extraction/01-extract` declared 3 bullets but produced 28 files; LOW tier meant no partial-completion warning, and the agent ran ~650 seconds without budget guidance.
+
+When in doubt, count up not down. The cost of a false MEDIUM is one extra dispatch-envelope paragraph; the cost of a false LOW is silent truncation.
 
 Phase authors should be aware: HIGH-risk phases will have an extra dispatch envelope warning the agent to use incremental discipline and signal partial-completion if budget runs short. If a phase is consistently HIGH and consistently truncates across agent runs, that's evidence the phase prompt should be split during a deliberate phase-file authoring revision.
 
