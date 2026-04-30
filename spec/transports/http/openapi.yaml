@@ -1,0 +1,1694 @@
+components:
+  schemas:
+    SoxError:
+      properties:
+        detail:
+          nullable: true
+        error_code:
+          type: string
+        message:
+          type: string
+        retry_after:
+          nullable: true
+          type: integer
+      required:
+      - error_code
+      - message
+      type: object
+    channels_ackInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX channels__ack operation. ACK is a control-plane
+        verb: it updates the server-side pending-state record for a message and does
+        NOT write to any channel, does NOT appear in channel replay, and does NOT
+        consume a seq slot. Normative reference: spec/primitives/ack-nack.md and docs/decisions/ack-mechanism.md.'
+      properties:
+        message_id:
+          description: The message_id of the message being acknowledged. Must match
+            a message previously delivered to the calling agent.
+          minLength: 1
+          type: string
+        reason:
+          default: null
+          description: Optional human-readable reason. SHOULD be provided when status='nack'.
+            Free text in v1.0; a standard taxonomy of reason codes is deferred to
+            the enforcer design document.
+          maxLength: 512
+          type:
+          - string
+          - 'null'
+        status:
+          description: 'The new pending-state status for this message. Lifecycle:
+            pending → received → processing → done | nack. Transitions MUST be forward-only
+            within a session. ''received'': agent has the message and is about to
+            work on it. ''processing'': agent has begun work. ''done'': agent has
+            finished. ''nack'': agent cannot or will not process the message.'
+          enum:
+          - received
+          - processing
+          - done
+          - nack
+          type: string
+      required:
+      - message_id
+      - status
+      title: channels__ack — input
+      type: object
+    channels_ackOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX channels__ack operation. Confirms the
+        pending-state record has been updated. No channel message is created. Normative
+        reference: spec/primitives/ack-nack.md.'
+      properties:
+        acked_at:
+          description: Unix epoch seconds (floating-point) at which the server recorded
+            this status transition.
+          type: number
+        message_id:
+          description: The message_id that was acknowledged. Echoed from input.
+          minLength: 1
+          type: string
+        status:
+          description: The new pending-state status recorded by the server. Echoed
+            from input.
+          enum:
+          - received
+          - processing
+          - done
+          - nack
+          type: string
+      required:
+      - message_id
+      - status
+      - acked_at
+      title: channels__ack — output
+      type: object
+    channels_collectInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX channels__collect operation. Server-side
+        fan-in aggregation: blocks until ''count'' replies to a broadcast arrive,
+        or until ''timeout'' seconds elapse. Uses the pending-state record maintained
+        by channels__ack — no new backing-store primitive required. PLANNED: quorum
+        semantics, cancel verb, and multiple-collector behaviour are open questions
+        (see $comment). For efficient HTTP implementations, the transport SHOULD use
+        long-poll or SSE; the stdio binding satisfies collect via a blocking await
+        on the server''s event loop, with no extra transport requirement. Normative
+        reference: docs/decisions/fanout-collect.md.'
+      properties:
+        count:
+          description: The number of qualifying replies to wait for before returning
+            successfully. The server returns as soon as this count is reached, even
+            if timeout has not elapsed.
+          minimum: 1
+          type: integer
+        reply_to:
+          description: The message_id of the broadcast message whose replies are being
+            collected. The server monitors channels__ack calls referencing this message_id.
+          minLength: 1
+          type: string
+        status_filter:
+          default: null
+          description: 'Optional filter on ACK status values that count toward the
+            ''count'' threshold. When null or omitted, any ACK (any status) counts.
+            Example: [''done''] waits for ''count'' agents to ACK with status=done
+            before returning.'
+          items:
+            enum:
+            - received
+            - processing
+            - done
+            - nack
+            type: string
+          type:
+          - array
+          - 'null'
+        timeout:
+          description: 'Maximum number of seconds to wait for replies. When elapsed,
+            the server returns whatever has been collected so far with timed_out=true.
+            Maximum server-enforced cap: 300 seconds.'
+          minimum: 0.1
+          type: number
+      required:
+      - reply_to
+      - count
+      - timeout
+      title: channels__collect — input
+      type: object
+    channels_collectOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX channels__collect operation. Returns
+        the set of replies received before count was reached or timeout elapsed. Partial-failure
+        semantics are explicit: received + missing + timed_out together give the full
+        picture. PLANNED: quorum semantics, cancel verb, and multiple-collector behaviour
+        are open questions (see $comment). Normative reference: docs/decisions/fanout-collect.md.'
+      properties:
+        missing:
+          description: agent_ids of group members who had not ACK'd by the time the
+            collect completed. Derived from the group's membership table minus the
+            received set. Empty if all expected members responded.
+          items:
+            type: string
+          type: array
+        received:
+          description: ACK records received before the collect completed (either count
+            reached or timeout elapsed).
+          items:
+            additionalProperties: false
+            properties:
+              acked_at:
+                description: Unix epoch seconds when the ACK was recorded.
+                type: number
+              agent_id:
+                description: The agent that sent the ACK.
+                type: string
+              message_id:
+                description: The message_id of the reply (same as the reply_to input).
+                type: string
+              status:
+                enum:
+                - received
+                - processing
+                - done
+                - nack
+                type: string
+            required:
+            - agent_id
+            - message_id
+            - status
+            - acked_at
+            type: object
+          type: array
+        timed_out:
+          description: True if the collect returned because the timeout elapsed before
+            'count' qualifying replies were received. False if count was reached before
+            timeout.
+          type: boolean
+      required:
+      - received
+      - missing
+      - timed_out
+      title: channels__collect — output
+      type: object
+    channels_heartbeatInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX channels__heartbeat operation. Heartbeat
+        is a control-plane verb that updates the server-side liveness record for the
+        calling agent. It does NOT produce a message in any channel and does NOT appear
+        in replay. The agent_id is derived from the authenticated connection — it
+        is NOT a parameter. Normative reference: spec/primitives/presence.md and docs/decisions/heartbeat-mechanism.md.'
+      properties:
+        status:
+          description: 'The agent''s self-reported presence status hint. ''online'':
+            agent is running and available. ''busy'': agent is mid-task and may not
+            drain promptly. ''offline'': agent is shutting down. The server may derive
+            additional states (stale, server-offline) from timeout logic regardless
+            of the reported status.'
+          enum:
+          - online
+          - busy
+          - offline
+          type: string
+        ttl:
+          default: null
+          description: 'Optional override for the liveness TTL in seconds. When provided,
+            the server treats the agent as ''stale'' if no heartbeat is received within
+            ttl seconds. When null, the server default applies (stale threshold: 30s,
+            offline threshold: 90s). Useful for agents with known long processing
+            gaps.'
+          minimum: 1
+          type:
+          - integer
+          - 'null'
+      required:
+      - status
+      title: channels__heartbeat — input
+      type: object
+    channels_heartbeatOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX channels__heartbeat operation. Confirms
+        the server-side liveness record has been updated and returns the server-assigned
+        expiry time. Normative reference: spec/primitives/presence.md.'
+      properties:
+        agent_id:
+          description: The agent_id whose liveness record was updated. Derived from
+            the authenticated connection identity.
+          minLength: 1
+          type: string
+        expires_at:
+          description: Unix epoch seconds (floating-point) at which the server will
+            transition this agent to 'stale' if no further heartbeat is received.
+            Derived from the effective TTL (caller-supplied or server default).
+          type: number
+        recorded_at:
+          description: Unix epoch seconds (floating-point) at which the server recorded
+            this heartbeat.
+          type: number
+        status:
+          description: The status recorded by the server. Echoed from input.
+          enum:
+          - online
+          - busy
+          - offline
+          type: string
+      required:
+      - agent_id
+      - status
+      - recorded_at
+      - expires_at
+      title: channels__heartbeat — output
+      type: object
+    group_createInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX group_create operation. Creates a new
+        group channel under the group/<group-id> prefix and adds the creating agent
+        as the first active member. The caller supplies the bare group ID (without
+        prefix); the server prepends ''group/'' to form the full channel name. If
+        id_mode is ''client'', group_id is required and used as-is. If id_mode is
+        ''server'', group_id is ignored and the server assigns an opaque ID. Normative
+        reference: spec/primitives/groups.md §5.1.'
+      properties:
+        display_name:
+          description: Optional human-readable name for tooling display. Not used
+            in routing or membership enforcement.
+          maxLength: 256
+          type: string
+        group_id:
+          description: The bare group identifier without the 'group/' prefix. The
+            server prepends 'group/' to form the full channel name (e.g. 'eng-team'
+            becomes 'group/eng-team'). Required when id_mode is 'client' (default);
+            ignored when id_mode is 'server'. MUST be unique within the namespace.
+          maxLength: 128
+          minLength: 1
+          type: string
+        id_mode:
+          default: client
+          description: 'Controls group ID assignment. ''client'': the caller-supplied
+            group_id is used (group_id is required in this mode). ''server'': the
+            server assigns an opaque ID and group_id in input is ignored.'
+          enum:
+          - client
+          - server
+          type: string
+        namespace:
+          default: default
+          description: Namespace scope for the group channel. Defaults to 'default'.
+          minLength: 1
+          type: string
+        replay_policy:
+          default: subscriber
+          description: 'Controls who may call the replay verb on this group channel.
+            ''subscriber'': any active member may replay. ''admin_only'': requires
+            admin capability. ''custom'': channel owner registers a replay-specific
+            middleware sub-chain. See spec/primitives/channels.md §6.1.'
+          enum:
+          - subscriber
+          - admin_only
+          - custom
+          type: string
+      required: []
+      title: group_create — input
+      type: object
+    group_createOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX group_create operation. Returns the
+        full group channel name (with ''group/'' prefix) and the creation timestamp.
+        Normative reference: spec/primitives/groups.md §5.1.'
+      properties:
+        created_at:
+          description: 'Unix epoch seconds when the group was created. Unit: Unix
+            epoch seconds (not nanoseconds — membership-table semantics differ from
+            wire envelope ts).'
+          type: integer
+        group_id:
+          description: The full group channel name including the 'group/' prefix (e.g.
+            'group/eng-team').
+          minLength: 1
+          type: string
+      required:
+      - group_id
+      - created_at
+      title: group_create — output
+      type: object
+    group_inviteInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX group_invite operation. Invites an agent
+        to a group. The calling agent MUST be an active member of the group. The invited
+        agent''s membership status is set to ''invited''. The optional message is
+        delivered to the invited agent via the sox-invite.schema.json envelope. Normative
+        reference: spec/primitives/groups.md §5.2.'
+      properties:
+        agent_id:
+          description: The agent to invite. Must be a known agent identity in the
+            current namespace.
+          minLength: 1
+          type: string
+        group_id:
+          description: The full group channel name including the 'group/' prefix (e.g.
+            'group/eng-team').
+          minLength: 1
+          type: string
+        message:
+          description: Optional invitation message sent to the invited agent via the
+            sox-invite.schema.json envelope. Free text in v1.0.
+          maxLength: 1024
+          type: string
+      required:
+      - group_id
+      - agent_id
+      title: group_invite — input
+      type: object
+    group_inviteOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX group_invite operation. Confirms the
+        invitation was recorded. Normative reference: spec/primitives/groups.md §5.2.'
+      properties:
+        agent_id:
+          description: The agent_id that was invited, echoed from the input.
+          minLength: 1
+          type: string
+        invited:
+          description: True when the invite was successfully recorded. False if the
+            agent was already an active member (idempotent path).
+          type: boolean
+        invited_at:
+          description: Unix epoch seconds when the invitation was recorded.
+          type: integer
+      required:
+      - invited
+      - agent_id
+      - invited_at
+      title: group_invite — output
+      type: object
+    group_joinInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX group_join operation. An invited agent
+        accepts group membership. Transitions the calling agent''s membership status
+        from ''invited'' to ''active''. The calling agent MUST already have status=''invited''
+        in the group membership table. Normative reference: spec/primitives/groups.md
+        §5.3.'
+      properties:
+        group_id:
+          description: The full group channel name including the 'group/' prefix (e.g.
+            'group/eng-team').
+          minLength: 1
+          type: string
+        namespace:
+          default: default
+          description: Namespace scope. Defaults to 'default'.
+          minLength: 1
+          type: string
+      required:
+      - group_id
+      title: group_join — input
+      type: object
+    group_joinOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX group_join operation. Confirms the agent''s
+        active membership in the group. Normative reference: spec/primitives/groups.md
+        §5.3.'
+      properties:
+        group_id:
+          description: The full group channel name, echoed from the input.
+          minLength: 1
+          type: string
+        joined:
+          description: True when the calling agent's status was successfully transitioned
+            to 'active'.
+          type: boolean
+        joined_at:
+          description: Unix epoch seconds when the agent's membership was transitioned
+            to active.
+          type: integer
+        member_count:
+          description: Current count of active members in the group after the join.
+          minimum: 1
+          type: integer
+      required:
+      - joined
+      - group_id
+      - member_count
+      - joined_at
+      title: group_join — output
+      type: object
+    group_leaveInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX group_leave operation. An active member
+        voluntarily leaves a group. The server removes the calling agent from the
+        membership table. Normative reference: spec/primitives/groups.md §5.4.'
+      properties:
+        group_id:
+          description: The full group channel name including the 'group/' prefix (e.g.
+            'group/eng-team').
+          minLength: 1
+          type: string
+      required:
+      - group_id
+      title: group_leave — input
+      type: object
+    group_leaveOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX group_leave operation. Confirms the
+        calling agent has been removed from the group membership table. Normative
+        reference: spec/primitives/groups.md §5.4.'
+      properties:
+        group_id:
+          description: The full group channel name, echoed from the input.
+          minLength: 1
+          type: string
+        left:
+          description: True when the calling agent was successfully removed from the
+            membership table.
+          type: boolean
+        left_at:
+          description: Unix epoch seconds when the agent was removed from the membership
+            table.
+          type: integer
+      required:
+      - left
+      - group_id
+      - left_at
+      title: group_leave — output
+      type: object
+    group_list_membersInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX group_list_members operation. Returns
+        the current membership table for a group. The calling agent MUST be an active
+        member. Optionally annotates each member with their current presence state
+        from sox/presence. Normative reference: spec/primitives/groups.md §5.5.'
+      properties:
+        group_id:
+          description: The full group channel name including the 'group/' prefix (e.g.
+            'group/eng-team').
+          minLength: 1
+          type: string
+        include_presence:
+          default: false
+          description: When true, annotate each member with their current presence
+            state read from sox/presence. When false (default), presence_state is
+            null on all member records.
+          type: boolean
+      required:
+      - group_id
+      title: group_list_members — input
+      type: object
+    group_list_membersOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX group_list_members operation. Returns
+        the group_id and the current list of members, optionally annotated with presence
+        state. Normative reference: spec/primitives/groups.md §5.5.'
+      properties:
+        group_id:
+          description: The full group channel name, echoed from the input.
+          minLength: 1
+          type: string
+        members:
+          description: Current membership list. Each entry represents one agent in
+            the group.
+          items:
+            additionalProperties: false
+            properties:
+              agent_id:
+                description: The member agent's verified identity.
+                minLength: 1
+                type: string
+              joined_at:
+                description: Unix epoch seconds when the agent joined or was invited.
+                type: integer
+              presence_state:
+                description: Current presence state from sox/presence when include_presence=true;
+                  null otherwise or when no presence record exists.
+                type:
+                - string
+                - 'null'
+              status:
+                description: '''active'' means the agent has joined. ''invited'' means
+                  the invite was sent but not yet accepted.'
+                enum:
+                - active
+                - invited
+                type: string
+            required:
+            - agent_id
+            - status
+            - joined_at
+            type: object
+          type: array
+      required:
+      - group_id
+      - members
+      title: group_list_members — output
+      type: object
+    list_agentsInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX list_agents operation. Returns the server-tracked
+        liveness records for all agents known to this server, optionally filtered
+        by presence state. Normative reference: spec/primitives/presence.md §2.'
+      properties:
+        namespace:
+          description: If set, return only agents whose identity was authenticated
+            within this namespace. Omit to return agents across all namespaces visible
+            to the caller.
+          maxLength: 128
+          minLength: 1
+          type: string
+        status_filter:
+          description: If set, return only agents whose current server-derived presence
+            state is one of the listed values. Omit to return all agents regardless
+            of state.
+          items:
+            enum:
+            - online
+            - busy
+            - stale
+            - offline
+            type: string
+          minItems: 1
+          type: array
+          uniqueItems: true
+      title: list_agents — input
+      type: object
+    list_agentsOutput:
+      additionalProperties: false
+      description: Output schema for the SOX list_agents operation. Returns the server-tracked
+        liveness table for all agents matching the input filters. Presence states
+        are server-derived from heartbeat timing per spec/primitives/presence.md §3.
+      properties:
+        agents:
+          description: List of agent liveness records known to this server. May be
+            empty if no agents have ever sent a heartbeat, or if all known agents
+            are filtered out.
+          items:
+            additionalProperties: false
+            properties:
+              agent_id:
+                description: The authenticated agent identity (from spec/ports/identity.md).
+                  Matches the agent_id field in sox/presence channel events.
+                minLength: 1
+                type: string
+              last_heartbeat_at:
+                description: Unix timestamp (nanoseconds) of the most recent heartbeat
+                  received from this agent. Zero if the agent was registered but has
+                  never heartbeated (e.g. appeared via identity verification only).
+                minimum: 0
+                type: integer
+              namespace:
+                description: Namespace the agent authenticated into, or null if namespaces
+                  are not in use.
+                maxLength: 128
+                minLength: 1
+                type:
+                - string
+                - 'null'
+              presence_state:
+                description: Server-derived presence state. 'stale' means no heartbeat
+                  within 30s; 'offline' means no heartbeat within 90s or agent explicitly
+                  sent offline status. See spec/primitives/presence.md §3.
+                enum:
+                - online
+                - busy
+                - stale
+                - offline
+                type: string
+            required:
+            - agent_id
+            - presence_state
+            - last_heartbeat_at
+            type: object
+          type: array
+      required:
+      - agents
+      title: list_agents — output
+      type: object
+    list_channelsInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX list_channels operation. No input parameters
+        are required. The tool returns all discoverable channels. Calling with an
+        empty object {} or no arguments is valid. Normative reference: CONTRACTS.md
+        §5.4.'
+      properties: {}
+      title: '{{list_tool}} — input'
+      type: object
+    list_channelsOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX list_channels (discovery) operation.
+        Returns all channels with at least one subscriber or at least one message
+        in the backing store''s retention window (default: last 24 hours). The mandatory
+        ''_sox_protocol'' block carries version negotiation metadata — clients MUST
+        read it on first call and fail-fast if their supported version range does
+        not intersect. Normative reference: spec/protocol.md and docs/decisions/version-negotiation-mechanism.md.'
+      properties:
+        _sox_protocol:
+          additionalProperties: false
+          description: Protocol version negotiation block. MUST be present on every
+            list_channels response. Clients MUST compare their own supported version
+            range against supported_versions and fail-fast if the intersection is
+            empty. If a client skips list_channels, it assumes the latest server version
+            at its own risk.
+          properties:
+            min_client_version:
+              description: Minimum client version this server will accept (e.g. '1.0').
+                Clients whose version is below this MUST refuse to operate with this
+                server.
+              type: string
+            server_version:
+              description: 'The exact protocol version this server node is running
+                (e.g. ''1.0''). Semver-formatted: MAJOR.MINOR.'
+              type: string
+            supported_versions:
+              description: All protocol versions this server can serve (e.g. ['1.0',
+                '1.1']). Clients find their intersection with this list. An empty
+                intersection MUST cause the client to refuse to operate.
+              items:
+                type: string
+              minItems: 1
+              type: array
+          required:
+          - server_version
+          - supported_versions
+          - min_client_version
+          type: object
+        channels:
+          description: List of discoverable channels. An empty array means no channels
+            are currently active.
+          items:
+            additionalProperties: false
+            properties:
+              name:
+                description: Fully-qualified channel name.
+                minLength: 1
+                type: string
+              subscriber_count:
+                description: Number of agents currently subscribed to this channel.
+                minimum: 0
+                type: integer
+            required:
+            - name
+            - subscriber_count
+            type: object
+          type: array
+      required:
+      - channels
+      - _sox_protocol
+      title: '{{list_tool}} — output'
+      type: object
+    recvInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX recv (drain) operation. Non-blocking:
+        returns immediately with whatever messages have accumulated in the agent''s
+        local mailbox since the last drain. An empty result is always valid. Calling
+        with no arguments drains all subscribed channels. Normative reference: spec/ports/backing-store.md
+        §2.2 and spec/protocol.md.'
+      properties:
+        channels:
+          description: Optional list of channel names to drain. When null or omitted,
+            all channels the calling agent is subscribed to are drained. When provided,
+            only messages from the listed channels are returned; messages from other
+            channels remain in the mailbox.
+          items:
+            minLength: 1
+            type: string
+          type:
+          - array
+          - 'null'
+        include_meta:
+          default: true
+          description: 'When true (default), each returned message carries a ''_meta''
+            object with trace_id, middleware_timings, and server_node_id. When false,
+            ''_meta'' is omitted from all returned messages. Per-request override
+            of the server-level default (set by deployment configuration). Normative
+            reference: docs/decisions/observability-meta-mode.md.'
+          type: boolean
+        max_messages:
+          default: 50
+          description: 'Maximum number of messages to return in a single call. Within
+            each channel, the oldest messages (lowest seq) are returned first up to
+            this limit. Default: 50.'
+          maximum: 1000
+          minimum: 1
+          type: integer
+        thread_depth:
+          default: 0
+          description: 'Controls inline expansion of reply-chain ancestors. 0 (default):
+            only reply_to message IDs are included on each message — no ancestor envelopes.
+            n > 0: n ancestor envelopes are inlined per message. -1: full ancestor
+            chain is inlined (server cap applies; default server max: 50 levels).
+            Agents choose the depth per-call to balance context cost vs. thread visibility.
+            Normative reference: docs/decisions/threading-depth.md.'
+          minimum: -1
+          type: integer
+      title: '{{recv_tool}} — input'
+      type: object
+    recvOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX recv (drain) operation. Messages are
+        returned in per-channel seq order (ascending seq within each channel). Cross-channel
+        order within a single response is unspecified. Each returned message is atomically
+        marked as delivered to the calling agent — it will not be returned to the
+        same agent again. Normative reference: spec/ports/backing-store.md §2.2 and
+        §3.2, spec/protocol.md.'
+      properties:
+        drained_at:
+          description: Unix epoch seconds (floating-point) at which this drain operation
+            completed.
+          type: number
+        messages:
+          description: Ordered list of messages drained. Empty array is valid when
+            the mailbox is empty. Within each channel, messages are in ascending seq
+            order. Across channels, order is unspecified.
+          items:
+            additionalProperties: false
+            properties:
+              _meta:
+                additionalProperties: true
+                description: 'Observability metadata. Present when include_meta=true
+                  (default); absent when include_meta=false. Shape: {trace_id: string,
+                  middleware_timings: string[], server_node_id: string}.'
+                type:
+                - object
+                - 'null'
+              ancestors:
+                description: Inline ancestor envelopes when thread_depth > 0 was requested.
+                  Ordered from immediate parent (index 0) to furthest ancestor. Null
+                  when thread_depth=0 (the default). Each element is a message object
+                  with the same shape as items in this array (minus 'ancestors' to
+                  avoid infinite nesting).
+                items:
+                  additionalProperties: true
+                  type: object
+                type:
+                - array
+                - 'null'
+              body:
+                additionalProperties: true
+                description: Opaque message payload. See send.input.schema.json for
+                  advisory field conventions and spec/envelopes/ for reserved body
+                  types.
+                type: object
+              channel:
+                description: Name of the channel this message was sent to.
+                minLength: 1
+                type: string
+              correlation_id:
+                description: Caller-supplied correlation token echoed verbatim from
+                  the send call. Null if the sender did not supply one.
+                maxLength: 128
+                type:
+                - string
+                - 'null'
+              delivered_to:
+                description: List of agent_ids that have recv'd this message. Server-populated.
+                  Used for deadlock detection wait-graph computation (SHOULD-implement).
+                  May be null if the server does not track delivery sets.
+                items:
+                  type: string
+                type:
+                - array
+                - 'null'
+              message_id:
+                description: Backing-store-assigned unique identifier for this message.
+                  Use as reply_to when replying, or as the reference in channels__ack
+                  calls.
+                minLength: 1
+                type: string
+              origin_server:
+                description: server_id in federated deployments. Always null in v1.0
+                  single-server deployments. Reserved for federated v2.
+                type:
+                - string
+                - 'null'
+              reply_to:
+                description: message_id of the parent message in a thread, or null
+                  if this message is not a reply. When thread_depth > 0 was requested
+                  on recv, ancestor envelopes are inlined in the 'ancestors' field.
+                type:
+                - string
+                - 'null'
+              sender:
+                description: 'agent_id of the agent that sent the message. Server-certified:
+                  bound from the verified connection identity, not self-reported by
+                  the client.'
+                minLength: 1
+                type: string
+              sent_at:
+                description: Unix epoch seconds (floating-point) at which the backing
+                  store accepted the message. Retained for backward compatibility;
+                  seq is the authoritative ordering key.
+                type: number
+              seq:
+                description: Per-channel monotone sequence number. Authoritative ordering
+                  key within a channel. Use as the 'since' cursor in subsequent replay
+                  queries.
+                minimum: 1
+                type: integer
+              ts:
+                description: Server-assigned monotonic nanosecond timestamp. Advisory
+                  tiebreaker for cross-channel display ordering. Not globally total-ordered
+                  in multi-node or federated deployments. May be null if the server
+                  does not support nanosecond timestamps.
+                type:
+                - integer
+                - 'null'
+            required:
+            - channel
+            - sender
+            - body
+            - sent_at
+            - message_id
+            - seq
+            type: object
+          type: array
+      required:
+      - drained_at
+      - messages
+      title: '{{recv_tool}} — output'
+      type: object
+    replayInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX replay operation. Returns historical
+        messages from a channel using a per-channel seq cursor. Access is gated by
+        the channel''s replay_policy (subscriber | admin_only | custom); the default
+        is ''subscriber'', meaning the same auth chain as recv applies. Normative
+        reference: spec/primitives/channels.md (replay_policy), spec/primitives/sequence-numbers.md,
+        docs/decisions/replay-access-control.md.'
+      properties:
+        channel:
+          description: The channel to replay from. The calling agent must satisfy
+            the channel's replay_policy.
+          minLength: 1
+          type: string
+        limit:
+          default: 100
+          description: Maximum number of messages to return in a single replay call.
+            When the range contains more messages than limit, has_more=true and the
+            caller should paginate using the seq of the last returned message as the
+            next 'since'.
+          maximum: 1000
+          minimum: 1
+          type: integer
+        since:
+          description: Return messages with seq > since. Use 0 to replay from the
+            beginning of the channel. Use the seq of the last message seen to replay
+            only missed messages. This is the per-channel cursor — it refers only
+            to seq values on the specified channel.
+          minimum: 0
+          type: integer
+        until:
+          default: null
+          description: Return messages with seq <= until. When null, replay continues
+            to the current head of the channel. Combined with 'since', defines the
+            inclusive range (since, until].
+          minimum: 1
+          type:
+          - integer
+          - 'null'
+      required:
+      - channel
+      - since
+      - limit
+      title: replay — input
+      type: object
+    replayOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX replay operation. Returns historical
+        messages in ascending seq order. has_more=true signals that more messages
+        exist beyond the returned set; paginate by using the seq of the last returned
+        message as the next ''since''. Normative reference: spec/primitives/sequence-numbers.md
+        and docs/decisions/replay-access-control.md.'
+      properties:
+        has_more:
+          description: True if additional messages exist beyond the returned set within
+            the requested range (or beyond 'since' when 'until' is null). When true,
+            paginate by calling replay again with since=<last returned message seq>.
+          type: boolean
+        messages:
+          description: Historical messages in ascending seq order. Each message has
+            the same envelope shape as recv output items. Empty array is valid when
+            no messages exist in the requested range.
+          items:
+            additionalProperties: true
+            properties:
+              _meta:
+                additionalProperties: false
+                description: Observability metadata. Present when the original recv
+                  had include_meta=true; may be absent on replay if the server did
+                  not capture it. Null when not available.
+                properties:
+                  middleware_timings:
+                    description: Per-middleware timing strings in 'middleware_name:Nms'
+                      format.
+                    items:
+                      type: string
+                    type: array
+                  server_node_id:
+                    description: Identifier of the server node that processed the
+                      original send.
+                    type: string
+                  trace_id:
+                    description: Distributed trace ID.
+                    type: string
+                type:
+                - object
+                - 'null'
+              body:
+                additionalProperties: true
+                type: object
+              channel:
+                minLength: 1
+                type: string
+              correlation_id:
+                type:
+                - string
+                - 'null'
+              delivered_to:
+                description: Agent_ids that have recv'd this message. Null in single-server
+                  v1. Populated server-side as agents drain the message; used for
+                  deadlock detection wait-graph computation.
+                items:
+                  minLength: 1
+                  type: string
+                type:
+                - array
+                - 'null'
+              message_id:
+                minLength: 1
+                type: string
+              origin_server:
+                type:
+                - string
+                - 'null'
+              reply_to:
+                type:
+                - string
+                - 'null'
+              sender:
+                minLength: 1
+                type: string
+              sent_at:
+                type: number
+              seq:
+                description: Per-channel monotone sequence number. Use as the 'since'
+                  cursor for the next replay page.
+                minimum: 1
+                type: integer
+              ts:
+                type:
+                - integer
+                - 'null'
+            required:
+            - channel
+            - sender
+            - body
+            - sent_at
+            - message_id
+            - seq
+            type: object
+          type: array
+      required:
+      - messages
+      - has_more
+      title: replay — output
+      type: object
+    sendInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX send operation (tool name varies by adapter;
+        use {{send_tool}} placeholder in discipline text). Non-blocking: the tool
+        returns as soon as the backing store durably accepts the message. Normative
+        reference: spec/primitives/channels.md and spec/protocol.md.'
+      properties:
+        body:
+          additionalProperties: true
+          description: 'Opaque message payload. MUST be a JSON object. SOX does not
+            inspect or validate the body beyond requiring it to be an object. Recommended
+            advisory fields: ''type'' (string), ''subject'' (string), ''context''
+            (string), ''question'' (string), ''answer'' (string), ''urgency'' (one
+            of low/normal/high). Reserved body types with normative schemas: ''sox-error''
+            (spec/envelopes/sox-error.schema.json), ''sox-invite'' (spec/envelopes/sox-invite.schema.json).'
+          type: object
+        channel:
+          description: 'Name of the target channel. Reserved prefixes: ''dm/<sorted-pair>''
+            for direct messages (server-enforced two-party), ''group/<group-id>''
+            for managed group channels (server-enforced membership), ''sox/'' for
+            server-emitted derived channels (agents cannot write). Recommended conventions
+            for open channels: ''ticket:<id>'', ''broadcast:<topic>'', ''thread:<parent-message-id>''.'
+          maxLength: 256
+          minLength: 1
+          type: string
+        correlation_id:
+          description: 'Optional caller-supplied correlation token. Stored verbatim
+            and echoed back in recv output. Use for: request-reply pairing, thread
+            anchoring. The protocol does not enforce uniqueness. Null when not needed.'
+          maxLength: 128
+          type:
+          - string
+          - 'null'
+        idempotency_key:
+          default: null
+          description: 'Optional caller-supplied idempotency key. The server deduplicates
+            sends with the same idempotency_key within the configured TTL window (default:
+            24 hours). A duplicate send returns the original message_id and sent_at
+            without re-persisting. Callers MUST NOT rely on deduplication beyond the
+            configured TTL. Null disables idempotency dedup for this send.'
+          maxLength: 256
+          type:
+          - string
+          - 'null'
+        reply_to:
+          default: null
+          description: Optional message_id of the message this message is replying
+            to. Used for threading (combined with thread_depth on recv) and wait-graph
+            computation for deadlock detection. Null if this message is not a reply.
+          type:
+          - string
+          - 'null'
+      required:
+      - channel
+      - body
+      title: '{{send_tool}} — input'
+      type: object
+    sendOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX send operation. Returned as soon as
+        the backing store durably accepts the message. A successful response guarantees
+        the message is immediately visible to all matching watch loops and subsequent
+        recv calls (backing-store send-atomicity contract). Normative reference: spec/ports/backing-store.md
+        §2.1 and spec/protocol.md.'
+      properties:
+        backpressure:
+          additionalProperties: false
+          description: 'Backpressure signal for the target channel''s recipient queue.
+            Always present regardless of the channel''s backpressure_mode. Senders
+            SHOULD use this to self-throttle in advisory mode. In enforced mode (backpressure_mode:
+            enforced), the server returns BACKPRESSURE_OVER_LIMIT error instead of
+            a successful response when state is ''over''.'
+          properties:
+            queue_depth:
+              description: Current number of unprocessed messages in the recipient's
+                pending queue for this channel.
+              minimum: 0
+              type: integer
+            state:
+              description: 'Server-computed backpressure state. ''ok'': queue_depth
+                < threshold * 0.8. ''warn'': queue_depth >= threshold * 0.8 and <
+                threshold. ''over'': queue_depth >= threshold. Thresholds are server-computed;
+                senders receive consistent values across all concurrent sends.'
+              enum:
+              - ok
+              - warn
+              - over
+              type: string
+            threshold:
+              description: 'The absolute message count at which the queue is considered
+                at capacity. Default: 1000. Per-channel override is configurable.'
+              minimum: 1
+              type: integer
+          required:
+          - queue_depth
+          - threshold
+          - state
+          type: object
+        message_id:
+          description: Backing-store-assigned unique identifier for the message just
+            sent. Use this as the reply_to value for threaded replies, or as the reference
+            in channels__ack calls.
+          minLength: 1
+          type: string
+        sent_at:
+          description: Unix epoch seconds (floating-point) at which the backing store
+            accepted the message. Retained for backward compatibility; seq is the
+            authoritative ordering key within a channel.
+          type: number
+        seq:
+          description: Per-channel monotone sequence number assigned to this message.
+            Starts at 1 for each channel. Use as the 'since' cursor in replay queries.
+          minimum: 1
+          type: integer
+      required:
+      - sent_at
+      - message_id
+      - seq
+      - backpressure
+      title: '{{send_tool}} — output'
+      type: object
+    subscribeInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX subscribe operation. Registers the calling
+        agent''s interest in channels matching a pattern. The subscription is persisted
+        in the backing store and survives MCP server restarts. Idempotent: registering
+        the same (agent_id, pattern) pair twice produces no duplicate subscription
+        and no error. Normative reference: CONTRACTS.md §5.3 and spec/ports/backing-store.md
+        §2.3.'
+      properties:
+        pattern:
+          description: 'Channel name pattern. Two forms are supported: (1) Exact match
+            — the pattern equals the full channel name (e.g. ''ticket:ENGI-0042'').
+            (2) Glob — the pattern contains one or more ''*'' wildcards matched against
+            the full channel name string using Unix glob rules (e.g. ''ticket:ENGI-*''
+            matches ''ticket:ENGI-0001'' and ''ticket:ENGI-9999'' but not ''project:ENGI-0001'').
+            The ''*'' wildcard matches any sequence of characters including the empty
+            string. Pattern matching is case-sensitive.'
+          maxLength: 256
+          minLength: 1
+          type: string
+      required:
+      - pattern
+      title: '{{subscribe_tool}} — input'
+      type: object
+    subscribeOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX subscribe operation. Returns the list
+        of channels that currently exist in the backing store and match the registered
+        pattern. An empty array is valid — it means the subscription was registered
+        successfully but no matching channels exist yet. Future messages on matching
+        channels will still be delivered to the subscribing agent. Normative reference:
+        CONTRACTS.md §5.3.'
+      properties:
+        subscribed:
+          description: List of channel names that currently exist in the backing store
+            and match the registered pattern. This is a snapshot at subscription time;
+            the list may grow as new channels matching the pattern receive messages.
+          items:
+            minLength: 1
+            type: string
+          type: array
+      required:
+      - subscribed
+      title: '{{subscribe_tool}} — output'
+      type: object
+    unsubscribeInput:
+      additionalProperties: false
+      description: 'Input schema for the SOX unsubscribe operation. Removes channel
+        subscriptions matching the provided channel names or glob patterns. Uses the
+        same pattern syntax as the subscribe operation. Queued-but-unread messages
+        for the removed subscriptions are discarded from the calling agent''s mailbox.
+        Normative reference: spec/primitives/channels.md §3.'
+      properties:
+        channels:
+          description: 'Channel names or glob patterns to unsubscribe from. Supports
+            the same two forms as subscribe.input: (1) Exact match — full channel
+            name. (2) Glob — pattern with ''*'' wildcards using Unix glob rules. Pattern
+            matching is case-sensitive. Each entry is matched against the agent''s
+            current subscriptions; non-matching entries are silently ignored.'
+          items:
+            maxLength: 256
+            minLength: 1
+            type: string
+          minItems: 1
+          type: array
+      required:
+      - channels
+      title: unsubscribe — input
+      type: object
+    unsubscribeOutput:
+      additionalProperties: false
+      description: 'Output schema for the SOX unsubscribe operation. Reports which
+        channels were actually removed from the agent''s subscription list and how
+        many queued messages were discarded. Normative reference: spec/primitives/channels.md
+        §3.'
+      properties:
+        pending_cleared:
+          description: Count of queued-but-unread messages discarded from the agent's
+            mailbox for the unsubscribed channels. These messages will not appear
+            in future recv calls.
+          minimum: 0
+          type: integer
+        unsubscribed:
+          description: Channel names actually removed from the agent's subscription
+            list. A channel is included here only if a matching subscription existed.
+            Channels that were not subscribed are silently omitted.
+          items:
+            minLength: 1
+            type: string
+          type: array
+      required:
+      - unsubscribed
+      - pending_cleared
+      title: unsubscribe — output
+      type: object
+  securitySchemes:
+    BearerAuth:
+      description: Bearer token resolved to agent_id by the identity layer.
+      scheme: bearer
+      type: http
+info:
+  description: SOX Protocol — inter-agent channels over HTTP. All operations are POST
+    to /v1/ops/<operation>. Live push via GET /v1/stream (Server-Sent Events).
+  title: SOX Protocol HTTP Transport
+  version: '1.0'
+openapi: 3.1.0
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                properties:
+                  protocol_version:
+                    type: string
+                  status:
+                    type: string
+                  store_ok:
+                    type: boolean
+                  uptime_s:
+                    type: number
+                type: object
+          description: Server is live
+      security: []
+      summary: Server health probe
+      tags:
+      - meta
+  /v1/ops/channels_ack:
+    post:
+      operationId: channels_ack
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/channels_ackInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/channels_ackOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX channels_ack operation
+      tags:
+      - channels
+  /v1/ops/channels_collect:
+    post:
+      deprecated: true
+      operationId: channels_collect
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/channels_collectInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/channels_collectOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX channels_collect operation
+      tags:
+      - channels
+      x-experimental: true
+  /v1/ops/channels_heartbeat:
+    post:
+      operationId: channels_heartbeat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/channels_heartbeatInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/channels_heartbeatOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX channels_heartbeat operation
+      tags:
+      - channels
+  /v1/ops/group_create:
+    post:
+      operationId: group_create
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/group_createInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/group_createOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX group_create operation
+      tags:
+      - groups
+  /v1/ops/group_invite:
+    post:
+      operationId: group_invite
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/group_inviteInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/group_inviteOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX group_invite operation
+      tags:
+      - groups
+  /v1/ops/group_join:
+    post:
+      operationId: group_join
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/group_joinInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/group_joinOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX group_join operation
+      tags:
+      - groups
+  /v1/ops/group_leave:
+    post:
+      operationId: group_leave
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/group_leaveInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/group_leaveOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX group_leave operation
+      tags:
+      - groups
+  /v1/ops/group_list_members:
+    post:
+      operationId: group_list_members
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/group_list_membersInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/group_list_membersOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX group_list_members operation
+      tags:
+      - groups
+  /v1/ops/list_agents:
+    post:
+      operationId: list_agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/list_agentsInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/list_agentsOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX list_agents operation
+      tags:
+      - presence
+  /v1/ops/list_channels:
+    post:
+      operationId: list_channels
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/list_channelsInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/list_channelsOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX list_channels operation
+      tags:
+      - channels
+  /v1/ops/recv:
+    post:
+      operationId: recv
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/recvInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/recvOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX recv operation
+      tags:
+      - channels
+  /v1/ops/replay:
+    post:
+      operationId: replay
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/replayInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/replayOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX replay operation
+      tags:
+      - channels
+  /v1/ops/send:
+    post:
+      operationId: send
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/sendInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/sendOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX send operation
+      tags:
+      - channels
+  /v1/ops/subscribe:
+    post:
+      operationId: subscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/subscribeInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/subscribeOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX subscribe operation
+      tags:
+      - channels
+  /v1/ops/unsubscribe:
+    post:
+      operationId: unsubscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/unsubscribeInput'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/unsubscribeOutput'
+          description: Successful response
+        '400':
+          description: Validation error (sox-error envelope)
+        '401':
+          description: Missing or invalid credential
+        '500':
+          description: Internal server error
+      security:
+      - BearerAuth: []
+      summary: SOX unsubscribe operation
+      tags:
+      - channels
+  /v1/stream:
+    get:
+      operationId: stream
+      parameters:
+      - description: 'Resume cursor: last received seq value.'
+        in: header
+        name: Last-Event-ID
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          content:
+            text/event-stream:
+              schema:
+                type: string
+          description: SSE stream of message events
+        '401':
+          description: Missing or invalid credential
+      security:
+      - BearerAuth: []
+      summary: Live message stream (Server-Sent Events)
+      tags:
+      - streaming
+servers:
+- description: Local development
+  url: http://localhost:8765
