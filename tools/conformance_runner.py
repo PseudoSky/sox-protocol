@@ -608,6 +608,25 @@ class SharedMemoryTarget:
         self._package_path = package_path
         self._store: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # When set, only agent IDs in this set may call operations.
+        # None means no enforcement (fixtures without an agents[] list).
+        self._registered_agents: set[str] | None = None
+
+    def register_agents(self, agents: list[dict[str, Any]]) -> None:
+        """Register the set of known agents for identity enforcement.
+
+        Called by the fixture runner when the fixture declares an ``agents``
+        list.  Agents with ``registered: false`` are declared as participants
+        but are NOT provisioned in the identity system — they will receive an
+        ``unknown_agent`` error on any operation call.
+
+        Any agent_id NOT in the provisioned set will receive an error response
+        matching the sox-error envelope shape (``_rpc_error.error_code``).
+        """
+        # Only provision agents where registered is not explicitly False.
+        self._registered_agents = {
+            a["id"] for a in agents if "id" in a and a.get("registered", True)
+        }
 
     def start(self, agent_id: str) -> None:
         """Start the shared in-memory store (no subprocess)."""
@@ -652,6 +671,16 @@ class SharedMemoryTarget:
         """
         if self._store is None or self._loop is None:
             raise RuntimeError("SharedMemoryTarget not started")
+        # Enforce identity: reject unknown agents when the fixture declared
+        # an agents[] list.  This mirrors the middleware layer that will sit
+        # in front of the backing store in the full stack.
+        if self._registered_agents is not None and agent_id not in self._registered_agents:
+            return {
+                "_rpc_error": {
+                    "error_code": "unknown_agent",
+                    "message": f"Agent {agent_id!r} is not registered in this fixture",
+                }
+            }
         return self._loop.run_until_complete(
             self._dispatch(agent_id, operation, args)
         )
@@ -1163,6 +1192,12 @@ def run_fixture(
             skipped=False,
             error=f"Failed to start target: {exc}",
         )
+
+    # Register known agents for identity enforcement (SharedMemoryTarget only).
+    # Fixtures that declare an agents[] list opt in to agent-identity checking;
+    # fixtures with no agents[] list use the implicit single-agent mode.
+    if fixture.agents and hasattr(target, "register_agents"):
+        target.register_agents(fixture.agents)
 
     try:
         # Run setup steps
