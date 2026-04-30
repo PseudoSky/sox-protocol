@@ -116,6 +116,20 @@ Free-form. Risks, caveats, links to ADRs, references to upstream specs. Agent do
 - **Inputs section** — bounded reading surface. Agent loads only what it needs; context preserved.
 - **Phase file is immutable** — re-running a phase loads the same prompt. State changes (status, attempt count) live in STATE.md only.
 
+## Risk tier (computed from declared outputs)
+
+A phase's risk tier is derived at dispatch time from output cardinality and profile (per `ORCHESTRATOR-CONTRACT.md §Completion check protocol`):
+
+| Tier | Criteria |
+|---|---|
+| LOW | profile in {meta, review, planning, release}, OR ≤ 3 declared outputs in the `## Outputs` section |
+| MEDIUM | profile in {docs, spec, test-harness, code-python, code-typescript} AND 4–8 declared outputs |
+| HIGH | profile in {code-with-spec, code-python, code-typescript, test-harness, spec} AND ≥9 declared outputs |
+
+Phase authors should be aware: HIGH-risk phases will have an extra dispatch envelope warning the agent to use incremental discipline and signal partial-completion if budget runs short. If a phase is consistently HIGH and consistently truncates across agent runs, that's evidence the phase prompt should be split during a deliberate phase-file authoring revision.
+
+The author's responsibility: declare every output the agent will produce in `## Outputs` (plus the `writes:` envelope for parallelism). The orchestrator computes the risk tier from that declaration. Under-declaring outputs to game tier is self-defeating — the completion check will surface missing files and trigger resume.
+
 ## `writes:` is the envelope, not the prediction
 
 `writes:` declares the **maximum surface** an agent could legitimately touch — the *envelope*. It is NOT a prediction of the specific files the agent will write. Phase files are immutable, so `writes:` must be set once at authoring time and cover everything that could happen at dispatch time.

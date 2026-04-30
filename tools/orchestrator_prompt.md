@@ -67,6 +67,25 @@ provenance chain is broken; stop and surface to the user instead.
    that share an assistant turn. Mark every batch member `IN_PROGRESS`
    in the same orchestrator turn before dispatching, and commit one
    merge-style `chore(orchestrator): begin parallel batch [...]` commit.
+5. **Completion check before exit criteria.** After every subagent return,
+   BEFORE running exit-criteria bash, verify that every declared output
+   for the phase exists on disk. The expected set is:
+   - For `code-with-spec` phases with a planner prereq:
+     `<plan_dir>/reservations/<phase_id>.json#/files`
+   - For all other phases: every bullet under the phase file's
+     `## Outputs` section, with globs resolved against the working tree.
+   If outputs are missing, do NOT run exit criteria. Resume the same
+   agent via SendMessage with the missing-output list. Cap at 5 resumes
+   before treating as REVIEW. See `ORCHESTRATOR-CONTRACT.md §Completion
+   check protocol` for the verbatim resume message and the
+   PARTIAL_COMPLETION block format.
+6. **Risk-tier dispatch envelope.** Compute each phase's risk tier from
+   declared outputs and profile (LOW / MEDIUM / HIGH per
+   `ORCHESTRATOR-CONTRACT.md §Risk tiers`). Surface the tier in your
+   pre-flight preamble. For MEDIUM and HIGH phases, append a
+   partial-completion instruction to the dispatch envelope so the agent
+   stops cleanly with a `PARTIAL_COMPLETION:` block when budget runs
+   short, rather than truncating mid-task.
 
 ## Startup checklist
 

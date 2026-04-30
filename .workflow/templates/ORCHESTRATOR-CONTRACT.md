@@ -20,8 +20,9 @@ Before entering the main loop, verify:
    ```
 3. **Load only the chosen phase file** (`phases/<phase_id>.md`). Do NOT load other phase files unless the chosen phase's `Inputs` section cites them.
 4. **Dispatch the named agent** with the verbatim prompt block. Capture the agent's runtime ID for the commit trailer.
-5. **On agent return, run every Exit Criteria checkbox via Bash.** Capture pass/fail.
-6. **Branch:**
+5. **Completion check (BEFORE running exit criteria).** Verify that every file the agent should have produced is on disk. See [Completion check protocol](#completion-check-protocol) below. If incomplete, resume the agent via SendMessage with the missing-output list. Only proceed to step 6 once completion is confirmed.
+6. **On agent return, run every Exit Criteria checkbox via Bash.** Capture pass/fail.
+7. **Branch:**
    - **All pass:** mark phase DONE, promote phases listed in `next state` from BLOCKED → READY, append transition, `git add -A`, commit:
      ```
      feat(<slug>:<phase_id>): <one-line summary>
@@ -45,7 +46,7 @@ Before entering the main loop, verify:
      Agent: <subagent_type> (id: <runtime_agent_id>)
      ```
      Stop and surface the agent's report + failed-check output to the user. Do not advance.
-7. **Loop.**
+8. **Loop.**
 
 ## Parallel mode (opt-in)
 
@@ -200,6 +201,104 @@ You MUST NOT:
 - Auto-resolve verification failures by editing deliverables yourself. Re-spawn the agent with corrective feedback, or surface to user.
 - Skip the `Phase:` / `Agent:` trailers. Provenance is non-negotiable.
 - Bypass the planner gate for `code-with-spec` profile phases.
+
+## Completion check protocol
+
+Subagents have their own session budgets. They can stop mid-task without surfacing the truncation as an error — they return a partial response that looks well-formed but leaves declared outputs unwritten. Without a completion check, the orchestrator's next step would run exit criteria, which then fail on missing files, sending the phase to REVIEW for the wrong reason (no actual quality issue, just incomplete work).
+
+The orchestrator runs this check **between agent return and exit-criteria execution**.
+
+### What to verify
+
+For each phase, the orchestrator computes the **expected outputs set**:
+
+1. **Code-with-spec phases** that have a planner prereq: read `<plan_dir>/reservations/<phase_id>.json`. The `files` list is the authoritative expected set.
+2. **All other phases**: parse the phase file's `## Outputs` section. Every bullet is an expected path or glob. Resolve globs against the working tree to a concrete file list.
+
+Then check disk:
+
+```python
+expected = set(expected_outputs(phase))
+present  = set(p for p in expected if path_exists(p))
+missing  = expected - present
+```
+
+If `missing` is empty → proceed to exit-criteria step.
+If `missing` is non-empty → trigger resume.
+
+### Resume protocol
+
+When `missing` is non-empty, the orchestrator dispatches **SendMessage** to the same agent (using the agent runtime ID captured at initial dispatch) with this message:
+
+```text
+Resume — completion check found <N> declared outputs missing on disk:
+
+<list of missing paths, one per line>
+
+Apply each missing deliverable per the original phase prompt. The original
+hard constraints still apply (100% coverage, mypy --strict, etc.).
+
+If you stopped mid-task because you ran out of token budget, prefer to
+finish the smallest remaining file group first, then signal stop with a
+PARTIAL_COMPLETION block (see Partial-completion protocol). The orchestrator
+will resume you again.
+
+After completing the missing outputs, REPORT (≤ 100 words) what you wrote
+and whether anything is still outstanding.
+```
+
+The orchestrator records this resume in `STATE.md` transitions but does NOT increment `attempts:` (resume is not a verification failure, it's a continuation). Cap at **5 resumes** before treating as REVIEW.
+
+### Partial-completion protocol (agent side)
+
+For phases with high output cardinality (see Risk tiers below), the dispatch envelope instructs the agent to signal partial-completion if it approaches its budget:
+
+```text
+PARTIAL_COMPLETION:
+- completed_files:
+  - <path>
+  - <path>
+- remaining_files:
+  - <path>
+  - <path>
+- resume_hint: <one sentence: where the next agent should pick up>
+END_PARTIAL_COMPLETION
+```
+
+The orchestrator parses this block, persists it at `<plan_dir>/partial/<phase_id>.json`, and uses it as input to the resume SendMessage so the resumed agent has explicit pickup context.
+
+### Risk tiers
+
+A phase's risk tier is computed from declared output cardinality and profile:
+
+| Tier | Criteria | Dispatch envelope action |
+|---|---|---|
+| LOW | profile in {meta, review, planning, release}, OR ≤ 3 declared outputs | Standard envelope; no partial-completion instruction |
+| MEDIUM | profile in {docs, spec, test-harness, code-python, code-typescript} AND 4–8 declared outputs | Standard envelope + partial-completion instruction |
+| HIGH | profile in {code-with-spec, code-python, code-typescript, test-harness, spec} AND ≥9 declared outputs | Standard envelope + partial-completion instruction + incremental-commit hint ("write one logical file group, verify it imports/compiles, move to next") |
+
+Risk tier is computed automatically by the orchestrator at dispatch time. The orchestrator surfaces the tier in its preamble:
+
+```
+[PRE-FLIGHT] spec-extraction/01-extract rated HIGH
+  (declared outputs: 25, profile: spec)
+  Will use partial-completion + incremental-commit dispatch envelope
+  Will run completion check after agent return
+```
+
+### When to give up on resume
+
+After **5 consecutive resumes** that still leave outputs missing, the orchestrator treats the phase as REVIEW (not a verification failure of the agent's work, but a scope-too-large failure of the phase contract). Surface to user with:
+
+```
+Phase <slug>/<phase_id> exceeded resume limit (5 attempts, still missing N outputs).
+The phase prompt may be too broad for one agent's budget. Options:
+1. Edit the phase file to narrow scope (deliberate authoring action; immutability exception)
+2. Split into multiple phases (requires planner re-run + state-machine restructure)
+3. Continue manually
+```
+
+This is the rare case where phase immutability bends. The user decides.
 
 ## REVIEW-state recovery
 
