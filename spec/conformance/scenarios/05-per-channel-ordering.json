@@ -1,0 +1,102 @@
+{
+  "name": "05-per-channel-ordering",
+  "description": "Within a single channel, messages are returned in send-time order (ascending sent_at). Across channels, ordering is unspecified.",
+  "agents": {
+    "sender": "agent-alpha",
+    "receiver": "agent-beta"
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:order-05" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:order-05",
+        "body": { "type": "status_update", "subject": "first message", "seq": 1 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-2",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:order-05",
+        "body": { "type": "status_update", "subject": "second message", "seq": 2 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-3",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:order-05",
+        "body": { "type": "status_update", "subject": "third message", "seq": 3 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-4",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:order-05",
+        "body": { "type": "status_update", "subject": "fourth message", "seq": 4 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "send-5",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:order-05",
+        "body": { "type": "status_update", "subject": "fifth message", "seq": 5 }
+      },
+      "expect": { "sent_at": { "type": "number" }, "message_id": { "type": "string" } }
+    },
+    {
+      "id": "recv-1",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": { "max_messages": 100 },
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 5 }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "ordering",
+      "channel": "ticket:order-05",
+      "by": "sent_at",
+      "order": "ascending",
+      "recv_step": "recv-1",
+      "description": "Messages on ticket:order-05 must be in ascending sent_at order"
+    },
+    {
+      "type": "no_loss",
+      "sent_count": 5,
+      "recv_step": "recv-1",
+      "min": 5,
+      "description": "All 5 messages must be received"
+    },
+    {
+      "type": "body_seq_ascending",
+      "recv_step": "recv-1",
+      "channel": "ticket:order-05",
+      "body_field": "seq",
+      "description": "The seq field in message bodies must be in ascending order (1,2,3,4,5)"
+    }
+  ]
+}

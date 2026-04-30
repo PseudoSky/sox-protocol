@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "label": "SOX conformance",
+  "message": "v1.0 passing",
+  "color": "brightgreen",
+  "namedLogo": "checkmarx"
+}

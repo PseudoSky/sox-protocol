@@ -1,0 +1,98 @@
+{
+  "name": "01-send-and-recv",
+  "description": "Single sender, single receiver. Exact round-trip: message sent by agent-alpha is received by agent-beta. Output conforms to recv.output.schema.json.",
+  "agents": {
+    "sender": "agent-alpha",
+    "receiver": "agent-beta"
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:test-01" },
+      "expect": {
+        "subscribed": { "type": "array" }
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:test-01",
+        "body": { "type": "status_update", "subject": "hello from alpha" },
+        "correlation_id": "corr-01"
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string", "minLength": 1 }
+      },
+      "capture": ["sent_at", "message_id"]
+    },
+    {
+      "id": "recv-1",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": {
+          "type": "array",
+          "minItems": 1
+        }
+      },
+      "assertions": [
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "channel",
+          "value": "ticket:test-01"
+        },
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "sender",
+          "value": "agent-alpha"
+        },
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "correlation_id",
+          "value": "corr-01"
+        },
+        {
+          "type": "message_body_field_equals",
+          "message_index": 0,
+          "field": "type",
+          "value": "status_update"
+        },
+        {
+          "type": "message_body_field_equals",
+          "message_index": 0,
+          "field": "subject",
+          "value": "hello from alpha"
+        }
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "type": "no_loss",
+      "description": "All sent messages must be received",
+      "sent_count": 1,
+      "recv_step": "recv-1"
+    },
+    {
+      "type": "schema_valid",
+      "step": "send-1",
+      "schema": "tools/send.output.schema.json"
+    },
+    {
+      "type": "schema_valid",
+      "step": "recv-1",
+      "schema": "tools/recv.output.schema.json"
+    }
+  ]
+}

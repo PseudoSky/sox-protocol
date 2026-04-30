@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/send.output.schema.json",
+  "title": "channels__send — output",
+  "description": "Output schema for the channels__send MCP tool. Returned as soon as the message is durably accepted by the backing store. Defined in CONTRACTS.md §5.1.",
+  "type": "object",
+  "required": ["sent_at", "message_id"],
+  "additionalProperties": false,
+  "properties": {
+    "sent_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating point) at which the backing store accepted the message. This is the canonical sent_at timestamp echoed back in recv output."
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backing-store-assigned unique identifier for the message just sent."
+    }
+  },
+  "examples": [
+    {
+      "sent_at": 1714300000.0,
+      "message_id": "msg-0000001"
+    }
+  ]
+}

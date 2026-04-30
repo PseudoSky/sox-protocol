@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/decision.schema.json",
+  "title": "Decision",
+  "description": "The output of the cadence enforcer's decide() pure function. Tells the runtime adapter what action to take in response to an Event. Defined in CONTRACTS.md §3.3.",
+  "type": "object",
+  "required": ["schema_version", "action"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Protocol schema version. MUST be '1.0' for this revision."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["noop", "inject", "block"],
+      "description": "'noop': no intervention required; 'inject': runtime SHOULD inject 'message' into the agent's next-turn context; 'block': runtime SHOULD prevent the triggering action from completing and present 'message' to the agent."
+    },
+    "message": {
+      "type": ["string", "null"],
+      "description": "Human-readable message for 'inject' and 'block' actions. MUST be a non-empty string when action is 'inject' or 'block'. MUST be null when action is 'noop'."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "Machine-readable reason string for telemetry and debugging. Not presented to the agent."
+    }
+  },
+  "if": {
+    "properties": { "action": { "const": "noop" } }
+  },
+  "then": {
+    "properties": { "message": { "type": "null" } }
+  },
+  "examples": [
+    {
+      "schema_version": "1.0",
+      "action": "noop",
+      "message": null,
+      "reason": null
+    },
+    {
+      "schema_version": "1.0",
+      "action": "inject",
+      "message": "You have not checked the channels inbox in a while. Call {{recv_tool}} before continuing if you may be waiting on input.",
+      "reason": "tool_calls_since_drain >= reminder_threshold_tool_calls"
+    },
+    {
+      "schema_version": "1.0",
+      "action": "block",
+      "message": "Inbox not drained. Call {{recv_tool}} and integrate any messages before completing the task.",
+      "reason": "stop_requested with non-empty inbox and force_drain_on_stop=true"
+    }
+  ]
+}

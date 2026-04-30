@@ -1,0 +1,108 @@
+{
+  "name": "07-recv-atomicity",
+  "description": "Recv'd messages are not redelivered to the same agent. A second recv by the same agent returns empty. A concurrent recv by a different subscribed agent is unaffected.",
+  "agents": {
+    "sender": "agent-alpha",
+    "receiver_a": "agent-beta",
+    "receiver_b": "agent-gamma"
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:atom-07" },
+      "expect": { "subscribed": { "type": "array" } }
+    },
+    {
+      "agent": "agent-gamma",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:atom-07" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:atom-07",
+        "body": { "type": "status_update", "subject": "atomic message" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string" }
+      },
+      "capture": ["message_id"]
+    },
+    {
+      "id": "wait-for-buffer",
+      "type": "sleep",
+      "milliseconds": 500,
+      "description": "Allow listener to buffer the message"
+    },
+    {
+      "id": "recv-beta-first",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      }
+    },
+    {
+      "id": "recv-beta-second",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array" }
+      }
+    },
+    {
+      "id": "recv-gamma",
+      "agent": "agent-gamma",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "no_redelivery",
+      "description": "Second recv by agent-beta must return empty (message already drained)",
+      "recv_step": "recv-beta-second",
+      "expected_count": 0
+    },
+    {
+      "type": "independent_delivery",
+      "description": "agent-gamma's recv is unaffected by agent-beta having already drained",
+      "recv_step": "recv-gamma",
+      "min": 1
+    },
+    {
+      "type": "no_loss",
+      "description": "First recv by agent-beta must have received the message",
+      "sent_count": 1,
+      "recv_step": "recv-beta-first",
+      "min": 1
+    },
+    {
+      "type": "message_id_present",
+      "recv_step": "recv-beta-first",
+      "capture_ref": "send-1.message_id",
+      "description": "The message received by agent-beta on first drain must match the sent message_id"
+    },
+    {
+      "type": "message_id_present",
+      "recv_step": "recv-gamma",
+      "capture_ref": "send-1.message_id",
+      "description": "The same message must also be independently deliverable to agent-gamma"
+    }
+  ]
+}

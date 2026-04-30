@@ -1,0 +1,207 @@
+name: spec-lint
+
+on:
+  push:
+    paths:
+      - "spec/**"
+      - "scripts/lint-discipline.sh"
+      - ".github/workflows/spec-lint.yml"
+  pull_request:
+    paths:
+      - "spec/**"
+      - "scripts/lint-discipline.sh"
+      - ".github/workflows/spec-lint.yml"
+
+jobs:
+  spec-lint:
+    name: Validate spec/ artefacts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Node.js — needed for ajv-cli
+      # -----------------------------------------------------------------------
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # -----------------------------------------------------------------------
+      # Install ajv-cli with JSON Schema 2020-12 support
+      # ajv-formats is included for format keywords (date-time, uri, etc.)
+      # -----------------------------------------------------------------------
+      - name: Install ajv-cli
+        run: |
+          npm install --global ajv-cli@5 ajv-formats@3
+
+      # -----------------------------------------------------------------------
+      # Step 1: Validate all JSON Schema files with ajv (2020-12 draft)
+      # Each schema is validated as a meta-schema-valid document.
+      # We run ajv compile (schema syntax check) for every .schema.json file.
+      # -----------------------------------------------------------------------
+      - name: Validate schemas (ajv compile — JSON Schema 2020-12)
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          find spec/schemas -name "*.schema.json" | sort | while IFS= read -r schema_file; do
+            echo "Compiling: ${schema_file}"
+            if ajv compile \
+                --spec=draft2020 \
+                --strict=false \
+                -s "${schema_file}"; then
+              echo "  OK: ${schema_file}"
+            else
+              echo "  FAIL: ${schema_file}" >&2
+              FAILED=$(( FAILED + 1 ))
+            fi
+          done
+
+          # ajv compile in a subshell — re-run to capture exit codes properly
+          FAILED=0
+          while IFS= read -r schema_file; do
+            echo "Compiling: ${schema_file}"
+            ajv compile --spec=draft2020 --strict=false -s "${schema_file}" || FAILED=$(( FAILED + 1 ))
+          done < <(find spec/schemas -name "*.schema.json" | sort)
+
+          if [[ "${FAILED}" -gt 0 ]]; then
+            echo ""
+            echo "ERROR: ${FAILED} schema(s) failed ajv compile" >&2
+            exit 1
+          fi
+          echo ""
+          echo "All schemas compiled successfully."
+
+      # -----------------------------------------------------------------------
+      # Step 2: Validate example instances within each schema against the
+      # schema itself. We extract each element of the top-level "examples"
+      # array and validate it against the schema using ajv validate.
+      # -----------------------------------------------------------------------
+      - name: Validate schema examples
+        run: |
+          set -euo pipefail
+          FAILED=0
+
+          while IFS= read -r schema_file; do
+            # Check if schema has examples; skip if not
+            example_count="$(python3 -c "
+          import json, sys
+          with open('${schema_file}') as f:
+              s = json.load(f)
+          print(len(s.get('examples', [])))
+          " 2>/dev/null || echo 0)"
+
+            if [[ "${example_count}" -eq 0 ]]; then
+              echo "SKIP (no examples): ${schema_file}"
+              continue
+            fi
+
+            echo "Validating ${example_count} example(s) in: ${schema_file}"
+
+            # Write each example to a temp file and validate
+            for i in $(seq 0 $(( example_count - 1 ))); do
+              tmp="$(mktemp /tmp/sox-example-XXXXXX.json)"
+              python3 -c "
+          import json, sys
+          with open('${schema_file}') as f:
+              s = json.load(f)
+          ex = s['examples'][$i]
+          print(json.dumps(ex))
+          " > "${tmp}" 2>/dev/null
+
+              if ajv validate \
+                  --spec=draft2020 \
+                  --strict=false \
+                  -s "${schema_file}" \
+                  -d "${tmp}" 2>&1; then
+                echo "  example[$i]: OK"
+              else
+                echo "  example[$i]: FAIL in ${schema_file}" >&2
+                FAILED=$(( FAILED + 1 ))
+              fi
+              rm -f "${tmp}"
+            done
+          done < <(find spec/schemas -name "*.schema.json" | sort)
+
+          if [[ "${FAILED}" -gt 0 ]]; then
+            echo ""
+            echo "ERROR: ${FAILED} schema example(s) failed validation" >&2
+            exit 1
+          fi
+          echo ""
+          echo "All schema examples validated successfully."
+
+      # -----------------------------------------------------------------------
+      # Step 3: Run the discipline-anchor linter
+      # -----------------------------------------------------------------------
+      - name: Lint discipline document
+        run: |
+          chmod +x scripts/lint-discipline.sh
+          scripts/lint-discipline.sh spec/discipline/discipline.md
+
+      # -----------------------------------------------------------------------
+      # Step 4: Verify no machine-readable file under spec/ imports from or
+      # $ref-points into the packages/ directory.
+      #
+      # What this check catches:
+      #   - JSON Schema $ref values containing "packages/"
+      #   - Any import/require/include statements referencing packages/ in
+      #     shell scripts or YAML files under spec/
+      #
+      # What this check deliberately does NOT flag:
+      #   - Documentation prose in spec/README.md and spec/ports/*.md that
+      #     describes the spec/package relationship in human-readable text
+      #     (those files explain *how* packages consume spec/, which is correct).
+      #   - Negative requirements in port contracts such as
+      #     "MUST NOT include content from packages/" (these prohibit coupling).
+      #
+      # The rule: no schema $ref, no executable code path, and no YAML/JSON
+      # structural field under spec/ may point into packages/.
+      # -----------------------------------------------------------------------
+      - name: Check spec/ schemas and scripts for packages/ references
+        run: |
+          set -euo pipefail
+          echo "Checking spec/schemas/ and spec/conformance/ for 'packages/' references..."
+          FAILED=0
+
+          # JSON schemas: any occurrence of "packages/" inside a .schema.json file
+          # indicates a $ref or description that escapes into the package tree.
+          if grep -r "packages/" spec/schemas/ 2>/dev/null; then
+            echo "ERROR: Found 'packages/' reference in spec/schemas/." >&2
+            FAILED=$(( FAILED + 1 ))
+          else
+            echo "Clean: spec/schemas/ has no 'packages/' references."
+          fi
+
+          # conformance/ machine-readable artefacts (populated at M6): same prohibition.
+          # Check only .sh, .json, and .yml files — NOT .md prose documentation.
+          # Documentation in spec/conformance/README.md may refer to packages/ in
+          # human-readable examples (e.g. "run packages/python/tests/..."); that is
+          # intentional and not a machine-readable dependency.
+          if [[ -d spec/conformance ]]; then
+            CONF_FAILED=0
+            while IFS= read -r conf_file; do
+              if grep -l "packages/" "${conf_file}" 2>/dev/null; then
+                echo "ERROR: Found 'packages/' reference in ${conf_file}" >&2
+                CONF_FAILED=$(( CONF_FAILED + 1 ))
+              fi
+            done < <(find spec/conformance \( -name "*.sh" -o -name "*.json" -o -name "*.yml" \))
+            if [[ "${CONF_FAILED}" -gt 0 ]]; then
+              FAILED=$(( FAILED + CONF_FAILED ))
+            else
+              echo "Clean: spec/conformance/ machine-readable files have no 'packages/' references."
+            fi
+          else
+            echo "SKIP: spec/conformance/ not yet populated (pre-M6)."
+          fi
+
+          if [[ "${FAILED}" -gt 0 ]]; then
+            echo ""
+            echo "ERROR: spec/ machine-readable artefacts reference packages/ — forbidden." >&2
+            exit 1
+          fi
+          echo ""
+          echo "packages/ isolation check PASSED."

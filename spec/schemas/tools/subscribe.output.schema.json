@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/subscribe.output.schema.json",
+  "title": "channels__subscribe — output",
+  "description": "Output schema for the channels__subscribe MCP tool. Returns the list of currently-existing channels matched by the registered pattern. Defined in CONTRACTS.md §5.3.",
+  "type": "object",
+  "required": ["subscribed"],
+  "additionalProperties": false,
+  "properties": {
+    "subscribed": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "List of channel names that currently exist in the backing store and match the registered pattern. An empty array means the pattern was registered successfully but no matching channels exist yet; future messages on matching channels will still be delivered."
+    }
+  },
+  "examples": [
+    {
+      "subscribed": []
+    },
+    {
+      "subscribed": ["ticket:ENGI-0042", "ticket:ENGI-0043"]
+    }
+  ]
+}

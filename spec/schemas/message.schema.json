@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/message.schema.json",
+  "title": "Message",
+  "description": "A single message element as returned in the 'messages' array of the channels__recv tool output (CONTRACTS.md §5.2). This is the wire representation of a stored message delivered to a receiving agent.",
+  "type": "object",
+  "required": ["channel", "sender", "body", "sent_at", "message_id"],
+  "additionalProperties": false,
+  "properties": {
+    "channel": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Name of the channel this message was sent to."
+    },
+    "sender": {
+      "type": "string",
+      "minLength": 1,
+      "description": "agent_id of the agent that sent the message."
+    },
+    "body": {
+      "type": "object",
+      "description": "Opaque message payload. SOX places no constraints on the body shape beyond it being a JSON object. See CONTRACTS.md §9 for recommended reserved field names (type, subject, context, question, answer, urgency).",
+      "additionalProperties": true
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "Optional caller-supplied correlation token for request-reply matching or at-least-once deduplication. Null if the sender did not supply one."
+    },
+    "sent_at": {
+      "type": "number",
+      "description": "Unix epoch seconds (floating point) at which the message was accepted by the backing store."
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Backing-store-assigned unique identifier for this message."
+    }
+  },
+  "examples": [
+    {
+      "channel": "ticket:ENGI-0042",
+      "sender": "agent-alpha",
+      "body": {
+        "type": "clarification_request",
+        "subject": "Which database schema version should I target?",
+        "question": "The task mentions schema v2 but the repo shows v3 in production. Which do I use?",
+        "urgency": "normal"
+      },
+      "correlation_id": "req-001",
+      "sent_at": 1714300000.0,
+      "message_id": "msg-0000001"
+    },
+    {
+      "channel": "broadcast:status",
+      "sender": "agent-beta",
+      "body": {
+        "type": "status_update",
+        "subject": "Auth rewrite complete",
+        "context": "PR #42 is open for review."
+      },
+      "correlation_id": null,
+      "sent_at": 1714300200.0,
+      "message_id": "msg-0000002"
+    }
+  ]
+}

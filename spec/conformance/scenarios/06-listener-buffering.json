@@ -1,0 +1,77 @@
+{
+  "name": "06-listener-buffering",
+  "description": "Message arrives at the server before recv is called. The listener's watch-loop must have buffered the message so that the first recv call returns it immediately (latency property).",
+  "agents": {
+    "sender": "agent-alpha",
+    "receiver": "agent-beta"
+  },
+  "setup": [
+    {
+      "agent": "agent-beta",
+      "tool": "channels__subscribe",
+      "args": { "pattern": "ticket:buffer-06" },
+      "expect": { "subscribed": { "type": "array" } }
+    }
+  ],
+  "steps": [
+    {
+      "id": "send-1",
+      "agent": "agent-alpha",
+      "tool": "channels__send",
+      "args": {
+        "channel": "ticket:buffer-06",
+        "body": { "type": "status_update", "subject": "buffered message" }
+      },
+      "expect": {
+        "sent_at": { "type": "number" },
+        "message_id": { "type": "string" }
+      },
+      "capture": ["message_id", "sent_at"]
+    },
+    {
+      "id": "wait-for-buffer",
+      "type": "sleep",
+      "milliseconds": 500,
+      "description": "Give the listener's watch-loop time to pick up the message and buffer it before recv is called"
+    },
+    {
+      "id": "recv-1",
+      "agent": "agent-beta",
+      "tool": "channels__recv",
+      "args": {},
+      "expect": {
+        "drained_at": { "type": "number" },
+        "messages": { "type": "array", "minItems": 1 }
+      },
+      "assertions": [
+        {
+          "type": "message_field_equals",
+          "message_index": 0,
+          "field": "channel",
+          "value": "ticket:buffer-06"
+        },
+        {
+          "type": "message_body_field_equals",
+          "message_index": 0,
+          "field": "subject",
+          "value": "buffered message"
+        }
+      ]
+    }
+  ],
+  "assertions": [
+    {
+      "type": "no_loss",
+      "description": "The message sent before recv must be present in recv output",
+      "sent_count": 1,
+      "recv_step": "recv-1",
+      "min": 1
+    },
+    {
+      "type": "message_id_present",
+      "recv_step": "recv-1",
+      "capture_ref": "send-1.message_id",
+      "description": "The specific message sent must appear in the recv output by message_id"
+    }
+  ]
+}

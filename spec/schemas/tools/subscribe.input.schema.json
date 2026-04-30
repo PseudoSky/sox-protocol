@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sox-protocol.dev/spec/schemas/tools/subscribe.input.schema.json",
+  "title": "channels__subscribe — input",
+  "description": "Input schema for the channels__subscribe MCP tool. Registers the calling agent's interest in channels matching a pattern. Subscription persists for the agent's lifetime in the backing store. Defined in CONTRACTS.md §5.3.",
+  "type": "object",
+  "required": ["pattern"],
+  "additionalProperties": false,
+  "properties": {
+    "pattern": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Channel name pattern. Supports '*' glob wildcard (e.g. 'ticket:ENGI-*' matches 'ticket:ENGI-0001', 'ticket:ENGI-0042', etc.) and exact match (e.g. 'agent:agent-beta'). Pattern matching semantics follow Unix glob rules applied to the full channel name string."
+    }
+  },
+  "examples": [
+    {
+      "pattern": "ticket:ENGI-0042"
+    },
+    {
+      "pattern": "ticket:ENGI-*"
+    },
+    {
+      "pattern": "broadcast:*"
+    }
+  ]
+}
