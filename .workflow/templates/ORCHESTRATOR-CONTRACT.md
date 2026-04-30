@@ -472,16 +472,44 @@ This guarantees a green DONE chain at engagement-completion time means *every* p
 
 ## Architect-question resolution flow
 
-Architect questions surfaced during `bucket-classification` (or any other engagement) require a decision before downstream engagements that depend on them can proceed. Resolution is itself an orchestrator-dispatched action:
+Architect questions surfaced during `bucket-classification` (or any other engagement) require a decision before downstream engagements that depend on them can proceed. Resolution is **proactively** orchestrator-dispatched, not reactive.
 
-1. The orchestrator detects an unresolved architect question gating a `READY` phase (e.g. `identity-primitive/01-adr` references the credential-primitive question — already resolved at ADR phase. But broader cross-engagement questions surface from `bucket-classification/result.md`).
-2. The orchestrator dispatches `workflow:workflow-architect` with the question text + relevant context (engagement objectives, prior research memory, related phase contracts).
-3. `workflow-architect` returns a decision (or escalates to user with options).
-4. The orchestrator records the decision in `docs/decisions/<question-slug>.md` (lightweight ADR-style), then unblocks the affected phases.
+### Proactive scan (runs at the start of every orchestrator invocation)
 
-For questions that genuinely require human judgment (e.g. brand naming, budget commitments), the architect surfaces them to the user with the candidate options laid out; the user decides; the orchestrator records the decision.
+Before entering the main loop (serial or parallel), the orchestrator:
 
-This means: **the consolidated architect-question queue from `bucket-classification` is not a dead-end document — it is the input list for orchestrator-dispatched architect runs.**
+1. **Reads the architect-question queue** from `.workflow/plans/bucket-classification/result.md` (the canonical consolidated list) and `.workflow/plans/bucket-classification/classified.json#/architect_questions`.
+2. **Cross-references each question with engagement ADR phases.** Some questions map to a specific engagement's ADR phase (e.g. Q1 "credential primitive" → `identity-primitive/01-adr`; Q3 "middleware vs hooks" → `hooks-middleware/01-adr`). These are **delegated** — the ADR phase will resolve them as part of its normal work; the orchestrator marks them `delegated_to: <slug>/<phase_id>` in a tracking file at `.workflow/decisions/INDEX.md` and does NOT pre-resolve them.
+3. **Identifies orphan questions** — questions with no corresponding ADR phase in any engagement (e.g. backpressure advisory-vs-enforced, idempotency TTL, replay access control, seq global-vs-per-channel for federation). These are the orchestrator's responsibility.
+4. **For each orphan question**, the orchestrator dispatches `workflow:workflow-architect` with: the question text, its source-section context, the relevant engagement objectives, any prior research memory, the broader vision document. The architect returns a decision OR an escalation-to-user with explicit candidate options.
+5. **Records the decision** at `docs/decisions/<question-slug>.md` (lightweight ADR-style: status, context, decision, consequences). Updates `.workflow/decisions/INDEX.md` with status (`resolved | escalated | delegated`).
+6. **Then enters the main loop.** Phases that depend on resolved questions can now advance with the decision available as input.
+
+For questions that genuinely require human judgment (brand naming, budget commitments, scope cuts), the architect surfaces them to the user with candidate options laid out; the user decides; the orchestrator records the decision.
+
+### Question-ADR mapping table (canonical)
+
+This mapping is computed by the orchestrator from each engagement's ADR phase frontmatter. Phase authors signal "this ADR resolves architect question N" by including the question text or a stable question slug in the ADR phase's `Inputs` section or `## Notes`. The orchestrator's scan picks this up.
+
+### Reactive fallback
+
+If a READY phase is gated by an unresolved orphan question that the proactive scan missed (e.g. a new question was added to the queue mid-run), the orchestrator falls back to the reactive flow: dispatch architect, record, unblock. This is a safety net, not the main path.
+
+### Hard rule
+
+**The user does not run architect-question resolution by hand.** The orchestrator handles it. If the user finds themselves writing `docs/decisions/<question>.md` manually, that's a contract violation — the orchestrator should have caught it. The invocation patterns `Run .workflow/`, `Run .workflow/plans/<slug>/STATE.md`, and `Resolve architect questions` all trigger the proactive scan as their first step.
+
+### `Resolve architect questions` invocation
+
+For when the user wants to resolve the queue without advancing any phases (e.g. before a long parallel run, to make sure no decisions surface mid-batch):
+
+```
+Resolve architect questions [from <plan_dir>/result.md]
+```
+
+This runs the proactive scan + architect dispatches, then exits without entering the main loop. Useful as a "stage-the-decisions" step.
+
+This means: **the consolidated architect-question queue from `bucket-classification` is not a dead-end document — it is the input list for orchestrator-dispatched architect runs that happen automatically at the start of every subsequent invocation.**
 
 ## Dispatch constraints (token budget)
 
