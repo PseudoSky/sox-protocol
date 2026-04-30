@@ -272,6 +272,12 @@ def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
             },
         }
 
+    # --- Explicit allowlist entry ---
+    # Ensures the server is callable in all permission modes, not just 'auto'.
+    allowed: list[dict[str, Any]] = settings.setdefault("allowedMcpServers", [])
+    if not any(e.get("serverName") == _MCP_SERVER_NAME for e in allowed):
+        allowed.append({"serverName": _MCP_SERVER_NAME})
+
     updated = json.dumps(settings, sort_keys=True)
     if updated == original:
         return False

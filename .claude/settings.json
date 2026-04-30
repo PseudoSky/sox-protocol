@@ -46,5 +46,10 @@
         "SOX_BACKING_STORE": "sqlite:////Users/nix/dev/ai/sox-protocol/.sox/messages.db"
       }
     }
-  }
+  },
+  "allowedMcpServers": [
+    {
+      "serverName": "sox"
+    }
+  ]
 }
