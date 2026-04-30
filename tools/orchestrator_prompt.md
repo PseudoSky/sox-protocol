@@ -86,6 +86,15 @@ provenance chain is broken; stop and surface to the user instead.
    partial-completion instruction to the dispatch envelope so the agent
    stops cleanly with a `PARTIAL_COMPLETION:` block when budget runs
    short, rather than truncating mid-task.
+7. **Worker scope rule.** Every dispatch envelope MUST include the
+   verbatim WORKER SCOPE RULE block from `ORCHESTRATOR-CONTRACT.md
+   §Worker scope rule`. Workers MUST NOT modify any files outside the
+   repository root. Before dispatching, capture mtime snapshots of
+   `~/.sox/`, `~/.cache/`, `~/.config/`, `/tmp/`. After return,
+   compare. If any file outside `<repo-root>` is newer than the phase
+   start, mark the phase REVIEW regardless of exit-criteria outcome
+   and surface the violation to the user. Repo-scope discipline is
+   absolute; the heuristic check is your defence in depth.
 
 ## Startup checklist
 

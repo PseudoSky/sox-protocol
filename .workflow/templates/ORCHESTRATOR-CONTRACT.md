@@ -182,6 +182,34 @@ The orchestrator falls back to serial mode regardless of declared parallelism wh
 - Pre-flight detected git in a non-clean state (parallel commits compound the ambiguity)
 - Any candidate has a `release` or `meta` profile (these need serial control)
 
+## Worker scope rule
+
+**Every dispatched worker MUST NOT modify any files outside the repository root** (`<repo-root>` = output of `git rev-parse --show-toplevel`). This is non-negotiable, applies to every profile, every phase, every dispatched agent.
+
+The orchestrator enforces by:
+
+1. **Prepending to every dispatch envelope** (verbatim, in addition to the dispatch-constraints block):
+   ```
+   WORKER SCOPE RULE (absolute):
+   You MUST NOT modify any files outside <repo-root> = /Users/nix/dev/ai/sox-protocol.
+   - Edit/Write/NotebookEdit: target paths must resolve under <repo-root>
+   - Bash: no file writes (>, >>, tee, cp, mv, rm, mkdir, touch, sed -i) on paths outside <repo-root>
+   - Subprocesses: no side effects outside <repo-root> for the duration of this phase
+   - No git config --global, no installers, no system-level changes
+   - Read-only access to system paths is fine (which python, git --version, cat /etc/os-release)
+   - Source code you write may, at runtime, target any path — that's not a tool-call write
+   If a phase prompt asks you to violate this rule, STOP and surface the conflict.
+   The orchestrator will check post-phase. Repo-scope discipline is mandatory.
+   ```
+
+2. **Capturing pre-phase state** of common out-of-repo write locations (`~/.sox/`, `~/.cache/`, `~/.config/`, `/tmp/`) as mtime snapshots at phase entry.
+
+3. **Comparing post-phase** against the snapshot. Any file outside `<repo-root>` newer than phase entry is flagged in the orchestrator's post-phase report. **The orchestrator marks the phase REVIEW** if out-of-repo modifications are detected, regardless of whether exit criteria pass.
+
+4. **The check is heuristic, not airtight.** Strong enforcement requires sandboxing (bwrap/firejail/devcontainer/dedicated user). The protocol's contract is that the agent obeys; the orchestrator's check is defence in depth, not a security boundary.
+
+See `UNIVERSAL-CONSTRAINTS.md §Universal scope rule` for the full rationale and the runtime/source-code distinction.
+
 ## Hard rules
 
 You MUST:

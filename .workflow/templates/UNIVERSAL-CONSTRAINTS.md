@@ -6,6 +6,42 @@ This file is referenced by `templates/PHASE.md`. Profiles are the canonical cont
 
 ---
 
+## Universal scope rule (applies to every profile)
+
+**Workers MUST NOT modify any files outside the repository root** (`<repo-root>` = `git rev-parse --show-toplevel`). This is absolute and applies to every profile, every phase, every agent dispatched by the orchestrator.
+
+What this means:
+
+- **Edit / Write / NotebookEdit tool calls**: target paths must resolve under `<repo-root>`. No edits to `~/`, `/tmp/`, `/opt/`, `/etc/`, system directories, other repositories, parent directories of the repo, or any user-home or system path.
+- **Bash tool calls**: must not perform file writes (`>`, `>>`, `tee`, `cp`, `mv`, `rm`, `mkdir`, `touch`, `sed -i`, etc.) on paths outside `<repo-root>`. Read-only operations (status checks, version probes) on system paths are permitted.
+- **Subprocess spawning**: any `python`, `node`, `make`, etc. invocations must not have side effects outside `<repo-root>` for the duration of the phase. Long-running daemons / installers / system-level changes are forbidden.
+- **No `git config --global`** or any other operation that mutates global git/shell/system state.
+
+What this does NOT prohibit:
+
+- **Source code that, when later executed, writes to runtime paths.** A phase may produce a Python module that opens `~/.sox/logs/identity-failures.jsonl` for append at runtime — that's a *runtime* effect of the deployed code, not the agent's *tool-call* effect during the phase. The agent writes the source file inside `<repo-root>`; the source file's behaviour at runtime is its own concern.
+- **Read-only access to system paths.** `git --version`, `which python`, `cat /etc/os-release` etc. are fine. The constraint is on *writes*, not reads.
+
+### Verification
+
+The orchestrator captures the working-tree-clean state at phase entry and at phase exit. Any file modified during the phase that is not under `<repo-root>` is detectable post-hoc by:
+
+```bash
+# At phase entry
+find ~/.sox ~/.config /tmp /opt -newer /tmp/phase_start_marker -type f 2>/dev/null > /tmp/touched_outside_repo
+```
+
+Heuristic, not airtight. Strong enforcement requires sandboxing the orchestrator (bwrap, firejail, devcontainer, or running under a dedicated user account). The protocol assumes the agent obeys; sandboxing is the operator's defence in depth.
+
+### Why this is a universal rule
+
+- **Reproducibility.** A phase that writes to `~/.cache/` cannot be re-run cleanly on a fresh machine. Repo-local writes are the only ones the engagement can replay.
+- **Provenance.** Git tracks repo-internal changes; system writes are invisible to the audit trail. The commit-trailer story breaks if work happens outside git's view.
+- **Isolation.** Multiple orchestrator sessions running in different worktrees of the same repo must not collide via shared system state. Repo-local discipline guarantees they don't.
+- **Security.** A subagent that can write `~/.ssh/authorized_keys` or `~/.bashrc` has effectively rooted the developer machine. Repo-scope is the simplest principle that prevents this.
+
+---
+
 ## Profile: `meta`
 
 For synthesis, classification, doc-restructuring work that produces no executable artifacts.
