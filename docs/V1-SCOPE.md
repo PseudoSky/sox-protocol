@@ -12,11 +12,11 @@
 | Tool | Status | Brief |
 |---|---|---|
 | `{{send_tool}}` | v1 MUST | Append a message to a named channel. Non-blocking. Returns `{sent_at, message_id, seq, backpressure}`. Supports `reply_to` for threading and `idempotency_key` for dedup (24h TTL default). |
-| `{{recv_tool}}` | v1 MUST | Drain the calling agent's mailbox. Non-blocking. Returns messages in ascending `seq` order per channel. Supports `thread_depth` (0/n/-1) for inline ancestor expansion and `include_meta` for observability metadata toggle. |
+| `{{recv_tool}}` | v1 MUST | Drain the calling agent's mailbox. Non-blocking. Returns messages in ascending `seq` order per channel. Supports `thread_depth` (0, n, or -1) for inline ancestor expansion and `include_meta` for observability metadata toggle. |
 | `{{subscribe_tool}}` | v1 MUST | Register interest in channels matching a glob pattern. Persists across server restarts. Idempotent. Cannot glob-match reserved prefixes `dm/` or `group/`. |
 | `{{list_tool}}` | v1 MUST | Discover active channels. Returns the mandatory `_sox_protocol` version negotiation block (`server_version`, `supported_versions`, `min_client_version`). Clients MUST read this on first call and fail-fast on version mismatch. |
-| `channels__ack` | v1 MUST | Signal ACK/NACK for a received message. Control-plane only: does NOT enter channel history, does NOT consume a `seq` slot. Updates server-side pending-state record. Statuses: `received → processing → done | nack`. |
-| `channels__heartbeat` | v1 MUST | Update the server-side liveness record for the calling agent. Control-plane only. Status: `online | busy | offline`. Server derives `stale` (30s) and `offline` (90s) from timeout. Triggers events on `sox/presence`. |
+| `channels__ack` | v1 MUST | Signal ACK or NACK for a received message. Control-plane only: does NOT enter channel history, does NOT consume a `seq` slot. Updates server-side pending-state record. Statuses: `received`, `processing`, `done`, `nack`. |
+| `channels__heartbeat` | v1 MUST | Update the server-side liveness record for the calling agent. Control-plane only. Status values: `online`, `busy`, `offline`. Server derives `stale` (30s) and `offline` (90s) from timeout. Triggers events on `sox/presence`. |
 | `replay` | v1 MUST | Replay historical messages from a channel using a per-channel `seq` cursor. Parameters: `channel`, `since` (seq), `until` (seq or null), `limit`. Access gated by `replay_policy` (default: `subscriber`). Paginates via `has_more`. |
 | `channels__collect` | planned | Server-side fan-in aggregation: block until `count` ACKs/replies arrive for a broadcast `reply_to` message, or `timeout` seconds elapse. Returns `{received[], missing[], timed_out}`. See post-v1 section. |
 
@@ -80,14 +80,14 @@ Absent when `include_meta: false`. Per-request flag overrides server-level defau
 | Sequence numbers | Per-channel monotone `seq` (starts at 1); advisory `ts` for cross-channel display | `spec/primitives/sequence-numbers.md`, `docs/decisions/seq-ordering-scope.md` |
 | Presence/heartbeat | Dedicated `channels__heartbeat` tool; `sox/presence` derived channel for observers | `spec/primitives/presence.md`, `docs/decisions/heartbeat-mechanism.md` |
 | Backpressure | Advisory by default; per-channel `enforced` opt-in; `backpressure` object always in send output | `spec/primitives/channels.md`, `docs/decisions/backpressure-model.md` |
-| Replay access | Per-channel `replay_policy`: `subscriber` (default) / `admin_only` / `custom` | `spec/primitives/channels.md`, `docs/decisions/replay-access-control.md` |
+| Replay access | Per-channel `replay_policy`: `subscriber` (default), `admin_only`, or `custom` | `spec/primitives/channels.md`, `docs/decisions/replay-access-control.md` |
 | Namespaces | Store-level enforcement; `shared` or `isolated` mode; `namespace_resolver` middleware required | `spec/primitives/namespace.md`, `docs/decisions/namespace-isolation-layer.md` |
 | Schema validation | Registry in backing store (`get/set_channel_schema`); enforcement in `schema_validator` middleware (default-on) | `spec/ports/middleware.md`, `docs/decisions/schema-validation-layer.md` |
 | Idempotency | `idempotency_key` on send; 24h default TTL; `sweep_idempotency_cache` mandatory on store | `spec/ports/backing-store.md`, `docs/decisions/idempotency-ttl.md` |
 | Version negotiation | `_sox_protocol` block in `list_channels` output; no separate negotiation tool | `spec/operations/list_channels.output.schema.json`, `docs/decisions/version-negotiation-mechanism.md` |
 | Deadlock detection | Wait-graph computed from `reply_to` + `delivered_to` at query time (SHOULD-implement) | `spec/protocol.md`, `docs/decisions/deadlock-detection-approach.md` |
 | Federation | Out of v1 implementation; spec is federation-aware: `origin_server` slot, `<server-id>/<agent-id>` form, per-channel `seq` | `spec/ports/identity.md`, `spec/protocol.md`, `docs/decisions/federation-scope.md` |
-| Threading | `reply_to` on envelope; `thread_depth` on `recv` (0/n/-1); server-side ancestor walk | `spec/primitives/threads.md`, `docs/decisions/threading-depth.md` |
+| Threading | `reply_to` on envelope; `thread_depth` on `recv` (0, n, or -1); server-side ancestor walk | `spec/primitives/threads.md`, `docs/decisions/threading-depth.md` |
 | Fan-out | Send to `group/<id>` channel IS the fan-out primitive; no separate verb | `spec/primitives/groups.md`, `docs/decisions/fanout-collect.md` |
 | Admin API | Co-located but opt-in (`--admin` flag); not registered in default server mode | `docs/decisions/admin-api-colocation.md` |
 | TUI connection | Stdio subprocess; TUI is an MCP client like any agent | `docs/decisions/tui-connection-model.md` |
@@ -97,7 +97,7 @@ Absent when `include_meta: false`. Per-request flag overrides server-level defau
 
 ## Middleware default chain (normative order)
 
-```
+```text
 namespace_resolver → auth → rate_limit → schema_validator → idempotency → store_dispatch → audit_log
 ```
 

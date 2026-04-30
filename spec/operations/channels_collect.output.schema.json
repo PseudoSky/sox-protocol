@@ -2,13 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/operations/channels_collect.output.schema.json",
   "title": "channels__collect — output",
-  "x-status": "planned",
-  "x-open-questions": [
-    "Quorum semantics: does 'count' mean count-of-ACKs-with-status=done, count-of-any-reply messages, or configurable via status_filter? Current lean: configurable via status_filter, defaulting to any reply.",
-    "Cancel verb: can a caller cancel an in-progress collect mid-wait? A cancel primitive or timeout-only semantics? No cancel verb is defined in v1; timeout is the only termination path.",
-    "Multiple-collector semantics: can two agents call channels__collect with the same reply_to simultaneously (observer pattern)? Likely yes — each collector holds an independent wait; the pending-state record supports multiple readers. Needs conformance test."
-  ],
-  "description": "Output schema for the SOX channels__collect operation. Returns the set of replies received before count was reached or timeout elapsed. Partial-failure semantics are explicit: received + missing + timed_out together give the full picture. PLANNED: see x-open-questions. Normative reference: docs/decisions/fanout-collect.md.",
+  "$comment": "x-status: planned — quorum semantics unresolved; open questions: (1) Quorum semantics: does 'count' mean count-of-ACKs-with-status=done, count-of-any-reply messages, or configurable via status_filter? Current lean: configurable via status_filter, defaulting to any reply. (2) Cancel verb: no cancel verb defined in v1; timeout is the only termination path. (3) Multiple-collector semantics: can two agents call channels__collect with the same reply_to simultaneously? Likely yes — each collector holds an independent wait; needs conformance test.",
+  "description": "Output schema for the SOX channels__collect operation. Returns the set of replies received before count was reached or timeout elapsed. Partial-failure semantics are explicit: received + missing + timed_out together give the full picture. PLANNED: quorum semantics, cancel verb, and multiple-collector behaviour are open questions (see $comment). Normative reference: docs/decisions/fanout-collect.md.",
   "type": "object",
   "required": ["received", "missing", "timed_out"],
   "additionalProperties": false,

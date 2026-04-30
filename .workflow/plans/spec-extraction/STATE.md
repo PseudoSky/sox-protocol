@@ -13,12 +13,12 @@ orchestrator_protocol: v1
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-extract | Extract protocol spec from current implementation | `DONE` | api-designer | 1 | 2026-04-30T00:00:00Z |
-| 03-reconcile | Reconcile spec with architecture decisions | `IN_PROGRESS` | api-designer | 3 | 2026-04-30T00:00:00Z |
-| 02-review | Architectural review of spec/ | `BLOCKED` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
+| 03-reconcile | Reconcile spec with architecture decisions | `DONE` | api-designer | 3 | 2026-04-30T00:00:00Z |
+| 02-review | Architectural review of spec/ | `READY` | architect-reviewer | 0 | 2026-04-30T00:00:00Z |
 
 ## Currently next action
 
-`03-reconcile` is `IN_PROGRESS` (attempt 3). Re-dispatched with feedback-1.md corrective instructions.
+`02-review` is `READY`. Dispatch `architect-reviewer` to audit `spec/`.
 
 ## Transitions
 
@@ -26,6 +26,7 @@ orchestrator_protocol: v1
 - 2026-04-29T00:00:00Z 01-extract — initialized (READY)
 - 2026-04-30T00:00:00Z 03-reconcile — IN_PROGRESS → REVIEW (attempt 2; 3 exit criteria failed: ajv x-status, packages/ grep, markdownlint 29 errors)
 - 2026-04-30T00:00:00Z 03-reconcile — REVIEW → IN_PROGRESS (attempt 3; re-dispatch with feedback-1.md)
+- 2026-04-30T00:00:00Z 03-reconcile — IN_PROGRESS → DONE (all exit criteria pass; 02-review promoted BLOCKED → READY)
 
 ## Termination targets
 

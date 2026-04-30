@@ -67,6 +67,7 @@ Group lifecycle is managed through the following tools. All lifecycle tools requ
 Creates a new group channel and adds the creating agent as the first `active` member.
 
 **Parameters:**
+
 - `group_id` (string, optional): desired group ID. If omitted, server assigns an opaque ID.
 - `display_name` (string, optional): human-readable name for tooling display.
 
@@ -77,6 +78,7 @@ Creates a new group channel and adds the creating agent as the first `active` me
 Invites an agent to a group. The inviting agent MUST be an `active` member. The invited agent's status is set to `invited`.
 
 **Parameters:**
+
 - `channel` (string): the `group/<group-id>` channel.
 - `agent_id` (string): the agent to invite.
 
@@ -87,6 +89,7 @@ Invites an agent to a group. The inviting agent MUST be an `active` member. The 
 An invited agent accepts membership. Transitions the calling agent's status from `invited` to `active`.
 
 **Parameters:**
+
 - `channel` (string): the `group/<group-id>` channel.
 
 **Returns:** `{ channel: <string>, joined_at: <number> }`
@@ -96,6 +99,7 @@ An invited agent accepts membership. Transitions the calling agent's status from
 An active member leaves the group. The server removes the agent from the membership table.
 
 **Parameters:**
+
 - `channel` (string): the `group/<group-id>` channel.
 
 **Returns:** `{ channel: <string>, left_at: <number> }`
@@ -105,6 +109,7 @@ An active member leaves the group. The server removes the agent from the members
 Returns the current membership table for a group. Caller MUST be an `active` member.
 
 **Parameters:**
+
 - `channel` (string): the `group/<group-id>` channel.
 
 **Returns:** Array of `{ agent_id, joined_at, status }` objects.

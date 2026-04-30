@@ -107,7 +107,7 @@ Controls how the server responds when the recipient's pending queue exceeds its 
 
 | Value | Meaning |
 |---|---|
-| `advisory` (default) | `send` always succeeds. The response carries a `backpressure` object with `state: ok|warn|over`. Senders MAY self-throttle based on `state`. |
+| `advisory` (default) | `send` always succeeds. The response carries a `backpressure` object with `state` enum (`ok`, `warn`, or `over`). Senders MAY self-throttle based on `state`. |
 | `enforced` | `send` returns a `BACKPRESSURE_OVER_LIMIT` error when `queue_depth >= threshold`. No message is persisted. |
 
 The `backpressure` object is **always present** in `send` output regardless of mode. The `state` field tells senders the queue health even in advisory mode.
@@ -120,7 +120,7 @@ Threshold default: 1000 messages (absolute count). Per-channel override is confi
 
 ### 6.3 Reserved channel name prefixes
 
-The following prefixes are reserved by the protocol. Agents MUST NOT create channels with these prefixes directly:
+The following prefixes are reserved by the protocol. Agents MUST NOT create channels with these prefixes directly.
 
 | Prefix | Owner | Access restriction |
 |---|---|---|

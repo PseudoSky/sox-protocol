@@ -26,6 +26,7 @@ The binding MUST wire at minimum the following two lifecycle events:
 
 **Per-tool-call event:**  
 After each tool call completes within the runtime, the binding MUST construct and deliver an `Event` with:
+
 - `event_type: "tool_used"`
 - `agent_id`: the identifier of the agent that made the call
 - `timestamp`: the time the tool call completed, as Unix epoch seconds
@@ -33,6 +34,7 @@ After each tool call completes within the runtime, the binding MUST construct an
 
 **On-stop event:**  
 When the runtime signals that the agent is about to exit or complete its turn, the binding MUST construct and deliver an `Event` with:
+
 - `event_type: "stop_requested"`
 - `agent_id`: the stopping agent's identifier
 - `timestamp`: the current time, as Unix epoch seconds
@@ -68,6 +70,7 @@ The injected content MUST be `Decision.message` verbatim. The binding MUST NOT p
 ### 2.6 Decision translation — `block`
 
 When `enforcer.decide()` returns a `Decision` with `action: "block"`, the binding MUST:
+
 1. Prevent the triggering action from completing. For a `stop_requested` event, this means the agent MUST NOT exit until it has drained its inbox.
 2. Present `Decision.message` to the agent so it understands what is required before proceeding.
 

@@ -74,18 +74,20 @@ This means:
 
 In v1.0 single-server deployments, agent identities are bare strings (e.g., `agent-alpha`). The protocol reserves a structured form for federated v2 deployments:
 
-```
+```text
 <server-id>/<agent-id>
 ```
 
 where `<server-id>` is an opaque string identifying the originating SOX server node, and `<agent-id>` is the agent's local identifier within that server.
 
 **v1.0 behaviour:**
+
 - The `<server-id>/` prefix is implicit (empty); agent IDs are bare strings.
 - The `origin_server` envelope field carries `null` in v1.0.
 - The backing-store credential registry records `(agent_id, public_key, registered_at, revoked_at?)` without a server-id component.
 
 **v2 federation behaviour (reserved slot):**
+
 - Agent IDs in cross-server messages MUST use the `<server-id>/<agent-id>` form.
 - The `origin_server` envelope field carries the `server-id` of the originating server.
 - A remote server learns a foreign agent's public key via federation key-exchange (deferred to v2 design).

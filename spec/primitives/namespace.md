@@ -60,7 +60,7 @@ The `namespace_resolver` is a **required** element of the default middleware cha
 
 Namespace and `server_id` (federation) are **orthogonal** slots:
 
-```
+```text
 (server_id, namespace, channel, seq)
 ```
 

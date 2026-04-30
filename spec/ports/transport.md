@@ -87,7 +87,7 @@ When the transport is bound to HTTP (as opposed to stdio), the server MUST imple
 - The allow-list is a deployment configuration parameter (not a protocol field). Operators extending the allow-list beyond localhost MUST document their trust model.
 
 > **Warning:** Exposing the SOX HTTP endpoint to the public internet without a reverse proxy is not recommended. Auth tokens travel in browser-visible headers. Document this clearly in deployment guides.
-
+>
 > **Decision source:** `docs/decisions/webapp-deployment-model.md`
 
 ---

@@ -25,7 +25,7 @@ ACK and NACK are issued by calling the dedicated `channels__ack` tool:
 channels__ack(
   message_id = "<string>",
   status     = "<received | processing | done | nack>",
-  reason     = "<optional string>"   // used with status=nack
+  reason     = "<optional string>"
 )
 ```
 
@@ -40,7 +40,7 @@ The tool updates the server-side pending-state record for `message_id` and retur
 
 The ACK status field drives the following lifecycle:
 
-```
+```text
 pending → received → processing → done
                                → nack
 ```

@@ -25,6 +25,7 @@ A conformant backing-store implementation MUST provide all five methods describe
 Accepts a message for a named channel, persists it, and returns a `(message_id, sent_at)` pair.
 
 **Parameters:**
+
 - `channel` (string, non-empty): the target channel name.
 - `sender` (string, non-empty): the `agent_id` of the sending agent.
 - `body` (object): opaque JSON object payload.
@@ -42,6 +43,7 @@ Accepts a message for a named channel, persists it, and returns a `(message_id, 
 Atomically drains pending messages for a given agent from one or more channels and marks them as delivered to that agent.
 
 **Parameters:**
+
 - `agent_id` (string, non-empty): the draining agent's identifier.
 - `channels` (list of strings, or null): the channels to drain. When null, all channels to which `agent_id` is subscribed are drained.
 - `max_messages` (integer, 1–1000): the upper bound on messages returned in one call. Default 50.
@@ -58,6 +60,7 @@ Atomically drains pending messages for a given agent from one or more channels a
 Registers a subscription: declares that `agent_id` wants to receive messages on channels matching `pattern`.
 
 **Parameters:**
+
 - `agent_id` (string, non-empty): the subscribing agent.
 - `pattern` (string, non-empty, max 256 chars): a channel name pattern. Supports Unix-glob `*` wildcard applied to the full channel name. Also supports exact match (no wildcard).
 
@@ -73,9 +76,11 @@ Registers a subscription: declares that `agent_id` wants to receive messages on 
 Returns a list of known channels.
 
 **Parameters:**
+
 - `since` (number or null): optional Unix epoch seconds. When provided, returns only channels that have received a message since that timestamp. When null, the implementation SHOULD return channels with at least one subscriber or at least one message in the last 24 hours.
 
 **Returns:** A list of objects, each with at minimum:
+
 - `name` (string): channel name.
 - `subscriber_count` (integer, ≥ 0): number of agents currently subscribed.
 
@@ -87,6 +92,7 @@ Returns a list of known channels.
 An asynchronous generator (or equivalent in the target language) that yields new messages for a given agent as they arrive.
 
 **Parameters:**
+
 - `agent_id` (string, non-empty): the watching agent.
 
 **Yields:** Message objects conforming to `spec/schemas/message.schema.json`, one at a time, as they become available in the backing store.

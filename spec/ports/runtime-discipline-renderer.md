@@ -22,6 +22,7 @@ The renderer does NOT execute the discipline — it renders it. Behavioural enfo
 ### 2.1 Discipline source acceptance
 
 The renderer MUST be able to accept the discipline content in at least one of these forms:
+
 - A filesystem path pointing to `spec/discipline/discipline.md` (or a copy of it bundled in the implementation's package).
 - The raw markdown string content of the discipline document.
 
@@ -61,6 +62,7 @@ The bootstrap snippet is separate from the full discipline and MUST NOT duplicat
 ### 2.5 Idempotent installation
 
 Running the renderer's install operation twice on the same target project MUST be idempotent:
+
 - It MUST NOT produce duplicate discipline content in any prompt surface.
 - It MUST NOT corrupt or break any existing project configuration.
 - Re-running the install SHOULD update the rendered content if the discipline source has changed (version upgrade path).
@@ -71,7 +73,7 @@ Running the renderer's install operation twice on the same target project MUST b
 
 - The renderer MUST NOT inject concrete tool names into the discipline source file (`spec/discipline/discipline.md`). Substitution happens at render time, not at authoring time.
 - The renderer MUST NOT modify `spec/discipline/discipline.md` or any file under `spec/`.
-- The renderer MUST NOT include content from `packages/` in the rendered output.
+- The renderer MUST NOT include content from implementation-layer source directories in the rendered output.
 - The renderer MUST NOT emit rendered content that still contains raw `{{...}}` placeholder tokens (with the exception of tokens the runtime has declared unavailable and replaced with a marked note).
 
 ---

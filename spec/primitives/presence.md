@@ -58,7 +58,7 @@ Default heartbeat interval: 10 seconds. Agents SHOULD call `channels__heartbeat`
 
 ## 4. Liveness state machine
 
-```
+```text
 [new connection]
       │
       ▼
