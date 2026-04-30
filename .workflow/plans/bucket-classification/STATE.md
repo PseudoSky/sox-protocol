@@ -12,7 +12,7 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-classify-and-restructure | Tag every TODO item and rewrite the file | `READY` | general-purpose | 0 | 2026-04-29T00:00:00Z |
+| 01-classify-and-restructure | Tag every TODO item and rewrite the file | `IN_PROGRESS` | general-purpose | 0 | 2026-04-30T00:00:00Z |
 
 ## Status legend
 
@@ -27,12 +27,13 @@ ABANDONED   → consciously dropped; reason in transitions
 
 ## Currently next action
 
-`01-classify-and-restructure` is `READY`. Spawn `general-purpose` with the verbatim prompt from `phases/01-classify-and-restructure.md`.
+`01-classify-and-restructure` is `IN_PROGRESS`. Awaiting agent return.
 
 ## Transitions (append-only)
 
 Most recent first.
 
+- 2026-04-30T00:00:00Z 01-classify-and-restructure — IN_PROGRESS (orchestrator dispatch)
 - 2026-04-29T00:00:00Z 01-classify-and-restructure — initialized (READY)
 
 ## Open blockers
