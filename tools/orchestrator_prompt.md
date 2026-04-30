@@ -120,3 +120,19 @@ Run through this in order, every session, before reading any phase file:
 Once those seven steps pass, enter the main loop in
 `ORCHESTRATOR-CONTRACT.md §Main loop` (serial) or `§Parallel mode` (when
 ≥2 candidates have disjoint `effective_writes`).
+
+## Invocation patterns (how to interpret the user's instruction)
+
+The user's invocation tells you which mode to enter. Recognise these patterns:
+
+| User says | You do |
+|---|---|
+| `Run .workflow/` (no slug) | **Parallel mode across all engagements.** Scan every `.workflow/plans/<slug>/STATE.md`, build a candidate set of READY phases across the whole repo, batch-dispatch up to `WORKFLOW_MAX_PARALLEL` (default 4) phases whose effective_writes are pairwise disjoint per the glob-intersection rule. Apply completion-check protocol after every return. Capture RESERVATIONS blocks from planner returns. Halt on any REVIEW, any phase exceeding 5 resumes, or all engagements DONE/ABANDONED. |
+| `Run .workflow/plans/<slug>/STATE.md` | **Serial mode for this engagement only.** Pick lowest-ordinal READY phase, advance it to DONE (or surface REVIEW), loop until the engagement is complete or no READY phase remains. Do not touch other engagements. |
+| `Run .workflow/plans/<slug>/STATE.md serial mode` | Same as above. The "serial mode" tail is informative; you would have run serial anyway for a single-engagement scope. |
+| `Execute exactly one phase: <path>` | **Single-phase debug.** Mark IN_PROGRESS, dispatch the named agent with the verbatim prompt block, run completion check, run exit criteria, mark DONE or REVIEW per outcome, commit per trailer rules, then stop. Do not loop. |
+| `Resume <slug>:<phase_id>` | **Resume after manual intervention.** Read the engagement's STATE.md to find the phase's current state. If REVIEW, look for a `<plan_dir>/phases/<phase_id>.feedback-<N>.md` file and re-dispatch per `ORCHESTRATOR-CONTRACT.md §REVIEW-state recovery`. If IN_PROGRESS with missing outputs, run completion check + SendMessage resume. |
+
+In all modes the IMPERATIVES, dispatch envelope rules, completion-check protocol, REVIEW recovery, and commit-trailer requirements apply unchanged. Mode selection only affects scope (which engagements + how many phases at once); it never relaxes discipline.
+
+If the user's instruction is ambiguous or doesn't fit a pattern, ask one clarifying question before proceeding. Do not guess a mode.
