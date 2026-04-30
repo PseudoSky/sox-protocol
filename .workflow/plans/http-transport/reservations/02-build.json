@@ -1,0 +1,29 @@
+{
+  "phase_id": "02-build",
+  "engagement": "http-transport",
+  "source_run": "planner-run2",
+  "files": [
+    "packages/python/src/sox_protocol/adapters/transports/http/__init__.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/server.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/routes.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/sse.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/health.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/cors.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/auth.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/config.py",
+    "packages/python/src/sox_protocol/adapters/transports/http/errors.py",
+    "packages/python/src/sox_protocol/cli/serve.py",
+    "packages/python/src/sox_protocol/cli/__main__.py",
+    "packages/python/tests/transports/http/__init__.py",
+    "packages/python/tests/transports/http/conftest.py",
+    "packages/python/tests/transports/http/test_routes.py",
+    "packages/python/tests/transports/http/test_sse.py",
+    "packages/python/tests/transports/http/test_auth.py",
+    "packages/python/tests/transports/http/test_cors.py",
+    "packages/python/tests/transports/http/test_health.py",
+    "packages/python/tests/transports/http/test_cli_serve.py",
+    "spec/transports/http/openapi.yaml",
+    "spec/transports/http/README.md",
+    "tools/openapi_gen.py"
+  ]
+}

@@ -1,0 +1,445 @@
+{
+  "summary": "Build the SOX Protocol conformance suite: declarative YAML fixtures covering all 12 fixture categories spanning the 16 v1 operations and 7 primitives, a Python harness (tools/conformance_runner.py) that runs each fixture against either the in-process Python reference impl (target=packages/python, stdio) or a remote HTTP target (target=http://host:port), and a GitHub Actions workflow that runs both targets on every PR. The runner consumes the http-transport's SSE stream at GET /v1/stream for live recv arrivals (matching the http-transport plan's wire_format choice). The harness has 100% unit-test coverage. Existing JSON scenarios under spec/conformance/scenarios/ are migrated to the new YAML category layout to avoid duplication.",
+  "fixture_format": {
+    "language": "yaml",
+    "schema": {
+      "name": "human-readable fixture name",
+      "spec_ref": "spec/<file>.md#section",
+      "pending": "optional bool; if true, runner skips in --strict mode (used for x-status: planned operations like channels_collect)",
+      "setup": "list of {operation, input} executed in order before the test sequence; responses ignored unless asserted via expected_setup_output",
+      "agents": "list of {id, credential} virtual agents the runner authenticates as; each step references which agent runs it",
+      "sequence": "ordered list of {as_agent, operation, input, expected_output (subset match with seq/message_id wildcards), expected_error (sox-error envelope match), wait_for_stream (optional SSE assertion: {channel, seq_at_least, timeout_s})}",
+      "expected_store_state": "optional snapshot {channels: {name: {message_count, last_seq}}, presence: {agent_id: status}}",
+      "teardown": "optional list of operations for cleanup"
+    }
+  },
+  "fixtures": [
+    {
+      "path": "spec/conformance/send-recv-basic/01-send-and-drain.yaml",
+      "spec_ref": "spec/primitives/channels.md#send-recv",
+      "purpose": "Single-channel send by agent A; agent B subscribed receives via recv with seq=1.",
+      "operations": ["subscribe", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/send-recv-basic/02-recv-empty.yaml",
+      "spec_ref": "spec/operations/recv.output.schema.json",
+      "purpose": "recv with no pending messages returns empty list, non-blocking.",
+      "operations": ["recv"]
+    },
+    {
+      "path": "spec/conformance/send-recv-basic/03-include-meta-toggle.yaml",
+      "spec_ref": "spec/protocol.md#observability-extension-_meta",
+      "purpose": "include_meta:false omits _meta block; include_meta:true includes trace_id.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/01-glob-match.yaml",
+      "spec_ref": "spec/primitives/channels.md#subscriptions",
+      "purpose": "subscribe pattern team/* receives team/eng but not ops/eng.",
+      "operations": ["subscribe", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/02-unsubscribe-discards-queue.yaml",
+      "spec_ref": "spec/operations/unsubscribe.input.schema.json",
+      "purpose": "unsubscribe drops queued-but-unread messages for the removed pattern.",
+      "operations": ["subscribe", "send", "unsubscribe", "recv"]
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/03-multi-pattern.yaml",
+      "spec_ref": "spec/primitives/channels.md#subscriptions",
+      "purpose": "Multiple overlapping subscriptions deliver each message exactly once.",
+      "operations": ["subscribe", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/threading/01-reply-to-link.yaml",
+      "spec_ref": "spec/primitives/threads.md",
+      "purpose": "send with reply_to threads to parent message_id; recv with thread_depth surfaces parent context.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/threading/02-deep-thread.yaml",
+      "spec_ref": "spec/primitives/threads.md",
+      "purpose": "3-level deep thread; thread_depth=2 returns 2 ancestors.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/groups/01-create-invite-join.yaml",
+      "spec_ref": "spec/primitives/groups.md#5",
+      "purpose": "group_create -> group_invite -> group_join transitions invitee from invited to active; group_list_members reflects membership.",
+      "operations": ["group_create", "group_invite", "group_join", "group_list_members"]
+    },
+    {
+      "path": "spec/conformance/groups/02-broadcast.yaml",
+      "spec_ref": "spec/primitives/groups.md",
+      "purpose": "send to a group channel fans out to all active members; non-members do not receive.",
+      "operations": ["group_create", "group_invite", "group_join", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/groups/03-leave.yaml",
+      "spec_ref": "spec/primitives/groups.md#5.4",
+      "purpose": "group_leave removes member; subsequent broadcasts do not deliver.",
+      "operations": ["group_leave", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/dms/01-sorted-pair-naming.yaml",
+      "spec_ref": "spec/primitives/dms.md",
+      "purpose": "DM channel name is dm/<sorted-pair>; same channel regardless of which agent sent first.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/dms/02-third-party-cannot-read.yaml",
+      "spec_ref": "spec/primitives/dms.md",
+      "purpose": "Agent C subscribed to dm/* cannot read messages between A and B.",
+      "operations": ["subscribe", "send", "recv"]
+    },
+    {
+      "path": "spec/conformance/ack-nack/01-ack-tool-not-message.yaml",
+      "spec_ref": "spec/primitives/ack-nack.md",
+      "purpose": "channels_ack is invoked as a tool; the ack does NOT appear in channel history on subsequent recv.",
+      "operations": ["send", "recv", "channels_ack", "recv"]
+    },
+    {
+      "path": "spec/conformance/ack-nack/02-nack-via-ack-tool.yaml",
+      "spec_ref": "spec/envelopes/sox-nack.schema.json",
+      "purpose": "channels_ack with status=nack records NACK; pending-state reflects rejection; no body posted to channel.",
+      "operations": ["send", "channels_ack"]
+    },
+    {
+      "path": "spec/conformance/identity-verification/01-server-certified-sender.yaml",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "Sender field in stored envelope is server-certified from auth credential, not from client-supplied body.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/identity-verification/02-unknown-credential-rejected.yaml",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "send with unrecognized credential returns sox-error; no message persisted.",
+      "operations": ["send"]
+    },
+    {
+      "path": "spec/conformance/sequence-monotonicity/01-seq-starts-at-one.yaml",
+      "spec_ref": "spec/primitives/sequence-numbers.md",
+      "purpose": "First message in a fresh channel has seq=1; recv echoes it.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/sequence-monotonicity/02-monotone-per-channel.yaml",
+      "spec_ref": "spec/primitives/sequence-numbers.md",
+      "purpose": "10 sends produce seq 1..10; recv returns them in seq order; second channel's seq sequence is independent.",
+      "operations": ["send", "recv"]
+    },
+    {
+      "path": "spec/conformance/presence/01-heartbeat-updates-presence-channel.yaml",
+      "spec_ref": "spec/primitives/presence.md",
+      "purpose": "channels_heartbeat updates server liveness; sox/presence channel reflects agent as active.",
+      "operations": ["channels_heartbeat", "subscribe", "recv"]
+    },
+    {
+      "path": "spec/conformance/presence/02-stale-heartbeat-marks-offline.yaml",
+      "spec_ref": "spec/state-machines/presence-states.md",
+      "purpose": "Without heartbeat for the configured window, presence transitions to offline; recorded on sox/presence.",
+      "operations": ["channels_heartbeat", "recv"]
+    },
+    {
+      "path": "spec/conformance/replay/01-replay-since-seq.yaml",
+      "spec_ref": "spec/operations/replay.input.schema.json",
+      "purpose": "replay with since_seq=N returns only messages with seq>=N in monotone order.",
+      "operations": ["send", "replay"]
+    },
+    {
+      "path": "spec/conformance/replay/02-replay-empty-future-cursor.yaml",
+      "spec_ref": "spec/operations/replay.output.schema.json",
+      "purpose": "replay with since_seq beyond last seq returns empty; no error.",
+      "operations": ["send", "replay"]
+    },
+    {
+      "path": "spec/conformance/namespace-isolation/01-namespace-scoped-channels.yaml",
+      "spec_ref": "spec/primitives/namespace.md",
+      "purpose": "Channel created under namespace A is not visible to list_channels under namespace B.",
+      "operations": ["send", "list_channels"]
+    },
+    {
+      "path": "spec/conformance/namespace-isolation/02-version-block.yaml",
+      "spec_ref": "spec/protocol.md#versioning",
+      "purpose": "list_channels response includes _sox_protocol block with protocol_version matching spec/VERSION.",
+      "operations": ["list_channels"]
+    },
+    {
+      "path": "spec/conformance/channels-collect/01-collect-n-replies.yaml",
+      "spec_ref": "spec/operations/channels_collect.input.schema.json",
+      "purpose": "[pending] channels_collect returns when N replies arrive on the broadcast thread; SSE progress events emitted en route. Marked pending: skipped under --strict.",
+      "operations": ["send", "channels_collect"]
+    }
+  ],
+  "harness": {
+    "path": "tools/conformance_runner.py",
+    "public_api": [
+      "run(target: str, fixtures: list[Path], strict: bool) -> RunResult",
+      "load_fixtures(root: Path) -> list[Fixture]",
+      "class StdioTarget — speaks MCP framing to packages/python via subprocess",
+      "class HttpTarget — POSTs to /v1/ops/<op>; consumes /v1/stream SSE for wait_for_stream assertions",
+      "main(argv) — CLI entrypoint",
+      "targets: 'packages/python' (stdio) | 'http://host:port' (HTTP)"
+    ],
+    "live_recv_strategy": "For HttpTarget: open a single SSE connection to GET /v1/stream per agent at fixture start (matches http-transport plan wire_format.live_recv=SSE). Each event is a JSON envelope; runner indexes by channel+seq for wait_for_stream assertions with bounded timeout. For StdioTarget: poll recv on a 50ms interval up to wait_for_stream.timeout_s."
+  },
+  "ci_workflow": {
+    "path": ".github/workflows/conformance.yml",
+    "matrix": ["python-reference-stdio", "python-reference-http"],
+    "future_matrix_entries": ["typescript-reference-stdio", "typescript-reference-http"]
+  },
+  "files": [
+    {
+      "path": "tools/conformance_runner.py",
+      "spec_ref": "spec/conformance/README.md",
+      "purpose": "Harness implementing load_fixtures, run, StdioTarget, HttpTarget, CLI.",
+      "public_api": ["run", "main", "StdioTarget", "HttpTarget", "Fixture", "RunResult"]
+    },
+    {
+      "path": "tools/conformance_runner_tests/__init__.py",
+      "spec_ref": "n/a",
+      "purpose": "Test package marker.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/conftest.py",
+      "spec_ref": "n/a",
+      "purpose": "Fake target fixtures, ephemeral http server fixture using the real adapter.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/test_load_fixtures.py",
+      "spec_ref": "fixture_format.schema",
+      "purpose": "YAML loading, schema validation, pending flag handling.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/test_stdio_target.py",
+      "spec_ref": "spec/ports/transport.md",
+      "purpose": "Subprocess lifecycle, MCP framing, recv polling.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/test_http_target.py",
+      "spec_ref": "spec/transports/http/openapi.yaml",
+      "purpose": "POST request shape, SSE consumption, wait_for_stream assertion semantics.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/test_strict_mode.py",
+      "spec_ref": "fixture_format.schema",
+      "purpose": "Pending fixtures skipped under --strict; counted under non-strict.",
+      "public_api": []
+    },
+    {
+      "path": "tools/conformance_runner_tests/test_run_result.py",
+      "spec_ref": "n/a",
+      "purpose": "Per-fixture pass/fail diff formatting; exit code derivation.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/README.md",
+      "spec_ref": "all primitives",
+      "purpose": "Documents fixture format, how to add fixtures, how third-party impls register a target, --strict semantics.",
+      "public_api": []
+    },
+    {
+      "path": ".github/workflows/conformance.yml",
+      "spec_ref": "n/a",
+      "purpose": "PR workflow: matrix over [stdio, http]; spins up the http server for the http leg; runs conformance_runner --strict; uploads result artifact.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/send-recv-basic/01-send-and-drain.yaml",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/send-recv-basic/02-recv-empty.yaml",
+      "spec_ref": "spec/operations/recv.output.schema.json",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/send-recv-basic/03-include-meta-toggle.yaml",
+      "spec_ref": "spec/protocol.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/01-glob-match.yaml",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/02-unsubscribe-discards-queue.yaml",
+      "spec_ref": "spec/operations/unsubscribe.input.schema.json",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/subscription-patterns/03-multi-pattern.yaml",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/threading/01-reply-to-link.yaml",
+      "spec_ref": "spec/primitives/threads.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/threading/02-deep-thread.yaml",
+      "spec_ref": "spec/primitives/threads.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/groups/01-create-invite-join.yaml",
+      "spec_ref": "spec/primitives/groups.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/groups/02-broadcast.yaml",
+      "spec_ref": "spec/primitives/groups.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/groups/03-leave.yaml",
+      "spec_ref": "spec/primitives/groups.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/dms/01-sorted-pair-naming.yaml",
+      "spec_ref": "spec/primitives/dms.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/dms/02-third-party-cannot-read.yaml",
+      "spec_ref": "spec/primitives/dms.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/ack-nack/01-ack-tool-not-message.yaml",
+      "spec_ref": "spec/primitives/ack-nack.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/ack-nack/02-nack-via-ack-tool.yaml",
+      "spec_ref": "spec/envelopes/sox-nack.schema.json",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/identity-verification/01-server-certified-sender.yaml",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/identity-verification/02-unknown-credential-rejected.yaml",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/sequence-monotonicity/01-seq-starts-at-one.yaml",
+      "spec_ref": "spec/primitives/sequence-numbers.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/sequence-monotonicity/02-monotone-per-channel.yaml",
+      "spec_ref": "spec/primitives/sequence-numbers.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/presence/01-heartbeat-updates-presence-channel.yaml",
+      "spec_ref": "spec/primitives/presence.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/presence/02-stale-heartbeat-marks-offline.yaml",
+      "spec_ref": "spec/state-machines/presence-states.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/replay/01-replay-since-seq.yaml",
+      "spec_ref": "spec/operations/replay.input.schema.json",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/replay/02-replay-empty-future-cursor.yaml",
+      "spec_ref": "spec/operations/replay.output.schema.json",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/namespace-isolation/01-namespace-scoped-channels.yaml",
+      "spec_ref": "spec/primitives/namespace.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/namespace-isolation/02-version-block.yaml",
+      "spec_ref": "spec/protocol.md",
+      "purpose": "Fixture file.",
+      "public_api": []
+    },
+    {
+      "path": "spec/conformance/channels-collect/01-collect-n-replies.yaml",
+      "spec_ref": "spec/operations/channels_collect.input.schema.json",
+      "purpose": "Fixture file (pending).",
+      "public_api": []
+    }
+  ],
+  "test_plan": [
+    "Unit: load_fixtures parses every fixture in spec/conformance/ without error.",
+    "Unit: schema validation rejects malformed fixtures (missing sequence, unknown operation).",
+    "Unit: StdioTarget mocks subprocess and asserts MCP framing.",
+    "Unit: HttpTarget uses ASGITransport against the real http adapter; asserts SSE wait_for_stream resolves on matching seq.",
+    "Unit: --strict skips fixtures with pending:true; non-strict runs them and surfaces results separately.",
+    "Unit: RunResult diff formatter on subset-mismatch.",
+    "Integration: tools/conformance_runner.py --target packages/python --strict exits 0.",
+    "Integration: tools/conformance_runner.py --target http://localhost:<port> --strict exits 0 once the http transport is up.",
+    "yamllint passes on spec/conformance/."
+  ],
+  "risks": [
+    "SSE consumption in tests can hang if the harness does not impose a wait_for_stream timeout; mitigated by mandatory timeout_s field with sane default.",
+    "Existing JSON scenarios under spec/conformance/scenarios/ overlap with new YAML fixtures; resolution: delete the JSON scenarios in this engagement and reference the YAML equivalents in PR description (no duplication).",
+    "channels_collect is x-status: planned; including it as a pending fixture keeps the surface visible without failing CI.",
+    "Cross-target parity: a fixture passing on stdio but failing on http indicates a transport bug, not a fixture bug; the runner reports per-target results to make this distinction visible."
+  ],
+  "dependencies": ["pyyaml", "pytest", "pytest-cov", "httpx", "jsonschema"],
+  "build_order": [
+    "harness runner skeleton (load_fixtures, RunResult, CLI)",
+    "StdioTarget against packages/python",
+    "category: send-recv-basic (smoke baseline)",
+    "category: ack-nack (validates the channels_ack-as-tool semantics most aggressively)",
+    "HttpTarget + SSE consumption",
+    "remaining categories: subscription-patterns, threading, groups, dms, identity-verification, sequence-monotonicity, presence, replay, namespace-isolation",
+    "channels-collect (pending)",
+    "spec/conformance/README.md",
+    "CI workflow"
+  ],
+  "exit_signals": [
+    "All fixtures parse (yamllint clean)",
+    "Python reference impl passes 100% of fixtures via stdio",
+    "Python reference impl passes 100% of fixtures via HTTP",
+    "Harness has 100% unit test coverage",
+    "CI runs on PR"
+  ]
+}

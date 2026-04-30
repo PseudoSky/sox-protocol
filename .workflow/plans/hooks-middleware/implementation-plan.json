@@ -1,0 +1,343 @@
+{
+  "summary": "Build the middleware/hooks pipeline at packages/python/src/sox_protocol/core/middleware/ per ADR 0003. Deliver: (1) a normative MiddlewareContext dataclass and Middleware Protocol matching spec/ports/middleware.md §3; (2) a Pipeline runner that composes an ordered list of middlewares around a terminal store_dispatch handler with strict short-circuit and reentrancy semantics; (3) a registry that loads middlewares declaratively (importable factory paths or in-process registration), validates must_run_before/must_run_after constraints, and assembles the default chain (namespace_resolver → auth → rate_limit → schema_validator → idempotency → store_dispatch → audit_log); (4) a hook_dispatcher middleware that fans out registered pre_<verb>/post_<verb> observation-only hooks; (5) the auth plugin which is a thin shim over the IdentityVerifier public API delivered by the identity-primitive engagement — NO duplication of identity logic; (6) one sample logging plugin that writes one JSON line per call to ~/.sox/logs/middleware.jsonl (path injectable). Tests live under packages/python/tests/middleware/ and one regression run under tests/identity/ proves the migration kept identity behaviour intact. Build order: protocol/context → errors → pipeline → registry → hooks → plugins/audit_log → plugins/auth → default chain → tests → identity migration shim.",
+  "files": [
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/__init__.py",
+      "spec_ref": "spec/ports/middleware.md §2",
+      "purpose": "Public re-exports forming the stable middleware API.",
+      "public_api": [
+        "Middleware",
+        "MiddlewareContext",
+        "Pipeline",
+        "PipelineBuilder",
+        "MiddlewareRegistry",
+        "register_middleware",
+        "HookDispatcher",
+        "Hook",
+        "HookDecision",
+        "default_chain",
+        "MiddlewareError",
+        "ChainConfigurationError",
+        "ShortCircuitResponse"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/context.py",
+      "spec_ref": "spec/ports/middleware.md §3, §6",
+      "purpose": "MiddlewareContext dataclass scoped to a single tool call; mutability rules from §6 enforced via property setters that raise on illegal writes (e.g. correlation_id, connection_id are read-only after construction).",
+      "public_api": [
+        "@dataclass class MiddlewareContext(operation: Literal['send','recv','subscribe','list_channels','channels_ack','channels_heartbeat','channels_collect','replay'], input: dict[str,object], connection_id: str, agent_id: str | None = None, metadata: dict[str,object] = field(default_factory=dict))",
+        "def freeze_correlation_id(self) -> None  # called by Pipeline after construction"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/protocol.py",
+      "spec_ref": "spec/ports/middleware.md §2",
+      "purpose": "Middleware Protocol type — the host-language binding of the normative async fn handle(request, next) -> response signature.",
+      "public_api": [
+        "class Middleware(Protocol): name: str; must_run_before: tuple[str, ...]; must_run_after: tuple[str, ...]; async def __call__(self, ctx: MiddlewareContext, call_next: Callable[[MiddlewareContext], Awaitable[dict[str,object]]]) -> dict[str,object]"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/errors.py",
+      "spec_ref": "spec/ports/middleware.md §7; spec/envelopes/sox-error.schema.json",
+      "purpose": "Typed exception/response classes used to short-circuit. ShortCircuitResponse wraps a sox-error-shaped dict; MiddlewareError converts uncaught exceptions to internal_error envelopes per §7.",
+      "public_api": [
+        "class MiddlewareError(Exception)",
+        "class ChainConfigurationError(MiddlewareError)",
+        "class ShortCircuitResponse(MiddlewareError): response: dict[str, object]",
+        "def make_internal_error(reason: str) -> dict[str, object]"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/pipeline.py",
+      "spec_ref": "spec/ports/middleware.md §2, §5, §7",
+      "purpose": "Pipeline composes middlewares around a terminal handler. Each call is reentrant: a fresh MiddlewareContext per dispatch. Catches middleware exceptions, converts to internal_error per §7.",
+      "public_api": [
+        "class Pipeline(middlewares: list[Middleware], terminal: Callable[[MiddlewareContext], Awaitable[dict[str,object]]])",
+        "async def dispatch(self, operation: str, input: dict[str,object], *, connection_id: str) -> dict[str,object]",
+        "class PipelineBuilder: def add(mw: Middleware) -> Self; def build(terminal) -> Pipeline"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/registry.py",
+      "spec_ref": "spec/ports/middleware.md §4; docs/adr/0003 (decision §4 declarative registration)",
+      "purpose": "MiddlewareRegistry collects middleware factories by name and assembles ordered chains, validating must_run_before/must_run_after constraints. Supports in-process register_middleware() (used by tests outside core) and entry-point loading at server startup.",
+      "public_api": [
+        "class MiddlewareRegistry()",
+        "def register(self, name: str, factory: Callable[[], Middleware]) -> None",
+        "def get(self, name: str) -> Callable[[], Middleware]",
+        "def assemble(self, order: list[str]) -> list[Middleware]  # raises ChainConfigurationError on conflict",
+        "def load_entry_points(self, group: str = 'sox_protocol.middleware') -> None",
+        "register_middleware: MiddlewareRegistry  # module-level default registry"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/hooks.py",
+      "spec_ref": "docs/adr/0003 §Decision (3) hooks-as-sugar",
+      "purpose": "HookDispatcher middleware reads registered pre_<verb>/post_<verb> hooks and fans them out around the rest of the chain. A hook may return HookDecision(action='allow'|'deny', error: dict | None) but cannot mutate ctx — we pass an immutable view.",
+      "public_api": [
+        "class Hook(Protocol): async def __call__(self, ctx_view: Mapping[str,object]) -> HookDecision | None",
+        "@dataclass class HookDecision(action: Literal['allow','deny'], error: dict[str,object] | None = None)",
+        "class HookDispatcher(pre: dict[str, list[Hook]], post: dict[str, list[Hook]]): name='hook_dispatcher'"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/plugins/__init__.py",
+      "spec_ref": "n/a",
+      "purpose": "Plugin namespace marker.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/plugins/auth.py",
+      "spec_ref": "spec/ports/middleware.md §4 (auth); spec/ports/identity.md §2, §4",
+      "purpose": "Auth middleware plugin wrapping the identity-primitive IdentityVerifier. Calls verifier.verify() to populate ctx.agent_id; calls verifier.bind_for_send() on send to overwrite input.sender. Short-circuits with sox-error error_code='identity_failure' on any IdentityFailure subclass. This is the migration target from core/identity/middleware.py.",
+      "public_api": [
+        "class AuthMiddleware(verifier: IdentityVerifier): name='auth'; must_run_after=('namespace_resolver',); must_run_before=('rate_limit','schema_validator','idempotency','store_dispatch')",
+        "def build_auth_middleware(verifier: IdentityVerifier) -> AuthMiddleware  # entry-point factory shape"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/plugins/logging.py",
+      "spec_ref": "docs/adr/0003 §Decision (4) sample plugin demonstrating composition",
+      "purpose": "Sample observation-only plugin: writes one JSONL line per call to a configurable path (default ~/.sox/logs/middleware.jsonl, created on first write). Demonstrates a plugin that lives at the bottom of the chain post-store_dispatch.",
+      "public_api": [
+        "class LoggingMiddleware(path: pathlib.Path | None = None, *, clock: Callable[[], float] = time.time): name='middleware_log'; must_run_after=('store_dispatch',)",
+        "def default_log_path() -> pathlib.Path  # ~/.sox/logs/middleware.jsonl"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/plugins/store_dispatch.py",
+      "spec_ref": "spec/ports/middleware.md §4 (store_dispatch)",
+      "purpose": "Terminal middleware: invokes the configured BackingStore method matching ctx.operation. The only chain link allowed to perform persistence.",
+      "public_api": [
+        "class StoreDispatchMiddleware(store: BackingStore): name='store_dispatch'"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/default_chain.py",
+      "spec_ref": "spec/ports/middleware.md §4; docs/adr/0003 §Decision (2)",
+      "purpose": "Defines the normative default order and a build_default_pipeline() helper that composes Pipeline from the supplied verifier + store. Other links (namespace_resolver, rate_limit, schema_validator, idempotency, audit_log) are referenced by name and resolved from the registry; if not registered, they are skipped with a startup warning so the v1 chain remains usable while sibling engagements catch up.",
+      "public_api": [
+        "DEFAULT_ORDER: tuple[str, ...] = ('namespace_resolver','auth','rate_limit','schema_validator','idempotency','store_dispatch','audit_log')",
+        "def build_default_pipeline(*, verifier: IdentityVerifier, store: BackingStore, registry: MiddlewareRegistry | None = None) -> Pipeline"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/middleware.py",
+      "spec_ref": "spec/ports/middleware.md §4 (auth); spec/ports/identity.md §4",
+      "purpose": "MIGRATION SHIM. After this engagement, this module re-exports AuthMiddleware from middleware.plugins.auth so any existing imports keep working. New code MUST import from sox_protocol.core.middleware.plugins.auth.",
+      "public_api": [
+        "IdentityMiddleware  # alias of AuthMiddleware, deprecated"
+      ]
+    },
+    {
+      "path": "packages/python/tests/middleware/__init__.py",
+      "spec_ref": "n/a",
+      "purpose": "Package marker.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/conftest.py",
+      "spec_ref": "n/a",
+      "purpose": "Fixtures: stub BackingStore, stub IdentityVerifier, tmp middleware-log path, helper to construct MiddlewareContext.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_pipeline.py",
+      "spec_ref": "spec/ports/middleware.md §2, §5, §7",
+      "purpose": "Order, short-circuit, response propagation, exception-to-internal_error conversion.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_context.py",
+      "spec_ref": "spec/ports/middleware.md §3, §6",
+      "purpose": "Mutability rules: correlation_id immutable, agent_id only settable once, connection_id read-only, metadata mutable.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_registry.py",
+      "spec_ref": "spec/ports/middleware.md §4; docs/adr/0003 §Decision (4)",
+      "purpose": "Constraint validation, missing-link error, entry-point loading via stub, OUT-OF-CORE registration smoke (test imports register_middleware from middleware package and registers a custom plugin defined in the test module).",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_hooks.py",
+      "spec_ref": "docs/adr/0003 §Decision (3)",
+      "purpose": "pre/post fan-out, deny-decision short-circuit, immutability of ctx_view passed to hooks.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_default_chain.py",
+      "spec_ref": "spec/ports/middleware.md §4, §9; docs/adr/0003 §Negative consequences (footgun)",
+      "purpose": "Conformance: default chain refuses an unauthenticated send (the canonical footgun test); namespace_resolver runs before auth when both registered; chain still builds when optional links absent.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_plugin_auth.py",
+      "spec_ref": "spec/ports/middleware.md §4; spec/ports/identity.md §2",
+      "purpose": "Auth plugin populates ctx.agent_id from verifier; bind_for_send overwrites sender; IdentityFailure converts to identity_failure sox-error short-circuit.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_plugin_logging.py",
+      "spec_ref": "docs/adr/0003 §Decision (4)",
+      "purpose": "Logging plugin appends one JSONL line per dispatched call, redacts no caller fields, creates parent dir on first write.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_external_plugin.py",
+      "spec_ref": "docs/adr/0003 §Decision (4) declarative out-of-tree registration",
+      "purpose": "A custom Middleware class defined inside the test module is registered via register_middleware (i.e., from outside core/) and exercised end-to-end through Pipeline.dispatch — proves no core code change is needed to add a plugin.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_migration_regression.py",
+      "spec_ref": "spec/ports/identity.md §2-§5 (post-migration)",
+      "purpose": "Re-runs the identity rejection scenarios using the new AuthMiddleware via Pipeline.dispatch (rather than the standalone IdentityMiddleware) and asserts identical outcomes — the migration regression check.",
+      "public_api": []
+    }
+  ],
+  "test_plan": [
+    {
+      "spec_section": "spec/ports/middleware.md §2 (pipeline structure)",
+      "test_cases": [
+        "test_request_flows_left_to_right — middlewares observe call in registration order",
+        "test_response_flows_right_to_left — response post-processing in reverse order",
+        "test_short_circuit_skips_subsequent_middlewares — deny in MW2 means MW3 and terminal never run",
+        "test_terminal_invoked_on_full_passthrough — store_dispatch reached when no MW short-circuits"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §3 (context)",
+      "test_cases": [
+        "test_context_per_call — concurrent dispatches receive distinct MiddlewareContext objects",
+        "test_metadata_is_mutable_for_inter_mw_communication — MW1 writes key, MW2 reads it",
+        "test_agent_id_initially_none — ctx.agent_id is None before auth runs"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §4 (default chain)",
+      "test_cases": [
+        "test_default_order_constant_matches_spec — DEFAULT_ORDER tuple equals the order documented in spec §4",
+        "test_assemble_rejects_auth_before_namespace_resolver — ChainConfigurationError when constraints violated",
+        "test_default_chain_refuses_unauthenticated_send — the conformance footgun assertion (§9)"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §5 (short-circuit semantics)",
+      "test_cases": [
+        "test_short_circuit_response_conforms_to_send_output_schema — success short-circuit shape valid",
+        "test_short_circuit_error_conforms_to_sox_error_schema — deny shape conforms to sox-error.schema.json"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §6 (mutability)",
+      "test_cases": [
+        "test_correlation_id_cannot_be_overwritten — attempt raises",
+        "test_connection_id_read_only — attempt raises",
+        "test_only_auth_may_set_agent_id — second writer raises (enforced via single-set semantics)"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §7 (error handling)",
+      "test_cases": [
+        "test_uncaught_exception_becomes_internal_error — raising MW yields sox-error error_code='internal_error'",
+        "test_internal_error_does_not_leak_traceback — message string contains no path/stack"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §9 (conformance)",
+      "test_cases": [
+        "test_pipeline_is_reentrant — 50 concurrent dispatches do not bleed context",
+        "test_chain_order_documented — PipelineBuilder.build records active order on Pipeline.order attribute"
+      ]
+    },
+    {
+      "spec_section": "docs/adr/0003 §Decision (3) hooks",
+      "test_cases": [
+        "test_pre_hook_fires_before_chain — hook observes input but ctx_view is read-only Mapping",
+        "test_post_hook_fires_after_response — hook observes response after store_dispatch",
+        "test_hook_deny_short_circuits — HookDecision(action='deny') yields sox-error and skips chain",
+        "test_hook_cannot_mutate_ctx — attempt to assign on ctx_view raises"
+      ]
+    },
+    {
+      "spec_section": "docs/adr/0003 §Decision (4) declarative registration",
+      "test_cases": [
+        "test_external_plugin_registers_via_module_api — see test_external_plugin.py",
+        "test_entry_point_loader_picks_up_factory — stub entry-point group, registry resolves it"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md (regression after migration)",
+      "test_cases": [
+        "test_unknown_agent_through_pipeline — same outcome as identity-primitive's test_unknown_agent_returns_identity_failure",
+        "test_send_sender_overwritten_through_pipeline — verified send replaces caller-claimed sender",
+        "test_audit_log_still_written_on_rejection — ~/.sox/logs/identity-failures.jsonl line still appears (tmp path)"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Plugins like namespace_resolver, rate_limit, schema_validator, idempotency, audit_log are owned by other engagements and may not exist when this lands.",
+      "mitigation": "build_default_pipeline tolerates missing optional links with a startup warning; the conformance test only requires auth + store_dispatch present. As sibling engagements ship, they register into the same MiddlewareRegistry."
+    },
+    {
+      "risk": "MiddlewareContext exposing the full operation enum may drift from spec as new operations are added.",
+      "mitigation": "The Literal enum mirrors the 8 ops listed in spec/operations/; a test asserts every spec/operations/*.input.schema.json filename has a matching enum member, failing CI if drift occurs."
+    },
+    {
+      "risk": "Identity migration could break existing imports of sox_protocol.core.identity.middleware.IdentityMiddleware.",
+      "mitigation": "Keep core/identity/middleware.py as a re-export shim aliasing AuthMiddleware; the existing identity tests run unchanged. Marked deprecated in module docstring."
+    },
+    {
+      "risk": "Out-of-core plugin registration may inadvertently allow a plugin to bypass auth by inserting before it.",
+      "mitigation": "MiddlewareRegistry.assemble enforces must_run_before/must_run_after; AuthMiddleware declares must_run_after=('namespace_resolver',) and must_run_before=('rate_limit','schema_validator','idempotency','store_dispatch'). A negative test attempts to insert a plugin before auth and asserts ChainConfigurationError."
+    },
+    {
+      "risk": "Hook short-circuit response shape could diverge from sox-error envelope.",
+      "mitigation": "HookDecision(action='deny') is converted by HookDispatcher into a sox-error via errors.make_internal_error / a dedicated factory; jsonschema-validated in test_hooks.py."
+    },
+    {
+      "risk": "channels_ack is a tool, not a message — a plugin could try to write ACK envelopes into ctx.input.body.",
+      "mitigation": "default_chain documents the 8 operations; schema_validator (when present) blocks body.type='sox-ack' on send. The pipeline itself does not police body shapes; this risk is filed for the schema_validator engagement."
+    }
+  ],
+  "dependencies": [],
+  "build_order": [
+    "errors.py",
+    "context.py",
+    "protocol.py",
+    "pipeline.py",
+    "registry.py",
+    "hooks.py",
+    "plugins/__init__.py",
+    "plugins/store_dispatch.py",
+    "plugins/auth.py",
+    "plugins/logging.py",
+    "default_chain.py",
+    "__init__.py",
+    "identity/middleware.py (rewrite as shim re-exporting AuthMiddleware)",
+    "tests/middleware/conftest.py",
+    "tests/middleware/test_context.py",
+    "tests/middleware/test_pipeline.py",
+    "tests/middleware/test_registry.py",
+    "tests/middleware/test_hooks.py",
+    "tests/middleware/test_plugin_auth.py",
+    "tests/middleware/test_plugin_logging.py",
+    "tests/middleware/test_default_chain.py",
+    "tests/middleware/test_external_plugin.py",
+    "tests/identity/test_migration_regression.py"
+  ],
+  "exit_signals": [
+    "100% coverage on packages/python/src/sox_protocol/core/middleware/",
+    "Identity tests still pass after migration: pytest tests/identity/ -q is green including test_migration_regression.py",
+    "Sample logging plugin registered and exercised by tests/middleware/test_plugin_logging.py",
+    "Out-of-core plugin registration exercised by tests/middleware/test_external_plugin.py (no core file modified by the test)",
+    "lint-imports clean (core/middleware/plugins/auth.py imports from core/identity, NOT from adapters)",
+    "mypy --strict clean on src/sox_protocol/core/middleware/",
+    "Conformance footgun test passes: default chain refuses an unauthenticated send"
+  ],
+  "migration_notes": "The identity-primitive engagement ships these stable public symbols which this engagement consumes WITHOUT duplication: IdentityVerifier (core surface), SignedRequest, VerifiedIdentity, IdentityFailure (and subclasses UnknownAgentError, RevokedCredentialError, SignatureMismatchError, ReplayDetectedError), AuditLogWriter, CredentialRegistry. The identity-primitive's IdentityVerifier.verify(request, *, operation, connection_id) becomes the single call site inside AuthMiddleware.__call__; IdentityVerifier.bind_for_send(request, send_input) becomes the call AuthMiddleware uses on operation=='send' to overwrite ctx.input['sender']. The identity-primitive's standalone IdentityMiddleware (core/identity/middleware.py) is REPLACED by a re-export shim aliasing AuthMiddleware so existing imports keep working; the shim is marked deprecated in its docstring. AuditLogWriter is constructed by the auth plugin and passed to the verifier; logging behaviour is unchanged so the identity engagement's test_audit_log.py keeps passing without modification. No identity logic is reimplemented inside core/middleware/."
+}

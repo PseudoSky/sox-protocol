@@ -1,0 +1,23 @@
+{
+  "phase_id": "03-implement",
+  "engagement": "identity-primitive",
+  "source_run": "planner-run1",
+  "files": [
+    "packages/python/src/sox_protocol/core/identity/__init__.py",
+    "packages/python/src/sox_protocol/core/identity/errors.py",
+    "packages/python/src/sox_protocol/core/identity/envelope.py",
+    "packages/python/src/sox_protocol/core/identity/registry.py",
+    "packages/python/src/sox_protocol/core/identity/verifier.py",
+    "packages/python/src/sox_protocol/core/identity/audit.py",
+    "packages/python/src/sox_protocol/core/identity/middleware.py",
+    "packages/python/src/sox_protocol/core/identity/keys.py",
+    "packages/python/tests/identity/__init__.py",
+    "packages/python/tests/identity/conftest.py",
+    "packages/python/tests/identity/test_registry.py",
+    "packages/python/tests/identity/test_envelope.py",
+    "packages/python/tests/identity/test_verifier.py",
+    "packages/python/tests/identity/test_audit_log.py",
+    "packages/python/tests/identity/test_middleware.py",
+    "packages/python/tests/identity/test_keys.py"
+  ]
+}

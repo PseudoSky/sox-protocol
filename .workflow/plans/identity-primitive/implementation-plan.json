@@ -1,0 +1,272 @@
+{
+  "summary": "Build the identity layer at packages/python/src/sox_protocol/core/identity/ as a self-contained module with three concerns: (1) a credential registry that stores (agent_id, public_key, registered_at, revoked_at?) tuples and verifies Ed25519 signatures over the canonical signed-request envelope (agent_id, nonce, timestamp, method, body-hash); (2) an identity verifier callable that wraps the registry and produces a verified agent_id from a signed request, raising IdentityFailure on any rejection; (3) an audit-log writer that emits one JSON line per rejection. The module exposes a stable public API consumable by the upcoming hooks-middleware engagement: CredentialRegistry (port + in-memory reference impl), SignedRequest dataclass, IdentityVerifier.verify(signed_request) -> VerifiedIdentity, and IdentityFailure exception hierarchy. A thin standalone `IdentityMiddleware` adapter is provided so identity can short-circuit calls before backing-store access is wired into the MCP server today; the hooks-middleware engagement will rebind this same verifier as the `auth` plugin in the chain. Build order: registry then verifier then audit then middleware adapter then tests. All audit-log writes target ~/.sox/logs/identity-failures.jsonl at runtime; tests redirect via an injectable path.",
+  "files": [
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/__init__.py",
+      "spec_ref": "spec/ports/identity.md §2",
+      "purpose": "Public re-exports forming the stable identity API consumed by hooks-middleware.",
+      "public_api": [
+        "CredentialRegistry",
+        "InMemoryCredentialRegistry",
+        "CredentialRecord",
+        "SignedRequest",
+        "VerifiedIdentity",
+        "IdentityVerifier",
+        "IdentityFailure",
+        "UnknownAgentError",
+        "RevokedCredentialError",
+        "SignatureMismatchError",
+        "ReplayDetectedError",
+        "AuditLogWriter",
+        "IdentityMiddleware"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/errors.py",
+      "spec_ref": "spec/ports/identity.md §5",
+      "purpose": "Typed exception hierarchy for identity failures; each carries a stable error_code matching sox-error.schema.json.",
+      "public_api": [
+        "class IdentityFailure(Exception): error_code: str = 'identity_failure'; reason: str",
+        "class UnknownAgentError(IdentityFailure)",
+        "class RevokedCredentialError(IdentityFailure)",
+        "class SignatureMismatchError(IdentityFailure)",
+        "class ReplayDetectedError(IdentityFailure)",
+        "class MalformedRequestError(IdentityFailure)"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/envelope.py",
+      "spec_ref": "spec/ports/identity.md §7; docs/adr/0002-agent-identity-primitive.md (signed_request envelope)",
+      "purpose": "Canonical signed-request envelope dataclass plus body-hash computation; defines the exact bytes that get signed.",
+      "public_api": [
+        "@dataclass(frozen=True) class SignedRequest(agent_id: str, nonce: str, timestamp: float, method: str, body_hash: str, signature: bytes)",
+        "@dataclass(frozen=True) class VerifiedIdentity(agent_id: str, verified_at: float, connection_id: str | None)",
+        "def canonical_payload(req: SignedRequest) -> bytes",
+        "def compute_body_hash(body: dict[str, object]) -> str"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/registry.py",
+      "spec_ref": "spec/ports/identity.md §3, §7; docs/adr/0002 §Operational/Server storage",
+      "purpose": "CredentialRegistry ABC plus in-memory reference implementation; stores (agent_id, public_key, registered_at, revoked_at?) and answers lookup/revocation queries. Append-only.",
+      "public_api": [
+        "@dataclass(frozen=True) class CredentialRecord(agent_id: str, public_key: bytes, registered_at: float, revoked_at: float | None)",
+        "class CredentialRegistry(ABC): async def register(agent_id, public_key) -> CredentialRecord; async def revoke(agent_id) -> None; async def lookup(agent_id) -> CredentialRecord | None; async def all_records() -> list[CredentialRecord]",
+        "class InMemoryCredentialRegistry(CredentialRegistry)"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/verifier.py",
+      "spec_ref": "spec/ports/identity.md §2, §4, §5",
+      "purpose": "IdentityVerifier glues registry + envelope + replay cache; verify() returns VerifiedIdentity or raises a typed IdentityFailure subclass. Replay cache TTL is configurable; default 5 minutes per ADR 0002 open question.",
+      "public_api": [
+        "class IdentityVerifier(registry: CredentialRegistry, audit: AuditLogWriter, *, replay_window_seconds: float = 300.0, clock: Callable[[], float] = time.time)",
+        "async def verify(self, request: SignedRequest, *, operation: str, connection_id: str | None = None) -> VerifiedIdentity",
+        "async def bind_for_send(self, request: SignedRequest, send_input: dict[str, object]) -> dict[str, object]  # overwrites sender per spec §2"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/audit.py",
+      "spec_ref": "spec/ports/identity.md §5 (SHOULD log)",
+      "purpose": "Append-only JSONL writer for identity failures. Default path ~/.sox/logs/identity-failures.jsonl (created at runtime, not at import); injectable for tests. One line per rejection: {ts, claimed_agent_id, reason, operation, connection_id}.",
+      "public_api": [
+        "class AuditLogWriter(path: pathlib.Path | None = None, *, clock: Callable[[], float] = time.time)",
+        "def default_audit_path() -> pathlib.Path  # returns ~/.sox/logs/identity-failures.jsonl",
+        "async def record_failure(self, *, claimed_agent_id: str | None, reason: str, operation: str, connection_id: str | None) -> None"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/middleware.py",
+      "spec_ref": "spec/ports/identity.md §4; spec/ports/middleware.md §4 (auth)",
+      "purpose": "Standalone IdentityMiddleware that wraps IdentityVerifier with a callable signature compatible with the upcoming middleware pipeline (handle(request, next)). Will be repackaged as the `auth` plugin during the hooks-middleware engagement; module docstring documents that migration seam.",
+      "public_api": [
+        "class IdentityMiddleware(verifier: IdentityVerifier)",
+        "async def __call__(self, request: dict[str, object], call_next: Callable[[dict[str, object]], Awaitable[dict[str, object]]]) -> dict[str, object]"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/identity/keys.py",
+      "spec_ref": "docs/adr/0002 §Operational",
+      "purpose": "Ed25519 helpers: generate keypair, load private key from path (mode 0600 enforced), sign canonical payload. Wraps the cryptography library so the rest of core stays algorithm-agnostic.",
+      "public_api": [
+        "def generate_keypair() -> tuple[bytes, bytes]  # (private_seed, public_key)",
+        "def load_private_key(path: pathlib.Path) -> Ed25519PrivateKey",
+        "def sign(private_key: Ed25519PrivateKey, payload: bytes) -> bytes",
+        "def verify_signature(public_key: bytes, payload: bytes, signature: bytes) -> bool"
+      ]
+    },
+    {
+      "path": "packages/python/tests/identity/__init__.py",
+      "spec_ref": "n/a",
+      "purpose": "Package marker.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/conftest.py",
+      "spec_ref": "n/a",
+      "purpose": "Fixtures: tmp audit-log path, deterministic clock, fresh InMemoryCredentialRegistry, sample agent keypair, helper to build SignedRequest from a body dict.",
+      "public_api": [
+        "fixture audit_writer",
+        "fixture registry",
+        "fixture verifier",
+        "fixture sample_keypair",
+        "fixture sign_request"
+      ]
+    },
+    {
+      "path": "packages/python/tests/identity/test_registry.py",
+      "spec_ref": "spec/ports/identity.md §7",
+      "purpose": "Validate registry append-only semantics, lookup, revocation behaviour.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_envelope.py",
+      "spec_ref": "spec/ports/identity.md §7; docs/adr/0002",
+      "purpose": "Canonical payload determinism + body-hash stability across key reorderings.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_verifier.py",
+      "spec_ref": "spec/ports/identity.md §2, §4, §5",
+      "purpose": "Verify happy-path success, every failure mode, sender overwrite for send().",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_audit_log.py",
+      "spec_ref": "spec/ports/identity.md §5 (SHOULD log)",
+      "purpose": "Integration: a rejected verify() yields exactly one JSONL line with required fields and no leakage.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_middleware.py",
+      "spec_ref": "spec/ports/identity.md §4; spec/ports/middleware.md §4",
+      "purpose": "IdentityMiddleware short-circuits unverified requests before call_next runs; verified requests forward with mutated sender; ensures backing-store is not reachable on rejection.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/identity/test_keys.py",
+      "spec_ref": "docs/adr/0002 §Operational",
+      "purpose": "Keypair generation, sign/verify roundtrip, file mode 0600 enforcement on load.",
+      "public_api": []
+    }
+  ],
+  "test_plan": [
+    {
+      "spec_section": "spec/ports/identity.md §2 (core guarantee)",
+      "test_cases": [
+        "test_send_overwrites_sender_with_verified_id — bind_for_send replaces caller-claimed sender with the verified agent_id",
+        "test_client_cannot_inject_sender — SignedRequest.method='send' with mismatched body.sender field still produces verified sender from agent_id binding"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md §4 (scope of enforcement)",
+      "test_cases": [
+        "test_send_requires_verification — IdentityMiddleware short-circuits unverified send before call_next",
+        "test_subscribe_requires_verification — same for subscribe",
+        "test_recv_requires_verification — same for recv; recv result is filtered to verified agent_id only",
+        "test_list_channels_passes_through_when_unauthenticated — informational op is not gated"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md §5 (failure behaviour)",
+      "test_cases": [
+        "test_unknown_agent_returns_identity_failure — raises UnknownAgentError mapping to error_code 'identity_failure'",
+        "test_revoked_credential_rejected — RevokedCredentialError on signed request from revoked agent",
+        "test_signature_mismatch_rejected — SignatureMismatchError when payload tampered",
+        "test_replay_within_window_rejected — second use of same nonce inside replay_window_seconds raises ReplayDetectedError",
+        "test_replay_outside_window_accepted — nonce reuse after window expiry succeeds (with new timestamp)",
+        "test_no_partial_state_on_failure — failed verify() does not mutate registry or audit cache invariants",
+        "test_error_message_does_not_leak_other_agent_ids — message string omits other registered agents"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md §5 (audit logging)",
+      "test_cases": [
+        "test_rejection_writes_one_audit_line — exactly one JSONL line per failure",
+        "test_audit_line_has_required_fields — ts, claimed_agent_id, reason, operation, connection_id present",
+        "test_audit_line_has_no_secrets — no signature, public_key, or body bytes appear in audit line",
+        "test_audit_path_default — default_audit_path() resolves to ~/.sox/logs/identity-failures.jsonl (string equality, no FS write in this test)"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md §6 (connection-time binding)",
+      "test_cases": [
+        "test_agent_id_not_in_send_input_schema — bind_for_send tolerates send input without agent_id key (server injects)",
+        "test_verifier_persists_binding_across_calls — same connection_id reusing nonce-distinct requests succeeds without re-registration"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/identity.md §7 (registry shape)",
+      "test_cases": [
+        "test_registry_records_required_columns — CredentialRecord exposes agent_id, public_key, registered_at, revoked_at",
+        "test_registry_is_append_only — revoke() sets revoked_at but does not remove the record",
+        "test_lookup_returns_none_for_unknown — lookup of unknown agent_id returns None (not raises)"
+      ]
+    },
+    {
+      "spec_section": "docs/adr/0002 (Ed25519 reference impl)",
+      "test_cases": [
+        "test_ed25519_sign_verify_roundtrip — signature produced by sign() validates with verify_signature()",
+        "test_load_private_key_rejects_world_readable — file mode 0644 is rejected; 0600 succeeds",
+        "test_canonical_payload_is_deterministic — reordering body keys does not change body_hash"
+      ]
+    },
+    {
+      "spec_section": "spec/ports/middleware.md §4 (auth position)",
+      "test_cases": [
+        "test_middleware_short_circuits_before_call_next — unverified request: call_next is NOT awaited",
+        "test_middleware_propagates_response_on_success — verified request: call_next response is returned unchanged"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "risk": "Audit-log path ~/.sox/logs/ does not exist at runtime; first failure raises FileNotFoundError instead of logging.",
+      "mitigation": "AuditLogWriter mkdir(parents=True, exist_ok=True) on first write; covered by test_rejection_writes_one_audit_line using a tmp path."
+    },
+    {
+      "risk": "Replay-window default (5 min) conflicts with future ADR pinning a different value.",
+      "mitigation": "Make replay_window_seconds a constructor arg with documented default; the open question in ADR 0002 will configure it later without API change."
+    },
+    {
+      "risk": "Hooks-middleware engagement may want a different signature than IdentityMiddleware.__call__.",
+      "mitigation": "IdentityVerifier is the canonical surface and is signature-stable; IdentityMiddleware is a thin adapter the hooks-middleware engagement is free to rewrite using the same verifier."
+    },
+    {
+      "risk": "InMemoryCredentialRegistry is not a real persistence layer; tests may accidentally rely on it as an adapter.",
+      "mitigation": "Document in registry.py docstring that this is a reference impl for tests and pre-adapter wiring; the SQLite/filesystem adapters land in a separate engagement."
+    },
+    {
+      "risk": "cryptography dependency may already be transitively present; double-pinning could cause version drift.",
+      "mitigation": "Add cryptography>=41 to packages/python/pyproject.toml [project.dependencies] in implementation phase only if absent; otherwise import-only."
+    }
+  ],
+  "dependencies": [
+    "cryptography>=41"
+  ],
+  "build_order": [
+    "errors.py",
+    "envelope.py",
+    "keys.py",
+    "registry.py",
+    "audit.py",
+    "verifier.py",
+    "middleware.py",
+    "__init__.py",
+    "tests/identity/conftest.py",
+    "tests/identity/test_keys.py",
+    "tests/identity/test_envelope.py",
+    "tests/identity/test_registry.py",
+    "tests/identity/test_audit_log.py",
+    "tests/identity/test_verifier.py",
+    "tests/identity/test_middleware.py"
+  ],
+  "exit_signals": [
+    "100% coverage on packages/python/src/sox_protocol/core/identity/",
+    "mypy --strict clean on src/sox_protocol/core/identity/",
+    "lint-imports clean (core/identity MUST NOT import from sox_protocol.adapters)",
+    "ruff check clean on src/sox_protocol/core/identity/ and tests/identity/",
+    "audit log appends one JSONL line to the configured path on every rejection (verified by test_audit_log.py against tmp path; runtime default ~/.sox/logs/identity-failures.jsonl is documented and exercised once via subprocess in test_audit_log.py)",
+    "Public API in __init__.py is stable and consumable by hooks-middleware engagement (pinned by test_imports smoke check inside test_middleware.py)"
+  ]
+}

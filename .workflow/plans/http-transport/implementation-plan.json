@@ -1,0 +1,192 @@
+{
+  "summary": "Build the HTTP transport adapter for the SOX Protocol Python reference implementation. Exposes all 16 v1 operations as JSON-over-HTTP POST endpoints under /v1/ops/<operation>, with a Server-Sent Events stream at GET /v1/stream for live recv push and channels__collect long-running responses. Identity is asserted via Authorization: Bearer <credential> resolved by the existing identity middleware. CORS allow-list is configurable. A GET /health probe returns store + transport liveness. The OpenAPI document at spec/transports/http/openapi.yaml is generated deterministically from spec/operations/*.json by tools/openapi_gen.py and committed. The conformance-suite runner targets this transport via --target http://host:port and uses the same SSE stream to observe asynchronous recv arrivals.",
+  "files": [
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/__init__.py",
+      "spec_ref": "spec/ports/transport.md §2.1",
+      "purpose": "Public entrypoint; re-exports HttpTransport and create_app.",
+      "public_api": ["HttpTransport", "create_app"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/server.py",
+      "spec_ref": "spec/ports/transport.md §2, §4",
+      "purpose": "FastAPI application factory: registers operation routes, /health, /v1/stream SSE, and CORS middleware. Wires identity middleware into a starlette dependency.",
+      "public_api": [
+        "create_app(store: BackingStore, identity: IdentityResolver, config: HttpConfig) -> FastAPI",
+        "class HttpTransport(Transport)"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/routes.py",
+      "spec_ref": "spec/operations/*.json",
+      "purpose": "One handler per operation: send, recv, subscribe, unsubscribe, list_channels, channels_ack, channels_heartbeat, channels_collect, replay, group_create, group_invite, group_join, group_leave, group_list_members. Each validates input against the matching JSON schema and returns the operation's output schema.",
+      "public_api": ["register_operation_routes(app: FastAPI, store: BackingStore) -> None"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/sse.py",
+      "spec_ref": "spec/ports/transport.md §2.4, §5",
+      "purpose": "Server-Sent Events stream for live recv push and channels__collect progress. Multiplexes per-agent watch streams onto a single connection per identity. Reconnect with Last-Event-ID resume by seq cursor.",
+      "public_api": ["sse_endpoint(request, store, identity) -> EventSourceResponse", "format_sse_event(message) -> str"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/health.py",
+      "spec_ref": "spec/protocol.md §Health",
+      "purpose": "GET /health: returns {status, protocol_version, store_ok, uptime_s}. No auth required.",
+      "public_api": ["health_router"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/cors.py",
+      "spec_ref": "spec/ports/transport.md §4",
+      "purpose": "CORS middleware factory honouring SOX_HTTP_CORS_ORIGINS; defaults to http://localhost:* and http://127.0.0.1:*; never emits Access-Control-Allow-Origin: * with credentials.",
+      "public_api": ["build_cors_middleware(origins: list[str]) -> Middleware"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/auth.py",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "Bearer token extraction + identity middleware integration. Rejects with 401 + sox-error envelope on missing/invalid credential.",
+      "public_api": ["bearer_dependency(identity: IdentityResolver) -> Callable"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/config.py",
+      "spec_ref": "spec/ports/transport.md §2",
+      "purpose": "Pydantic config model loaded from env vars SOX_HTTP_HOST, SOX_HTTP_PORT, SOX_HTTP_CORS_ORIGINS, SOX_HTTP_BUFFER_LIMIT, SOX_HTTP_RECONNECT_MAX_S.",
+      "public_api": ["HttpConfig"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/errors.py",
+      "spec_ref": "spec/envelopes/sox-error.schema.json",
+      "purpose": "Maps internal exceptions to sox-error envelopes and HTTP status codes.",
+      "public_api": ["sox_error_response(exc) -> JSONResponse"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/cli/serve.py",
+      "spec_ref": "spec/ports/transport.md §2",
+      "purpose": "Adds `sox serve --transport http|stdio` subcommand. For http: instantiates HttpConfig, builds app via create_app, runs uvicorn.",
+      "public_api": ["serve_command(args)"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/cli/__main__.py",
+      "spec_ref": "spec/ports/transport.md",
+      "purpose": "argparse entrypoint dispatching to serve_command and existing subcommands.",
+      "public_api": ["main()"]
+    },
+    {
+      "path": "packages/python/tests/transports/http/__init__.py",
+      "spec_ref": "n/a",
+      "purpose": "Test package marker.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/conftest.py",
+      "spec_ref": "n/a",
+      "purpose": "Pytest fixtures: in-memory backing store, test identity, async test client (httpx.AsyncClient + ASGITransport).",
+      "public_api": ["app_client", "store", "identity"]
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_routes.py",
+      "spec_ref": "spec/operations/*.json",
+      "purpose": "Per-operation request/response validation against operation schemas; covers all 16 operations including channels_ack tool semantics (no message-body ack), seq present on recv responses, dm/<sorted-pair> channel naming.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_sse.py",
+      "spec_ref": "spec/ports/transport.md §2.4, §5",
+      "purpose": "SSE stream tests: live recv push delivers seq monotonically; channels_collect emits progress + final; Last-Event-ID resume.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_auth.py",
+      "spec_ref": "spec/ports/identity.md",
+      "purpose": "401 on missing/invalid bearer; 200 on valid; sender field is server-certified from identity, not request body.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_cors.py",
+      "spec_ref": "spec/ports/transport.md §4",
+      "purpose": "Preflight handling; allow-list enforcement; never wildcard with credentials; localhost defaults.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_health.py",
+      "spec_ref": "spec/protocol.md §Health",
+      "purpose": "GET /health returns 200 within 5s of startup, includes protocol_version.",
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/transports/http/test_cli_serve.py",
+      "spec_ref": "spec/ports/transport.md",
+      "purpose": "CLI smoke: `sox serve --transport http --port <ephemeral>` starts and answers /health.",
+      "public_api": []
+    },
+    {
+      "path": "spec/transports/http/openapi.yaml",
+      "spec_ref": "spec/operations/*.json",
+      "purpose": "OpenAPI 3.1 document generated from operation schemas. Routes mirror /v1/ops/<operation> with input/output schema components, plus /v1/stream (SSE) and /health.",
+      "public_api": []
+    },
+    {
+      "path": "spec/transports/http/README.md",
+      "spec_ref": "spec/ports/transport.md §4, §5",
+      "purpose": "Documents wire format, SSE event shape, error envelope mapping, CORS configuration, and how to regenerate the OpenAPI document.",
+      "public_api": []
+    },
+    {
+      "path": "tools/openapi_gen.py",
+      "spec_ref": "spec/operations/*.json",
+      "purpose": "Reads spec/operations/*.{input,output}.schema.json and emits spec/transports/http/openapi.yaml. Deterministic ordering. Handles x-status: planned (marks operation deprecated/experimental).",
+      "public_api": ["generate(spec_dir: Path, out_path: Path) -> None", "main()"]
+    }
+  ],
+  "wire_format": {
+    "request_response": "JSON over HTTP POST to /v1/ops/<operation>; request body is the operation's input schema; response body is the operation's output schema; sox-error envelope on error with 4xx/5xx.",
+    "live_recv": "Server-Sent Events at GET /v1/stream. Rationale: SSE is unidirectional server->client which matches recv push semantics; survives any HTTP/1.1 reverse proxy without WebSocket upgrades; trivial for the conformance runner to consume with httpx (line iteration); supports Last-Event-ID resume keyed on per-channel seq, aligning with the seq-on-every-message primitive. WebSocket was rejected because no client-to-server messages are needed on the stream (operations are POSTed) and SSE composes better with CORS preflight.",
+    "auth": "Authorization: Bearer <credential>; identity middleware resolves credential -> agent_id; agent_id is server-certified into envelope.sender."
+  },
+  "openapi": {
+    "path": "spec/transports/http/openapi.yaml",
+    "generation": "from spec/operations/*.json via tools/openapi_gen.py; regenerated on every build by `python3 tools/openapi_gen.py`; validated with openapi-spec-validator."
+  },
+  "cli_subcommand": {
+    "name": "sox serve --transport http",
+    "env_vars": ["SOX_HTTP_HOST", "SOX_HTTP_PORT", "SOX_HTTP_CORS_ORIGINS", "SOX_HTTP_BUFFER_LIMIT", "SOX_HTTP_RECONNECT_MAX_S"]
+  },
+  "test_plan": [
+    "Per-operation contract tests assert input/output validate against spec/operations schemas.",
+    "channels_ack covered as a tool call returning sox-ack envelope; assert no sox-ack body appears on subsequent recv of the channel.",
+    "DM tests use dm/<sorted-pair> channel naming; assert lexicographic sort of agent ids.",
+    "recv test asserts seq is present, integer >=1, monotone per channel.",
+    "channels_heartbeat updates server-side liveness; presence reflected on sox/presence channel.",
+    "replay since seq=N returns only messages with seq>=N.",
+    "channels_collect emits SSE progress events and final aggregate; honours timeout.",
+    "Identity: 401 on missing/invalid bearer; sender forgery in body is overridden by certified identity.",
+    "CORS preflight: OPTIONS with allowed Origin returns Access-Control-Allow-Origin: <origin>; disallowed origin returns 403/no-cors-header.",
+    "Health: GET /health returns 200 within 5s of startup including protocol_version.",
+    "CLI smoke spawns uvicorn on ephemeral port and curls /health."
+  ],
+  "risks": [
+    "SSE buffering by intermediate proxies could delay live recv events; mitigated by X-Accel-Buffering: no header and periodic keep-alive comments.",
+    "FastAPI dependency injection for identity must run before request body parsing to avoid leaking unauthenticated payloads to logs; mitigated by using a starlette middleware rather than a route dependency for the auth check.",
+    "OpenAPI generation must keep stable key ordering across runs; mitigated by sorted() at every level and a CI diff-check.",
+    "channels_collect long-poll vs SSE divergence: we standardize on SSE only; documented in spec/transports/http/README.md and reflected in conformance live_recv_strategy."
+  ],
+  "dependencies": ["fastapi", "uvicorn", "sse-starlette", "httpx", "pyyaml", "openapi-spec-validator"],
+  "build_order": [
+    "config.py + errors.py + auth.py (no I/O)",
+    "cors.py + health.py",
+    "routes.py per-operation handlers",
+    "sse.py with watch stream multiplexing",
+    "server.py create_app wiring",
+    "cli/serve.py + cli/__main__.py",
+    "tools/openapi_gen.py + spec/transports/http/openapi.yaml + README",
+    "tests achieving 100% coverage"
+  ],
+  "exit_signals": [
+    "100% coverage on adapters/transports/http/",
+    "Conformance suite passes against HTTP target",
+    "OpenAPI generated and valid",
+    "CORS configurable",
+    "GET /health endpoint",
+    "mypy --strict clean",
+    "lint-imports clean (adapter -> core only)"
+  ]
+}

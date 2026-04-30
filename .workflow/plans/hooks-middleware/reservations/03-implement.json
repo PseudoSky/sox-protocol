@@ -1,0 +1,31 @@
+{
+  "phase_id": "03-implement",
+  "engagement": "hooks-middleware",
+  "source_run": "planner-run1",
+  "files": [
+    "packages/python/src/sox_protocol/core/middleware/__init__.py",
+    "packages/python/src/sox_protocol/core/middleware/context.py",
+    "packages/python/src/sox_protocol/core/middleware/protocol.py",
+    "packages/python/src/sox_protocol/core/middleware/errors.py",
+    "packages/python/src/sox_protocol/core/middleware/pipeline.py",
+    "packages/python/src/sox_protocol/core/middleware/registry.py",
+    "packages/python/src/sox_protocol/core/middleware/hooks.py",
+    "packages/python/src/sox_protocol/core/middleware/plugins/__init__.py",
+    "packages/python/src/sox_protocol/core/middleware/plugins/auth.py",
+    "packages/python/src/sox_protocol/core/middleware/plugins/logging.py",
+    "packages/python/src/sox_protocol/core/middleware/plugins/store_dispatch.py",
+    "packages/python/src/sox_protocol/core/middleware/default_chain.py",
+    "packages/python/src/sox_protocol/core/identity/middleware.py",
+    "packages/python/tests/middleware/__init__.py",
+    "packages/python/tests/middleware/conftest.py",
+    "packages/python/tests/middleware/test_pipeline.py",
+    "packages/python/tests/middleware/test_context.py",
+    "packages/python/tests/middleware/test_registry.py",
+    "packages/python/tests/middleware/test_hooks.py",
+    "packages/python/tests/middleware/test_default_chain.py",
+    "packages/python/tests/middleware/test_plugin_auth.py",
+    "packages/python/tests/middleware/test_plugin_logging.py",
+    "packages/python/tests/middleware/test_external_plugin.py",
+    "packages/python/tests/identity/test_migration_regression.py"
+  ]
+}
