@@ -2,7 +2,7 @@
 slug: orchestrator-bootstrap
 target: workflow-lint tool, orchestrator system prompt, and SOX hook opt-out for orchestrator sessions all shipped.
 created: 2026-04-30
-last_event: 2026-04-30T00:00:00Z
+last_event: 2026-04-30T18:00:00Z
 orchestrator_protocol: v1
 ---
 
@@ -12,14 +12,15 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-bootstrap | Build lint tool, system prompt, hook opt-out | `READY` | python-pro | 0 | 2026-04-30T00:00:00Z |
+| 01-bootstrap | Build lint tool, system prompt, hook opt-out | `IN_PROGRESS` | python-pro | 1 | 2026-04-30T18:00:00Z |
 
 ## Currently next action
 
-`01-bootstrap` is `READY`. **Run this engagement FIRST** before advancing any other engagement. It produces tools the orchestrator needs.
+`01-bootstrap` is `IN_PROGRESS`. python-pro is dispatched. Awaiting return + exit-criteria verification.
 
 ## Transitions
 
+- 2026-04-30T18:00:00Z 01-bootstrap — IN_PROGRESS (orchestrator: workflow-architect)
 - 2026-04-30T00:00:00Z 01-bootstrap — initialized (READY)
 
 ## Termination targets
