@@ -1,0 +1,315 @@
+{
+  "summary": "Wire MiddlewareRegistry.load_plugins() into both Python server bootstraps so out-of-tree plugins discovered through Python entry-points (group sox_protocol.plugins) compose with the default pipeline. The existing core/middleware/registry.py already exposes a permissive load_entry_points(group='sox_protocol.middleware') that registers any zero-arg callable; that path remains for legacy in-tree middleware. P4 layers a manifest-validating loader on top: a new core/middleware/plugin_loader.py reads sox-plugin.yaml from each discovered package, validates against spec/schemas/sox-plugin.schema.json, runs the §4 boot-time protocol_version compatibility check (PEP 440 + npm caret dual-form per 06-versioning.md), enforces capability-flag orthogonality, runs a stable Kahn topological sort with lex-id tie-break, and instantiates plugin factories via the entry_point.load() handle. The seven closed-taxonomy error envelopes from 03-plugin-contract.md §6.2 (plugin_not_allowed, plugin_not_found, plugin_manifest_invalid, plugin_protocol_version_mismatch, plugin_capability_conflict, plugin_ordering_cycle, plugin_requirement_unmet) are emitted as structured errors during this load; all are fail-fast at startup.",
+  "summary_part2": "MiddlewareRegistry gains a single new public method: load_plugins(*, allowlist: list[str] | None = None, env: str = 'dev', host_protocol_version: str = '1.0.0', no_discovery: bool = False) -> None. It orchestrates: (1) entry-point scan; (2) per-plugin manifest read + JSON-Schema validate; (3) protocol_version negotiation; (4) capability-flag orthogonality assertion; (5) allowlist filter (production-empty=refuse-all; dev-warn-on-unallowlisted); (6) toposort with cycle detection; (7) requires/provides resolution; (8) factory invocation + register(). Result is cached on the registry as the resolved order property — Kahn runs once at startup, never per-request. Both bootstraps (core/mcp_server/server.py lifespan; adapters/transports/http/server.py create_app) call registry.load_plugins() AFTER build_default_pipeline; the new plugins extend rather than replace the default chain. CLI (cli/serve.py) gains --allow-plugins ID,... and --no-discovery flags; SOX_ALLOWED_PLUGINS and SOX_ENV env vars provide the equivalent declarative path with --allow-plugins taking precedence per 03-plugin-contract.md §6.1.",
+  "summary_part3": "P4 deliberately does NOT redesign any contract: it implements the contract frozen by B1. Per ADR 0004 §6 the v1 host validates that signatures is present and is a list but does not enforce contents. Per 06-versioning.md §6.2 the host emits a non-zero exit and the five-field plugin_protocol_version_mismatch envelope on incompatibility. Per analysis §7.5 risk #1 production mode (SOX_ENV=production) with empty allowlist refuses to load any plugin — this is fail-fast supply-chain protection, not silent degradation. --no-discovery short-circuits the entire loader before allowlist evaluation (precedence rule documented in R4) so security audits and unit tests can run hermetically without site-packages contamination.",
+  "files": [
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/plugin_loader.py",
+      "phase": "02-build",
+      "purpose": "Read+validate sox-plugin.yaml manifests; run protocol_version negotiation; instantiate factories via declared entry-point.",
+      "current_state": "Does not exist.",
+      "target_state": "New module exposing read_manifest_for_entry_point(ep) -> Manifest, validate_manifest(doc) -> Manifest, check_protocol_version(manifest, host_version) -> None | raises PluginProtocolVersionMismatch, assert_capability_orthogonality(manifest) -> None | raises PluginCapabilityConflict, parse_version_range(s) -> Specifier (accepts both PEP 440 and npm caret per 06-versioning.md §2.2), and the Manifest dataclass mirroring the schema's spec block.",
+      "delta": [
+        "Add Manifest dataclass with fields: id (from metadata.id), version, kind, protocol_version, plugin_capabilities, requires, must_run_before, must_run_after, signatures, applies_to.",
+        "Add read_manifest_for_entry_point(ep): import the entry-point's distribution (importlib.metadata.distribution(ep.dist.name)); locate sox-plugin.yaml via the package's [project.entry-points.'sox_protocol.plugins'] convention (declared next to the entry-point package's __init__ — fall back to walking distribution.files for sox-plugin.yaml). Returns the parsed dict or raises PluginManifestInvalid('not found').",
+        "Add validate_manifest(doc): jsonschema.validate against spec/schemas/sox-plugin.schema.json; on failure raise PluginManifestInvalid with the validator's path + message. Validate that signatures is present and is a list (per ADR 0004 §6, do not enforce contents).",
+        "Add parse_version_range(s): try packaging.specifiers.SpecifierSet(s) first; on failure attempt a normalize_npm_caret(s) translation (caret/tilde/wildcard/x → equivalent PEP 440 clause set) then re-parse; on second failure raise PluginManifestInvalid('protocol_version not parseable').",
+        "Add check_protocol_version(manifest, host_protocol_version): apply the §4.2 algorithm (parse → test → reject). Use prereleases=True when host version contains a pre-release identifier per 06-versioning.md §4.4. On mismatch raise PluginProtocolVersionMismatch carrying the five-field envelope from §5.1.",
+        "Add assert_capability_orthogonality(manifest): scan plugin_capabilities for the {observe_only:true} + {may_short_circuit:true} pair; on conflict raise PluginCapabilityConflict per 03-plugin-contract.md §2.3.",
+        "Add canonicalize_env_var(plugin_id, key) -> str helper implementing the §7.2 rule (replace . and - with _; uppercase; SOX_PLUGIN_<id>_<KEY>). Used by future config readers; included here as the loader is the natural home.",
+        "Hard import boundary: this module MUST NOT import from sox_protocol.adapters; lint-imports rule kept."
+      ],
+      "public_api": [
+        "Manifest",
+        "read_manifest_for_entry_point",
+        "validate_manifest",
+        "parse_version_range",
+        "check_protocol_version",
+        "assert_capability_orthogonality",
+        "canonicalize_env_var",
+        "PluginManifestInvalid",
+        "PluginProtocolVersionMismatch",
+        "PluginCapabilityConflict"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/errors.py",
+      "phase": "02-build",
+      "purpose": "Add the seven closed-taxonomy plugin startup error classes per 03-plugin-contract.md §6.2.",
+      "current_state": "Defines ChainConfigurationError, MiddlewareError, ShortCircuitResponse.",
+      "target_state": "Adds PluginStartupError(MiddlewareError) base + seven typed subclasses each carrying error_code as a stable class-level constant.",
+      "delta": [
+        "Add class PluginStartupError(MiddlewareError) base with error_code: ClassVar[str] and to_envelope() -> dict[str, str] method.",
+        "Add PluginNotAllowed(PluginStartupError, error_code='plugin_not_allowed') — config typo / unallowlisted id; envelope echoes the offending id.",
+        "Add PluginNotFound(PluginStartupError, error_code='plugin_not_found') — allowlist entry references no entry-point.",
+        "Add PluginManifestInvalid(PluginStartupError, error_code='plugin_manifest_invalid') — schema validation failed; carries jsonschema path.",
+        "Add PluginProtocolVersionMismatch(PluginStartupError, error_code='plugin_protocol_version_mismatch') — five-field envelope: plugin_id, plugin_declares, host_supports, remediation.",
+        "Add PluginCapabilityConflict(PluginStartupError, error_code='plugin_capability_conflict') — observe_only+may_short_circuit set together.",
+        "Add PluginOrderingCycle(PluginStartupError, error_code='plugin_ordering_cycle') — message MUST name cycle members in arrow notation.",
+        "Add PluginRequirementUnmet(PluginStartupError, error_code='plugin_requirement_unmet') — names unmet capability + requiring plugin id."
+      ],
+      "public_api": [
+        "PluginStartupError",
+        "PluginNotAllowed",
+        "PluginNotFound",
+        "PluginManifestInvalid",
+        "PluginProtocolVersionMismatch",
+        "PluginCapabilityConflict",
+        "PluginOrderingCycle",
+        "PluginRequirementUnmet"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/registry.py",
+      "phase": "02-build",
+      "purpose": "Add load_plugins() orchestrator on MiddlewareRegistry; re-export the resolved order as a cached property.",
+      "current_state": "Has load_entry_points(group='sox_protocol.middleware') (lines 177-200) — naive loader, no manifest/allowlist/version checks, called by no production code.",
+      "target_state": "Adds load_plugins(*, allowlist, env, host_protocol_version, no_discovery, group='sox_protocol.plugins') method that performs the seven-step pipeline (scan→manifest-validate→version-negotiate→orthogonality→allowlist→toposort→register). Caches resolved order on self._resolved_order. Existing load_entry_points kept untouched for backward compat with in-tree middleware that still register that way.",
+      "delta": [
+        "Import from sox_protocol.core.middleware.plugin_loader: read_manifest_for_entry_point, validate_manifest, check_protocol_version, assert_capability_orthogonality.",
+        "Import error classes from sox_protocol.core.middleware.errors.",
+        "Add self._loaded_manifests: dict[str, Manifest] = {} and self._resolved_order: tuple[str, ...] | None = None on __init__.",
+        "Add load_plugins(*, allowlist: list[str] | None = None, env: str = 'dev', host_protocol_version: str = '1.0.0', no_discovery: bool = False, group: str = 'sox_protocol.plugins') -> None.",
+        "Step 0: if no_discovery: log INFO 'plugin discovery disabled (--no-discovery)'; set self._resolved_order = (); return.",
+        "Step 1: enumerate importlib.metadata.entry_points(group=group); collect (ep.name, ep) tuples.",
+        "Step 2: in production mode (env=='production') with empty/None allowlist: log+raise PluginNotAllowed (allowlist_required) — refuses startup; non-empty allowlist proceeds.",
+        "Step 3: for each entry-point: read_manifest_for_entry_point(ep) → validate_manifest → check_protocol_version → assert_capability_orthogonality. Each raise propagates as the right typed error and aborts startup.",
+        "Step 4: allowlist filter — for each manifest.id: if env=='production' and id not in allowlist: skip silently per 03-plugin-contract.md §6.1; if env=='dev' and allowlist provided and id not in allowlist: emit stderr warning + load anyway. For each id IN allowlist that produced no manifest: raise PluginNotFound(id).",
+        "Step 5: build DAG over loaded manifests using must_run_before/must_run_after; resolve capability strings via the {provides → set[plugin_id]} index built from each manifest.plugin_capabilities. Run stable Kahn (existing _topological_sort generalized; add lex tie-break confirmation) and on incompletion raise PluginOrderingCycle naming remaining nodes.",
+        "Step 6: validate requires — for each manifest: every entry in requires resolved against the provides index; missing → raise PluginRequirementUnmet(plugin=id, capability=req).",
+        "Step 7: invoke factories — for each ordered id call ep.load()() and self.register(id, factory). Cache self._resolved_order = tuple(ordered_ids).",
+        "Step 8: log structured 'plugin registry frozen: N plugins loaded' line per ADR §9.1.",
+        "Add @property resolved_order(self) -> tuple[str, ...] returning self._resolved_order or () if load_plugins not yet called.",
+        "Do NOT modify load_entry_points — keep as-is for backward compatibility."
+      ],
+      "public_api": [
+        "MiddlewareRegistry.load_plugins",
+        "MiddlewareRegistry.resolved_order"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/middleware/__init__.py",
+      "phase": "02-build",
+      "purpose": "Re-export the new plugin error taxonomy and Manifest type so out-of-core code can catch typed startup failures.",
+      "current_state": "Re-exports protocol/context, Pipeline, Registry, Hooks, default_chain, three error classes.",
+      "target_state": "Adds re-exports of the seven PluginStartupError subclasses + Manifest.",
+      "delta": [
+        "Add to imports: from sox_protocol.core.middleware.errors import (PluginStartupError, PluginNotAllowed, PluginNotFound, PluginManifestInvalid, PluginProtocolVersionMismatch, PluginCapabilityConflict, PluginOrderingCycle, PluginRequirementUnmet)",
+        "Add to imports: from sox_protocol.core.middleware.plugin_loader import Manifest",
+        "Append all new names to __all__."
+      ],
+      "public_api": [
+        "Manifest",
+        "PluginStartupError",
+        "PluginNotAllowed",
+        "PluginNotFound",
+        "PluginManifestInvalid",
+        "PluginProtocolVersionMismatch",
+        "PluginCapabilityConflict",
+        "PluginOrderingCycle",
+        "PluginRequirementUnmet"
+      ]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/cli/serve.py",
+      "phase": "03-allowlist",
+      "purpose": "Add --allow-plugins and --no-discovery flags; thread them through to the bootstrap.",
+      "current_state": "argparse with --transport/--host/--port; serve_command builds either MCP stdio server or HTTP app via create_app(store, config).",
+      "target_state": "Adds --allow-plugins ID,ID,... and --no-discovery flags; resolves allowlist with CLI taking precedence over SOX_ALLOWED_PLUGINS env var; resolves env from SOX_ENV (default 'dev'); passes both into create_app and into mcp_server.main via os.environ injection (SOX_ALLOWED_PLUGINS / SOX_NO_DISCOVERY) so the stdio path's lifespan reads them uniformly.",
+      "delta": [
+        "Add parser.add_argument('--allow-plugins', default=None, help='Comma-separated plugin id allowlist; overrides SOX_ALLOWED_PLUGINS')",
+        "Add parser.add_argument('--no-discovery', action='store_true', help='Disable plugin discovery entirely (testing/security audit)')",
+        "In serve_command before transport branching: if args.allow_plugins is not None: os.environ['SOX_ALLOWED_PLUGINS'] = args.allow_plugins; if args.no_discovery: os.environ['SOX_NO_DISCOVERY'] = '1'.",
+        "For HTTP path: pass allowlist (parsed) and no_discovery into create_app via new kwargs (see http/server.py delta).",
+        "Precedence rule documented (R4): --no-discovery short-circuits BEFORE allowlist evaluation; if both set, no_discovery wins."
+      ],
+      "public_api": []
+    },
+    {
+      "path": "packages/python/src/sox_protocol/core/mcp_server/server.py",
+      "phase": "04-bootstrap-integration",
+      "purpose": "Invoke registry.load_plugins() inside the lifespan AFTER build_default_pipeline.",
+      "current_state": "Lifespan builds identity stack, calls build_default_pipeline(verifier, store), starts listener, yields the context dict. No plugin loader is invoked.",
+      "target_state": "After pipeline construction (line 310) the lifespan reads allowlist+env from SOX_ALLOWED_PLUGINS / SOX_ENV / SOX_NO_DISCOVERY, calls a singleton MiddlewareRegistry's load_plugins, and applies the resolved out-of-tree plugins as additional middleware appended to the pipeline (or rebuilds the pipeline through PipelineBuilder feeding registered factories).",
+      "delta": [
+        "Import: from sox_protocol.core.middleware import MiddlewareRegistry, register_middleware (use the module-level singleton).",
+        "After line 310 (pipeline = build_default_pipeline(...)): parse allowlist = (os.environ.get('SOX_ALLOWED_PLUGINS') or '').split(',') filtered for empties or None if absent; env = os.environ.get('SOX_ENV', 'dev'); no_discovery = os.environ.get('SOX_NO_DISCOVERY') == '1'.",
+        "Call register_middleware.load_plugins(allowlist=allowlist, env=env, host_protocol_version='1.0.0', no_discovery=no_discovery). On any PluginStartupError: log envelope at ERROR + sys.exit(1) per ADR 0004 fail-fast.",
+        "Extend the existing pipeline with discovered plugins: for name in register_middleware.resolved_order: pipeline = pipeline.with_appended(register_middleware.get(name)()) — exact API surface depends on Pipeline mutation semantics already in core; if Pipeline is immutable, rebuild via PipelineBuilder seeded from build_default_pipeline's components plus registered factories.",
+        "Update lifespan docstring to mention the load_plugins step.",
+        "Coordination note: this file is read-only WRT pipeline construction primitives — we extend, do not modify build_default_pipeline."
+      ],
+      "public_api": []
+    },
+    {
+      "path": "packages/python/src/sox_protocol/adapters/transports/http/server.py",
+      "phase": "04-bootstrap-integration",
+      "purpose": "Invoke registry.load_plugins() in create_app() AFTER the pipeline is constructed (or accepted from caller).",
+      "current_state": "create_app builds identity stack via _build_identity_stack (line 74 build_default_pipeline call) or accepts a caller-provided pipeline, then registers operation routes against built_pipeline. P1-03 is concurrently restructuring this seam.",
+      "target_state": "Accepts new optional kwargs allowlist: list[str]|None, env: str='dev', no_discovery: bool=False on create_app. After built_pipeline is determined, invokes register_middleware.load_plugins(...) and extends built_pipeline with the resolved chain; routes are registered against the extended pipeline.",
+      "delta": [
+        "Add to create_app signature: allowlist: list[str] | None = None, env: str = 'dev', no_discovery: bool = False (defaults preserve current behavior when not supplied).",
+        "After built_pipeline is established (current line ~127 in the post-P1-03 layout), invoke from sox_protocol.core.middleware import register_middleware; register_middleware.load_plugins(allowlist=allowlist, env=env, host_protocol_version='1.0.0', no_discovery=no_discovery).",
+        "Wrap in try/except PluginStartupError as exc: log + raise — uvicorn will exit non-zero. Do NOT swallow.",
+        "Extend built_pipeline as in mcp_server (same rebuild-or-append strategy).",
+        "Coordination with P1-03 (R3): P4 only adds the load_plugins call; the pipeline-construction sequence owned by P1 must remain authoritative. Diff target lines will shift; identify by 'register_operation_routes(ops_router, built_pipeline,' anchor."
+      ],
+      "public_api": [
+        "create_app(*, allowlist, env, no_discovery)"
+      ]
+    },
+    {
+      "path": "packages/python/tests/middleware/test_plugin_loader.py",
+      "phase": "05-test",
+      "purpose": "Unit tests for plugin_loader.py: manifest parsing, schema validation, version negotiation, orthogonality, env-var canonicalization.",
+      "current_state": "Does not exist.",
+      "target_state": "pytest module with the assertions enumerated in test_plan.",
+      "delta": [],
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_load_plugins_integration.py",
+      "phase": "05-test",
+      "purpose": "Integration tests: install a stub plugin via importlib.metadata entry-point monkey-patch; assert discovered, manifest-validated, registered, ordered.",
+      "current_state": "Does not exist.",
+      "target_state": "pytest module exercising the end-to-end load_plugins() against a synthetic distribution registered via fixtures (no site-packages writes).",
+      "delta": [],
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_allowlist_semantics.py",
+      "phase": "05-test",
+      "purpose": "Production refuses-empty; dev warns-on-unallowlisted; --no-discovery short-circuits; PluginNotFound on typo.",
+      "current_state": "Does not exist.",
+      "target_state": "pytest module covering SOX_ENV branches and CLI/env precedence.",
+      "delta": [],
+      "public_api": []
+    },
+    {
+      "path": "packages/python/tests/middleware/test_bootstrap_wireup.py",
+      "phase": "05-test",
+      "purpose": "Verify mcp_server lifespan and http create_app both invoke load_plugins after build_default_pipeline; verify sequence via spy.",
+      "current_state": "Does not exist.",
+      "target_state": "pytest module with monkeypatched MiddlewareRegistry.load_plugins recording call order against build_default_pipeline.",
+      "delta": [],
+      "public_api": []
+    }
+  ],
+  "test_plan": [
+    {
+      "phase": "05-test",
+      "file": "tests/middleware/test_plugin_loader.py",
+      "cases": [
+        "test_manifest_valid_minimum — minimal sox-plugin.yaml (interceptor kind, signatures: []) parses+validates",
+        "test_manifest_invalid_missing_signatures — manifest without signatures field raises PluginManifestInvalid (ADR 0004 §6 / 06-versioning §6.2)",
+        "test_protocol_version_pep440_accepted — '>=1.0,<2.0' against host 1.0.0 passes",
+        "test_protocol_version_npm_caret_accepted — '^1.0.0' against host 1.0.0 passes (R1: dual-form parser path)",
+        "test_protocol_version_mismatch_envelope — host 2.0.0 vs '>=1.0,<2.0' raises PluginProtocolVersionMismatch with all five envelope fields populated per 06-versioning.md §5.1",
+        "test_protocol_version_unparseable — 'not a range' raises PluginManifestInvalid",
+        "test_capability_orthogonality_violation — manifest with both observe_only:true and may_short_circuit:true raises PluginCapabilityConflict",
+        "test_canonicalize_env_var — id='org.example.sox-jwt-auth', key='JWKS_URL' → 'SOX_PLUGIN_ORG_EXAMPLE_SOX_JWT_AUTH_JWKS_URL'"
+      ]
+    },
+    {
+      "phase": "05-test",
+      "file": "tests/middleware/test_load_plugins_integration.py",
+      "cases": [
+        "test_stub_plugin_discovered_and_invoked — monkeypatch importlib.metadata.entry_points to yield a stub EntryPoint pointing at a tmp-built distribution containing sox-plugin.yaml; assert MiddlewareRegistry.get(stub_id) returns the factory",
+        "test_cyclic_must_run_before_after — two stubs with mutual must_run_before raise PluginOrderingCycle whose message contains 'a -> b -> a'",
+        "test_capability_requires_unmet — stub declares requires:['identity.registry'] with no provider; raises PluginRequirementUnmet naming both",
+        "test_resolved_order_cached — registry._resolved_order set once; second call to load_plugins is idempotent OR raises (decision: idempotent; second call re-runs validation but produces same tuple)",
+        "test_load_plugins_lex_tie_break — three independent stubs with no constraints resolve in UTF-8 lex order"
+      ]
+    },
+    {
+      "phase": "05-test",
+      "file": "tests/middleware/test_allowlist_semantics.py",
+      "cases": [
+        "test_production_empty_allowlist_refuses — env='production', allowlist=None: load_plugins raises PluginNotAllowed (or refuses startup with structured envelope)",
+        "test_production_strict_filter — env='production', allowlist=['a']: stub 'b' silently skipped per 03-plugin-contract.md §6.1; stub 'a' loads",
+        "test_production_typo_raises_not_found — env='production', allowlist=['a-typo'] but no such entry-point: raises PluginNotFound('a-typo')",
+        "test_dev_unallowlisted_warns — env='dev', allowlist=['a']: stub 'b' loads with stderr warning containing 'b'",
+        "test_dev_no_allowlist_loads_all — env='dev', allowlist=None: all discovered plugins loaded, no warning",
+        "test_no_discovery_short_circuits — no_discovery=True, env='production', allowlist=None: returns cleanly; resolved_order is () (R4 precedence)",
+        "test_cli_overrides_env_var — SOX_ALLOWED_PLUGINS='env-id' but --allow-plugins=cli-id: CLI wins"
+      ]
+    },
+    {
+      "phase": "05-test",
+      "file": "tests/middleware/test_bootstrap_wireup.py",
+      "cases": [
+        "test_mcp_server_lifespan_calls_load_plugins_after_pipeline — spy on build_default_pipeline + MiddlewareRegistry.load_plugins; assert call order",
+        "test_http_create_app_calls_load_plugins_after_pipeline — same for adapters/transports/http/server.py:create_app",
+        "test_plugin_startup_error_aborts_startup — PluginStartupError raised inside load_plugins surfaces as SystemExit(1) from mcp_server.main and as ASGI startup failure for HTTP",
+        "test_signatures_present_but_contents_unenforced — manifest with non-empty signatures: [{'algorithm':'foo','value':'bar'}] loads in v1 (R5 reservation)"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "title": "PEP 440 ~= vs npm ~ semantic mismatch",
+      "detail": "PEP 440 ~=1.0 means >=1.0,<2 (compatible-release); npm ~1.0 means >=1.0.0,<1.1.0 (patch-only). A naive single-parser implementation will silently swap semantics depending on which parser sees the string first.",
+      "mitigation": "parse_version_range() in plugin_loader.py MUST attempt PEP 440 first (canonical per 06-versioning.md §2.2), and only fall back to npm-form normalization when the input contains a leading caret/tilde-with-no-spec or wildcard 'x'. Add a unit test covering '~=1.0' (PEP 440 → matches 1.5) vs '~1.0.0' (npm → does NOT match 1.5) on the same host version to lock the disambiguation.",
+      "spec_ref": "spec/ports/middleware/06-versioning.md §2.2"
+    },
+    {
+      "id": "R2",
+      "title": "Tests need a stub plugin without polluting site-packages",
+      "detail": "Integration tests must inject an entry-point so importlib.metadata.entry_points(group='sox_protocol.plugins') yields it, but pip install -e into the dev venv is unacceptable for hermetic CI.",
+      "mitigation": "Use monkeypatch on importlib.metadata.entry_points to return a synthetic EntryPoint whose .load() returns a fixture factory and whose .dist points at a tmp_path with a stub METADATA + sox-plugin.yaml. Fallback: write a real .dist-info into a tmp_path and prepend to sys.path via monkeypatch — fewer mocks, more realism — choose this if the EntryPoint constructor proves brittle across importlib.metadata versions.",
+      "spec_ref": "n/a (test-engineering)"
+    },
+    {
+      "id": "R3",
+      "title": "P1-03 is concurrently mutating adapters/transports/http/server.py",
+      "detail": "P4's edits to create_app land alongside P1's pipeline-plumbing rewrite. Anchor lines (current line ~127 for built_pipeline) WILL drift.",
+      "mitigation": "Identify edit sites by code anchor strings ('register_operation_routes(ops_router, built_pipeline,' and 'built_pipeline = ' assignment) rather than line numbers. Coordination protocol: P4 phase 04-bootstrap-integration is BLOCKED until P1-03 status.md shows complete; sequence enforced by rollout_order. If P1-03 lands later, P4's create_app delta is rebased on top.",
+      "spec_ref": "n/a (concurrency)"
+    },
+    {
+      "id": "R4",
+      "title": "--allow-plugins vs --no-discovery interaction",
+      "detail": "If both --no-discovery and --allow-plugins=foo,bar are passed, do we allow startup with a stale allowlist that references nothing? Spec is silent.",
+      "mitigation": "Decision: --no-discovery short-circuits the loader entirely BEFORE allowlist evaluation. Allowlist contents are not validated, no PluginNotFound is raised, resolved_order = (). Document this precedence in load_plugins() docstring AND in cli/serve.py --no-discovery help text. Test test_no_discovery_short_circuits asserts this.",
+      "spec_ref": "ADR 0004 decision 4 (allowlist) — spec silent on interaction; project decision recorded here."
+    },
+    {
+      "id": "R5",
+      "title": "signatures field reservation enforcement scope",
+      "detail": "v1 hosts MUST validate that signatures is present and is a list, but MUST NOT enforce contents (06-versioning.md §6.2). Easy to over-implement.",
+      "mitigation": "validate_manifest() asserts presence + list type only; non-empty arrays log a one-time INFO 'signature verification deferred to v1.x'. Test test_signatures_present_but_contents_unenforced asserts a manifest with arbitrary signature items still loads cleanly.",
+      "spec_ref": "spec/ports/middleware/06-versioning.md §6.2; ADR 0004 §6"
+    },
+    {
+      "id": "R6",
+      "title": "load_entry_points() legacy path coexistence",
+      "detail": "Existing core/middleware/registry.py:load_entry_points uses group='sox_protocol.middleware' (singular), differs from new group='sox_protocol.plugins'. Two parallel discovery paths could cause name collisions.",
+      "mitigation": "load_plugins() uses the NEW group exclusively; load_entry_points() left untouched but its docstring updated to note it is legacy / deprecated for v1.x removal. If a name collision is detected during register(), MiddlewareRegistry.register raises ValueError today — that surfaces as PluginStartupError inside load_plugins via try/except wrap.",
+      "spec_ref": "ADR 0004 §4 (discovery)"
+    },
+    {
+      "id": "R7",
+      "title": "Pipeline rebuild vs append strategy not specified by core",
+      "detail": "Both bootstraps need to fold loaded plugins into the already-constructed Pipeline returned by build_default_pipeline. Pipeline today is built via PipelineBuilder; mid-flight extension API isn't documented in core/middleware/__init__.py.",
+      "mitigation": "Phase 02-build's plugin_loader.py and registry.py changes do NOT modify Pipeline. The bootstrap-integration phase (04) chooses ONE strategy: rebuild via PipelineBuilder seeded with default_chain components plus registered plugin factories. A small helper extend_pipeline_with_registry(p: Pipeline, r: MiddlewareRegistry) -> Pipeline can live in core/middleware/default_chain.py if needed; this is a minor extension, not a contract change. Spec compliance: cached order rule (4.1) is preserved because the pipeline is rebuilt once at startup, never per-request.",
+      "spec_ref": "spec/ports/middleware/03-plugin-contract.md §4.3"
+    }
+  ],
+  "rollout_order": {
+    "phases": [
+      {"id": "02-build", "depends_on": [], "parallelizable_subtasks": ["plugin_loader.py", "errors.py + __init__.py exports"], "blocking_for": ["03-allowlist", "04-bootstrap-integration"]},
+      {"id": "03-allowlist", "depends_on": ["02-build"], "parallelizable_subtasks": ["cli/serve.py CLI flags", "registry.py allowlist branches inside load_plugins"], "blocking_for": ["04-bootstrap-integration", "05-test"]},
+      {"id": "04-bootstrap-integration", "depends_on": ["02-build", "03-allowlist", "P1-03(external)"], "parallelizable_subtasks": ["mcp_server/server.py wiring", "adapters/transports/http/server.py wiring"], "blocking_for": ["05-test"]},
+      {"id": "05-test", "depends_on": ["02-build", "03-allowlist", "04-bootstrap-integration"], "parallelizable_subtasks": ["test_plugin_loader.py", "test_load_plugins_integration.py", "test_allowlist_semantics.py", "test_bootstrap_wireup.py"], "blocking_for": ["06-review"]},
+      {"id": "06-review", "depends_on": ["05-test"], "parallelizable_subtasks": [], "blocking_for": []}
+    ],
+    "notes": [
+      "02-build subtasks (plugin_loader.py independent of errors.py + registry.py modifications) can run in parallel within the same agent.",
+      "03-allowlist's CLI changes (cli/serve.py) are independent of registry.py allowlist branches — both can land in the same commit but reviewed independently.",
+      "04-bootstrap-integration's two bootstrap files (mcp_server/server.py vs adapters/transports/http/server.py) are independent — parallel-safe.",
+      "P1-03 (pipeline-integration phase 03) is an external blocker on adapters/transports/http/server.py only; mcp_server/server.py side of 04 can begin as soon as 02 + 03 complete.",
+      "06-review is terminal and includes the security audit of the discovery boundary per migration.md P4 success criteria."
+    ]
+  }
+}
