@@ -16,7 +16,7 @@ orchestrator_protocol: v1
 | 02-plan | Implementation plan from ADR + spec | `DONE` | sox-cto-system:planner | 1 | 2026-04-30T17:09:00Z |
 | 03-implement | Build credential registry + middleware | `DONE` | python-pro | 1 | 2026-04-30T17:45:00Z |
 | 05-spec-realignment | Reconcile shipped identity layer with post-2f3d8f3 spec changes | `DONE` | python-pro | 1 | 2026-04-30T22:10:00Z |
-| 04-review | Code review | `READY` | code-reviewer | 0 | 2026-04-30T22:10:00Z |
+| 04-review | Code review | `DONE` | code-reviewer | 1 | 2026-05-01T15:55:37Z |
 
 ## Currently next action
 
@@ -29,6 +29,7 @@ orchestrator_protocol: v1
 - 2026-04-29T00:00:00Z 02-plan — initialized (BLOCKED)
 - 2026-04-29T00:00:00Z 01-adr — initialized (READY)
 - 2026-04-30T20:45:00Z salvage audit: 02-plan and 03-implement retroactively DONE (commit `f28b858`, 76/76, 100% cov); inserted 05-spec-realignment for spec drift remediation; 04-review re-blocked on 05
+- 2026-05-01T15:55:37Z 04-review — DONE (code-reviewer)
 
 ## Reconciliation note (2026-04-30, salvage audit)
 

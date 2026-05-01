@@ -16,7 +16,7 @@ orchestrator_protocol: v1
 | 02-plan | Implementation plan | `DONE` | sox-cto-system:planner | 1 | 2026-04-30T17:09:00Z |
 | 03-implement | Build pipeline + migrate identity plugin | `DONE` | python-pro | 1 | 2026-04-30T18:30:00Z |
 | 05-op-coverage | Widen Operation literal + StoreDispatch op-table; add terminal coverage | `DONE` | python-pro | 1 | 2026-04-30T21:55:00Z |
-| 04-review | Code review | `READY` | code-reviewer | 0 | 2026-04-30T21:55:00Z |
+| 04-review | Code review | `DONE` | code-reviewer | 1 | 2026-05-01T00:00:00Z |
 
 ## Currently next action
 
@@ -26,6 +26,7 @@ orchestrator_protocol: v1
 
 - 2026-04-29T00:00:00Z all four phases initialized
 - 2026-04-30T20:45:00Z salvage audit: 02-plan and 03-implement retroactively DONE (commit `e33d0f2`, 83/83, 100% cov); inserted 05-op-coverage for spec drift remediation; 04-review re-blocked on 05
+- 2026-05-01T00:00:00Z 04-review — DONE (code-reviewer)
 
 ## Reconciliation note (2026-04-30, salvage audit)
 
