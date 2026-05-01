@@ -11,7 +11,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
-      "description": "Name of the target channel. Reserved prefixes: 'dm/<sorted-pair>' for direct messages (server-enforced two-party), 'group/<group-id>' for managed group channels (server-enforced membership), 'sox/' for server-emitted derived channels (agents cannot write). Recommended conventions for open channels: 'ticket:<id>', 'broadcast:<topic>', 'thread:<parent-message-id>'."
+      "description": "Name of the target channel. Reserved prefixes enforce server-side access control: 'dm/<sorted-pair>' for direct messages (server-enforced two-party channels; only the two named agents may subscribe or send; wildcard subscription on this prefix is rejected); 'group/<group-id>' for managed group channels (server-enforced membership; only current members may subscribe or send; wildcard subscription on this prefix is rejected); 'sox/' for server-emitted derived channels (agents cannot write to sox/ channels). Recommended conventions for open channels: 'ticket:<id>', 'broadcast:<topic>', 'thread:<parent-message-id>'. See docs/decisions/dm-semantics.md and docs/decisions/groups-model.md."
     },
     "body": {
       "type": "object",
@@ -25,13 +25,13 @@
     },
     "reply_to": {
       "type": ["string", "null"],
-      "description": "Optional message_id of the message this message is replying to. Used for threading (combined with thread_depth on recv) and wait-graph computation for deadlock detection. Null if this message is not a reply.",
+      "description": "Optional message_id of the message this message is replying to. Used for threading (combined with thread_depth on recv) and wait-graph computation for deadlock detection. Null if this message is not a reply. See docs/decisions/threading-depth.md and docs/decisions/deadlock-detection-approach.md.",
       "default": null
     },
     "idempotency_key": {
       "type": ["string", "null"],
       "maxLength": 256,
-      "description": "Optional caller-supplied idempotency key. The server deduplicates sends with the same idempotency_key within the configured TTL window (default: 24 hours). A duplicate send returns the original message_id and sent_at without re-persisting. Callers MUST NOT rely on deduplication beyond the configured TTL. Null disables idempotency dedup for this send.",
+      "description": "Optional caller-supplied idempotency key. The server deduplicates sends with the same idempotency_key within the configured TTL window (default: 24 hours). A duplicate send returns the original message_id and sent_at without re-persisting. Callers MUST NOT rely on deduplication beyond the configured TTL. Null disables idempotency dedup for this send. See docs/decisions/idempotency-ttl.md.",
       "default": null
     }
   },

@@ -22,7 +22,7 @@
           "channel": {
             "type": "string",
             "minLength": 1,
-            "description": "Name of the channel this message was sent to."
+            "description": "Name of the channel this message was sent to. Reserved prefixes: 'dm/<sorted-pair>' (server-enforced two-party), 'group/<group-id>' (server-enforced membership), 'sox/' (server-emitted derived channels, agents cannot write)."
           },
           "sender": {
             "type": "string",
@@ -72,16 +72,26 @@
           },
           "ancestors": {
             "type": ["array", "null"],
-            "description": "Inline ancestor envelopes when thread_depth > 0 was requested. Ordered from immediate parent (index 0) to furthest ancestor. Null when thread_depth=0 (the default). Each element is a message object with the same shape as items in this array (minus 'ancestors' to avoid infinite nesting).",
+            "description": "Inline ancestor envelopes when thread_depth > 0 was requested. Ordered from immediate parent (index 0) to furthest ancestor. Null when thread_depth=0 (the default). Each element is a message object with the same shape as items in this array (minus 'ancestors' to avoid infinite nesting). See docs/decisions/threading-depth.md.",
             "items": {
               "type": "object",
+              "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
               "additionalProperties": true
             }
           },
           "_meta": {
             "type": ["object", "null"],
-            "description": "Observability metadata. Present when include_meta=true (default); absent when include_meta=false. Shape: {trace_id: string, middleware_timings: string[], server_node_id: string}.",
-            "additionalProperties": true
+            "description": "Observability metadata. Present when include_meta=true (default); absent when include_meta=false. See docs/decisions/observability-meta-mode.md.",
+            "additionalProperties": true,
+            "properties": {
+              "trace_id": { "type": "string" },
+              "middleware_timings": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Per-middleware timing strings in 'name:duration' format (e.g. 'auth:2ms'). Pinned as string[] for v1; see docs/decisions/observability-meta-mode.md open questions."
+              },
+              "server_node_id": { "type": "string" }
+            }
           }
         }
       }
