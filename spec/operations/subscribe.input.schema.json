@@ -11,7 +11,19 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
-      "description": "Channel name pattern. Two forms are supported: (1) Exact match — the pattern equals the full channel name (e.g. 'ticket:ENGI-0042'). (2) Glob — the pattern contains one or more '*' wildcards matched against the full channel name string using Unix glob rules (e.g. 'ticket:ENGI-*' matches 'ticket:ENGI-0001' and 'ticket:ENGI-9999' but not 'project:ENGI-0001'). The '*' wildcard matches any sequence of characters including the empty string. Pattern matching is case-sensitive."
+      "description": "Channel name pattern. Two forms are supported: (1) Exact match — the pattern equals the full channel name (e.g. 'ticket:ENGI-0042'). (2) Glob — the pattern contains one or more '*' wildcards matched against the full channel name string using Unix glob rules (e.g. 'ticket:ENGI-*' matches 'ticket:ENGI-0001' and 'ticket:ENGI-9999' but not 'project:ENGI-0001'). The '*' wildcard matches any sequence of characters including the empty string. Pattern matching is case-sensitive. Glob patterns containing '*' that match the reserved prefixes 'dm/' or 'group/' are rejected — these namespaces require explicit channel names or group lifecycle verbs. Exact-match subscriptions to 'dm/<sorted-pair>' or 'group/<group-id>' are permitted for current members. See docs/decisions/dm-semantics.md and docs/decisions/groups-model.md.",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^dm/.*\\*",
+            "description": "Wildcard subscriptions on the dm/ prefix are forbidden. Use an exact dm/<sorted-pair> channel name instead."
+          },
+          {
+            "pattern": "^group/.*\\*",
+            "description": "Wildcard subscriptions on the group/ prefix are forbidden. Use an exact group/<group-id> channel name or a group lifecycle verb instead."
+          }
+        ]
+      }
     }
   },
   "examples": [
@@ -25,10 +37,10 @@
       "pattern": "broadcast:*"
     },
     {
-      "pattern": "agent:agent-beta"
+      "pattern": "dm/agent-alpha~agent-beta"
     },
     {
-      "pattern": "group:security-*"
+      "pattern": "group/security-team"
     }
   ]
 }
