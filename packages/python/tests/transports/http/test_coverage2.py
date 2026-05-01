@@ -11,7 +11,6 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.server import HttpTransport, create_app
 from sox_protocol.adapters.transports.http.sse import (
     build_sse_router,
@@ -30,12 +29,11 @@ async def test_sse_generator_yields_message_from_watch() -> None:
     """SSE event_generator yields a data line for a message from watch()."""
     store = MemoryStore()
     await store.initialize()
-    resolver = PassthroughIdentityResolver()
 
     await store.subscribe("gen-agent", "gen-ch")
 
     # Build the router and extract the generator function via the ASGI app
-    app = create_app(store=store, identity=resolver)
+    app = create_app(store=store)
 
     # We test the SSE generator by directly calling the store.watch() loop
     # that the generator uses, confirming the watch path works end-to-end.
@@ -222,10 +220,9 @@ async def test_sse_endpoint_returns_streaming_response() -> None:
     """
     store = MemoryStore()
     await store.initialize()
-    resolver = PassthroughIdentityResolver()
 
     # Call build_sse_router and extract the endpoint handler directly
-    router = build_sse_router(store, resolver)
+    router = build_sse_router(store)
     # The route is registered — find the endpoint function
     route = next(r for r in router.routes if getattr(r, "path", "") == "/v1/stream")  # type: ignore[attr-defined]
     endpoint = route.endpoint  # type: ignore[attr-defined]

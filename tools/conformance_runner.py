@@ -574,7 +574,22 @@ class HttpTarget:
         }
         try:
             resp = self._session.post(url, json=args, headers=headers)
-            resp.raise_for_status()
+        except Exception as exc:
+            return {"_rpc_error": {"message": str(exc)}}
+        # 4xx/5xx with a JSON body containing error_code is a sox-error
+        # envelope from the server (post-pipeline-integration: AuthMiddleware /
+        # transformer / internal_error all surface here). Return the body
+        # directly so fixtures matching against `error_code` work without
+        # special-casing _rpc_error.
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                if isinstance(body, dict) and "error_code" in body:
+                    return body
+            except Exception:
+                pass
+            return {"_rpc_error": {"message": f"HTTP {resp.status_code}: {resp.text[:200]}"}}
+        try:
             return resp.json()
         except Exception as exc:
             return {"_rpc_error": {"message": str(exc)}}
@@ -600,6 +615,26 @@ class ProcessHttpTarget:
         self._proc: subprocess.Popen[bytes] | None = None
         self._inner: HttpTarget | None = None
         self._port: int = 0
+        # ``None`` = fixture didn't declare an agents[] list; auto-register on
+        # arrival (legacy v1 behavior). ``[]`` (empty list) or non-empty list =
+        # fixture explicitly declared agents; pre-register only those, disable
+        # auto-register so unknown tokens get identity_failure server-side.
+        self._pre_registered_agents: list[str] | None = None
+
+    def set_pre_registered_agents(self, agent_ids: list[str]) -> None:
+        """Set the agents to pre-register in the spawned server's registry.
+
+        When non-empty, the server reads SOX_PRE_REGISTERED_AGENTS at startup,
+        registers each agent under its ephemeral keypair, and DISABLES
+        auto-registration of arriving bearer tokens. Unknown tokens fall
+        through to AuthMiddleware unmapped → identity_failure envelope.
+        This is the gate the conformance harness's
+        unknown-credential-rejected fixture relies on (server-side rejection,
+        not harness-side substitution per analysis §7.5 risk #5).
+
+        MUST be called before :meth:`start`.
+        """
+        self._pre_registered_agents = list(agent_ids)
 
     def _find_free_port(self) -> int:
         """Return an available TCP port on 127.0.0.1."""
@@ -625,6 +660,11 @@ class ProcessHttpTarget:
             "SOX_BACKING_STORE": "memory://",
             "PYTHONPATH": str(self._package_path / "src"),
         }
+        if self._pre_registered_agents is not None:
+            # Empty list means "no pre-registered agents" but auto-register
+            # is still disabled — the server's contract treats env-var
+            # presence (even empty value) as the opt-in to strict mode.
+            env["SOX_PRE_REGISTERED_AGENTS"] = ",".join(self._pre_registered_agents)
         self._proc = subprocess.Popen(
             [
                 sys.executable,
@@ -1408,6 +1448,19 @@ def run_fixture(
     agent_ids = [a["id"] for a in fixture.agents] if fixture.agents else ["test-agent"]
     primary_agent = agent_ids[0] if agent_ids else "test-agent"
 
+    # For ProcessHttpTarget: pre-register the fixture's "registered: true"
+    # agents in the spawned server BEFORE start (env-var injection point).
+    # Disables auto-registration so unknown-credential-rejected fixtures
+    # actually fail at AuthMiddleware. Pass even an empty list to opt into
+    # strict mode (a fixture with only `registered: false` agents). When
+    # fixture has no agents[] declaration at all, leave auto_register on.
+    # SharedMemoryTarget ignores this.
+    if fixture.agents and hasattr(target, "set_pre_registered_agents"):
+        registered_ids = [
+            a["id"] for a in fixture.agents if "id" in a and a.get("registered", True)
+        ]
+        target.set_pre_registered_agents(registered_ids)  # may be empty list
+
     # For SharedMemoryTarget, start once with primary agent
     # (all agents share the same store)
     try:
@@ -1484,8 +1537,16 @@ def run_fixture(
             auto_caps = _extract_capture(step, result)
             captures.update(auto_caps)
 
-            # Check for expected_error
-            is_error = isinstance(result, dict) and "_rpc_error" in result
+            # Check for expected_error. A response is an error if either:
+            # (a) the harness wrapped it in `_rpc_error` (transport-side
+            #     synthesis on RPC failure), OR
+            # (b) it's a sox-error envelope surfaced directly from the
+            #     server (top-level `error_code`). Post-pipeline-integration
+            #     the HTTP transport returns 4xx with the envelope body, and
+            #     HttpTarget.call_tool now passes that body through directly.
+            is_error = isinstance(result, dict) and (
+                "_rpc_error" in result or "error_code" in result
+            )
             if expected_error is not None:
                 if not is_error:
                     sr = StepResult(

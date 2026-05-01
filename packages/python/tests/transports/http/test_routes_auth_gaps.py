@@ -17,7 +17,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import create_app
@@ -28,12 +27,11 @@ async def anon_client() -> AsyncGenerator[AsyncClient, None]:
     """Client with no authorization header capability — store initialized."""
     store = MemoryStore()
     await store.initialize()
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(
         host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5
     )
     liveness = LivenessStore()
-    app = create_app(store=store, identity=resolver, config=config, liveness=liveness)
+    app = create_app(store=store, config=config, liveness=liveness)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as ac:
@@ -150,12 +148,11 @@ async def erroring_client_ack_hb() -> AsyncGenerator[AsyncClient, None]:
     store = MagicMock(spec=MemoryStore)
     store.ack = AsyncMock(side_effect=RuntimeError("ack exploded"))
     store.heartbeat = AsyncMock(side_effect=RuntimeError("heartbeat exploded"))
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(
         host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5
     )
     liveness = LivenessStore()
-    app = create_app(store=store, identity=resolver, config=config, liveness=liveness)
+    app = create_app(store=store, config=config, liveness=liveness)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as ac:
@@ -197,12 +194,11 @@ async def test_list_agents_liveness_exception() -> None:
     from unittest.mock import AsyncMock, MagicMock
     store = MagicMock(spec=MemoryStore)
     store.list_agents = AsyncMock(side_effect=RuntimeError("store exploded"))
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(
         host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5
     )
     liveness = LivenessStore()
-    app = create_app(store=store, identity=resolver, config=config, liveness=liveness)
+    app = create_app(store=store, config=config, liveness=liveness)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as ac:

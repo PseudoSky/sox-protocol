@@ -15,6 +15,20 @@ The stream yields newline-delimited SSE events of the form::
 A keep-alive comment (``:``) is sent every 15 seconds to prevent proxy
 buffering.
 
+Phase 03-build-http: ``IdentityResolver`` import deleted; ``build_sse_router``
+now accepts ``pipeline`` as its second positional argument.  The SSE endpoint
+is read-side only (it calls ``store.watch`` directly via the pipeline's
+``BackingStore`` reference stored on ``app.state``).  Bearer token extraction
+uses :func:`~sox_protocol.adapters.transports.http.auth.extract_bearer_token`
+directly; the token (== agent_id in v1 transitional path) is used to identify
+the watch subscription.
+
+v1 SSE semantics:
+    The SSE stream is read-only: it yields messages that arrive in the
+    backing store for the authenticated agent.  Write-side operations (send,
+    subscribe, etc.) continue to use the POST routes.  If a write-side SSE
+    operation is ever added it MUST route through ``pipeline.dispatch``.
+
 Spec reference: ``spec/ports/transport.md §2.4, §5``
 """
 
@@ -28,7 +42,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from sox_protocol.adapters.transports.http.auth import IdentityResolver, extract_bearer_token
+from sox_protocol.adapters.transports.http.auth import extract_bearer_token
 from sox_protocol.adapters.transports.http.errors import sox_error_response
 from sox_protocol.core.ports.backing_store import BackingStore
 
@@ -118,12 +132,20 @@ async def sse_event_generator(
             await watch_task
 
 
-def build_sse_router(store: BackingStore, resolver: IdentityResolver) -> APIRouter:
+def build_sse_router(store: BackingStore) -> APIRouter:
     """Build and return the SSE router.
+
+    Phase 03-build-http: signature changed from ``(store, resolver)`` to
+    ``(store)`` — ``IdentityResolver`` deleted; bearer token extracted directly
+    via :func:`~sox_protocol.adapters.transports.http.auth.extract_bearer_token`.
+
+    The SSE stream is read-only in v1.  The ``store`` reference is retained
+    because ``store.watch()`` is a streaming read that does not fit the
+    request/response model of ``pipeline.dispatch``.  If a write-side SSE
+    operation is added in v1.1, it MUST route through the pipeline.
 
     Args:
         store: The backing store to watch for new messages.
-        resolver: Identity resolver for bearer token auth.
 
     Returns:
         An :class:`APIRouter` with the ``GET /v1/stream`` endpoint registered.
@@ -144,14 +166,10 @@ def build_sse_router(store: BackingStore, resolver: IdentityResolver) -> APIRout
                 message="Authorization: Bearer <token> header required",
                 status_code=401,
             )
-        try:
-            agent_id = resolver.resolve(token)
-        except ValueError as exc:
-            return sox_error_response(  # type: ignore[return-value]
-                error_code="invalid_credential",
-                message=str(exc),
-                status_code=401,
-            )
+        # v1 transitional: bearer token IS the agent_id.
+        # v1.1 will require a real SignedRequest credential for the SSE
+        # endpoint as well; for now we use the token directly for watch().
+        agent_id = token
 
         # Parse Last-Event-ID cursor for resume (stored for future use)
         last_event_id = request.headers.get("Last-Event-ID", "").strip()

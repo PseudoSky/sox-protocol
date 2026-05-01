@@ -23,7 +23,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import create_app
@@ -57,8 +56,7 @@ async def client(
     store: MemoryStore,
     config: HttpConfig,
 ) -> AsyncGenerator[AsyncClient, None]:
-    resolver = PassthroughIdentityResolver()
-    app = create_app(store=store, identity=resolver, config=config)
+    app = create_app(store=store, config=config)
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",

@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Pytest fixtures for HTTP transport tests."""
+"""Pytest fixtures for HTTP transport tests.
+
+Phase 03-build-http: PassthroughIdentityResolver removed; create_app now
+builds a Pipeline internally.  The ``resolver`` fixture is replaced by a
+``pipeline`` fixture for tests that need to inspect middleware behaviour.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import create_app
@@ -35,12 +39,6 @@ def memory_store() -> MemoryStore:
 
 
 @pytest.fixture()
-def resolver() -> PassthroughIdentityResolver:
-    """Return a passthrough identity resolver."""
-    return PassthroughIdentityResolver()
-
-
-@pytest.fixture()
 def liveness() -> LivenessStore:
     """Return a fresh LivenessStore."""
     return LivenessStore()
@@ -56,11 +54,10 @@ async def store(memory_store: MemoryStore) -> AsyncGenerator[MemoryStore, None]:
 @pytest_asyncio.fixture()
 async def client(
     store: MemoryStore,
-    resolver: PassthroughIdentityResolver,
     config: HttpConfig,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Return an httpx.AsyncClient backed by the test ASGI app."""
-    app = create_app(store=store, identity=resolver, config=config)
+    app = create_app(store=store, config=config)
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",

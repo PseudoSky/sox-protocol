@@ -12,7 +12,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.server import create_app
 
@@ -34,9 +33,8 @@ async def store() -> AsyncGenerator[MemoryStore, None]:
 
 @pytest_asyncio.fixture()
 async def client(store: MemoryStore) -> AsyncGenerator[AsyncClient, None]:
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-    app = create_app(store=store, identity=resolver, config=config)
+    app = create_app(store=store, config=config)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
         yield ac
 
@@ -155,9 +153,8 @@ async def client_with_erroring_store() -> AsyncGenerator[AsyncClient, None]:
                    "group_join", "group_leave", "group_list_members"]:
         getattr(store, method).side_effect = RuntimeError("store exploded")
 
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-    app = create_app(store=store, identity=resolver, config=config)
+    app = create_app(store=store, config=config)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
         yield ac
 
@@ -232,9 +229,8 @@ class TestRouteStoreExceptions:
         # Need a store that raises ValueError specifically for group_invite
         store2 = MagicMock(spec=MemoryStore)
         store2.group_invite = AsyncMock(side_effect=ValueError("not a member"))
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store2, identity=resolver, config=config)
+        app = create_app(store=store2, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             resp = await ac.post(
                 "/v1/ops/group_invite",

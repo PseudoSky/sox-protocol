@@ -18,7 +18,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.server import create_app
 from sox_protocol.core.ports.backing_store import BackpressureInfo
@@ -40,9 +39,8 @@ async def store() -> AsyncGenerator[MemoryStore, None]:
 @pytest_asyncio.fixture()
 async def client(store: MemoryStore) -> AsyncGenerator[AsyncClient, None]:
     """ASGI test client backed by MemoryStore."""
-    resolver = PassthroughIdentityResolver()
     config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-    app = create_app(store=store, identity=resolver, config=config)
+    app = create_app(store=store, config=config)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
         yield ac
 
@@ -413,9 +411,8 @@ class TestBackpressureOverLimit:
         store = MagicMock(spec=MemoryStore)
         bp = BackpressureInfo(queue_depth=1001, threshold=1000, over_limit=True, mode="enforced")
         store.send = AsyncMock(return_value=("msg-001", 1234567890.0, 1, bp))
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store, identity=resolver, config=config)
+        app = create_app(store=store, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             resp = await ac.post(
                 "/v1/ops/send",
@@ -448,9 +445,8 @@ class TestBackpressureOverLimit:
         store = MagicMock(spec=MemoryStore)
         bp = BackpressureInfo(queue_depth=2000, threshold=1000, over_limit=True, mode="enforced")
         store.send = AsyncMock(return_value=("msg-x", 0.0, 1, bp))
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store, identity=resolver, config=config)
+        app = create_app(store=store, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             resp = await ac.post(
                 "/v1/ops/send",
@@ -477,9 +473,8 @@ class TestListAgentsFromBackingStore:
         store = MagicMock(spec=MemoryStore)
         expected = [{"agent_id": "store-agent", "presence_state": "online", "last_heartbeat_at": 0, "namespace": None}]
         store.list_agents = AsyncMock(return_value=expected)
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store, identity=resolver, config=config)
+        app = create_app(store=store, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             resp = await ac.post(
                 "/v1/ops/list_agents",
@@ -496,9 +491,8 @@ class TestListAgentsFromBackingStore:
         """op_list_agents passes status_filter and namespace to BackingStore."""
         store = MagicMock(spec=MemoryStore)
         store.list_agents = AsyncMock(return_value=[])
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store, identity=resolver, config=config)
+        app = create_app(store=store, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             await ac.post(
                 "/v1/ops/list_agents",
@@ -510,9 +504,8 @@ class TestListAgentsFromBackingStore:
     @pytest.mark.asyncio
     async def test_list_agents_after_heartbeat_uses_backing_store(self, store: MemoryStore) -> None:
         """After heartbeat, list_agents returns data from BackingStore."""
-        resolver = PassthroughIdentityResolver()
         config = HttpConfig(host="127.0.0.1", port=9999, cors_origins=[], buffer_limit=100, reconnect_max_s=5)
-        app = create_app(store=store, identity=resolver, config=config)
+        app = create_app(store=store, config=config)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
             await ac.post(
                 "/v1/ops/channels_heartbeat",

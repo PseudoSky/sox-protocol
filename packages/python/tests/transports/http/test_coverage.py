@@ -10,10 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.adapters.transports.http.auth import (
-    PassthroughIdentityResolver,
-    resolve_agent_id,
-)
+from sox_protocol.adapters.transports.http.auth import extract_bearer_token
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.errors import (
     internal_error_response,
@@ -93,37 +90,50 @@ def test_validation_error_response() -> None:
 
 
 # ---------------------------------------------------------------------------
-# auth.py
+# auth.py — phase 03-build-http: only extract_bearer_token remains
 # ---------------------------------------------------------------------------
 
 
-def test_passthrough_resolver_empty_token_raises() -> None:
-    """PassthroughIdentityResolver.resolve('') raises ValueError."""
-    r = PassthroughIdentityResolver()
-    with pytest.raises(ValueError):
-        r.resolve("")
-
-
-@pytest.mark.asyncio
-async def test_resolve_agent_id_with_bad_resolver() -> None:
-    """resolve_agent_id returns error when resolver raises ValueError."""
-    class BadResolver:
-        def resolve(self, token: str) -> str:
-            raise ValueError("bad token")
-
+def test_extract_bearer_token_present() -> None:
+    """extract_bearer_token returns the token from a well-formed Authorization header."""
     from fastapi import Request as FastAPIRequest
     scope = {
         "type": "http",
         "method": "POST",
         "path": "/v1/ops/recv",
         "query_string": b"",
-        "headers": [(b"authorization", b"Bearer bad-token")],
+        "headers": [(b"authorization", b"Bearer my-agent-id")],
     }
     req = FastAPIRequest(scope)
-    agent_id, err = resolve_agent_id(req, BadResolver())
-    assert agent_id == ""
-    assert err is not None
-    assert err.status_code == 401
+    assert extract_bearer_token(req) == "my-agent-id"
+
+
+def test_extract_bearer_token_missing() -> None:
+    """extract_bearer_token returns None when Authorization header is absent."""
+    from fastapi import Request as FastAPIRequest
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/ops/recv",
+        "query_string": b"",
+        "headers": [],
+    }
+    req = FastAPIRequest(scope)
+    assert extract_bearer_token(req) is None
+
+
+def test_extract_bearer_token_x_sox_agent_id() -> None:
+    """extract_bearer_token accepts X-SOX-Agent-ID header for testing."""
+    from fastapi import Request as FastAPIRequest
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/v1/ops/recv",
+        "query_string": b"",
+        "headers": [(b"x-sox-agent-id", b"test-agent")],
+    }
+    req = FastAPIRequest(scope)
+    assert extract_bearer_token(req) == "test-agent"
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +242,9 @@ def test_http_transport_with_all_args() -> None:
     """HttpTransport accepts all optional constructor args."""
     from sox_protocol.adapters.transports.http.liveness import LivenessStore as LS
     store = MemoryStore()
-    identity = PassthroughIdentityResolver()
     config = HttpConfig(host="127.0.0.1", port=9876)
     liveness = LS()
-    t = HttpTransport(store=store, identity=identity, config=config, liveness=liveness)
+    t = HttpTransport(store=store, config=config, liveness=liveness)
     assert t._config.port == 9876
 
 
@@ -257,8 +266,7 @@ def test_build_sse_router_returns_router() -> None:
     """build_sse_router returns an APIRouter with the /v1/stream route."""
     from fastapi import APIRouter
     store = MemoryStore()
-    resolver = PassthroughIdentityResolver()
-    router = build_sse_router(store, resolver)
+    router = build_sse_router(store)
     assert isinstance(router, APIRouter)
     paths = [r.path for r in router.routes]  # type: ignore[attr-defined]
     assert "/v1/stream" in paths
