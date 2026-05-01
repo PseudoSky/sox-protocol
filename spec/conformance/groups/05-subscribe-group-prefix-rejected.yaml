@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+name: subscribe-group-prefix-rejected
+spec_ref: spec/operations/subscribe.input.schema.json#not-anyOf
+description: >
+  A subscribe call with a wildcard pattern matching the group/ prefix (e.g.
+  'group/*') must be rejected with a validation_error. The spec enforces that
+  wildcard subscriptions on the group/ namespace are forbidden — agents must use
+  exact group channel names or group lifecycle verbs. This is enforced via the
+  not/anyOf constraint in subscribe.input.schema.json.
+  Marked pending because wildcard-subscribe enforcement is in the MCP tools
+  layer which is bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-grp-sub-05
+    credential: secret-grp-sub-05
+
+sequence:
+  - id: subscribe-group-wildcard
+    as_agent: agent-grp-sub-05
+    operation: subscribe
+    input:
+      pattern: "group/*"
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

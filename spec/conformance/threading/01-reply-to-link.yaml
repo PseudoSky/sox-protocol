@@ -14,6 +14,10 @@ agents:
 
 setup:
   - operation: subscribe
+    as_agent: agent-thread-a
+    input:
+      pattern: "test:thread"
+  - operation: subscribe
     as_agent: agent-thread-b
     input:
       pattern: "test:thread"

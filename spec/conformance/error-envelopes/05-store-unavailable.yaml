@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+name: store-unavailable
+spec_ref: spec/envelopes/sox-error.schema.json#store_unavailable
+description: >
+  When the backing store is forced into a fault state, a send must return
+  store_unavailable error. The server_config.fault_inject=store_unavailable
+  activates the SOX_TEST_FAULTS=1 fault-injection hook in the reference
+  implementation. The error envelope must have error_code=store_unavailable
+  and a non-empty message string (no stack trace or file path).
+  Marked pending if target lacks fault-injection support.
+pending: true
+
+server_config:
+  fault_inject: store_unavailable
+
+agents:
+  - id: agent-store-fault
+    credential: secret-store-fault
+
+sequence:
+  - id: send-store-unavailable
+    as_agent: agent-store-fault
+    operation: send
+    input:
+      channel: "test:store-unavailable"
+      body:
+        type: status_update
+        subject: store unavailable send
+    expected_error:
+      error_code: store_unavailable
+
+assertions: []

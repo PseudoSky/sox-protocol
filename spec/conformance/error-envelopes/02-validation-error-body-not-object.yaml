@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+name: validation-error-body-not-object
+spec_ref: spec/envelopes/sox-error.schema.json#validation_error
+description: >
+  A send where the body field is not a JSON object (e.g. a string or array)
+  must be rejected with validation_error. The SOX spec requires body to be
+  a JSON object (additionalProperties allowed). This exercises the input
+  schema validation path before any backing store access.
+  Note: FastMCP type validation may reject this at the tool parameter level;
+  either a validation_error in the sox-error envelope or an MCP-level error
+  is acceptable here.
+pending: true
+
+agents:
+  - id: agent-valobj
+    credential: secret-valobj
+
+sequence:
+  - id: send-string-body
+    as_agent: agent-valobj
+    operation: send
+    input:
+      channel: "test:validation"
+      body: "not an object"
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

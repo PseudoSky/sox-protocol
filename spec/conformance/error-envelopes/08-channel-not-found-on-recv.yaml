@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+name: channel-not-found-on-recv
+spec_ref: spec/envelopes/sox-error.schema.json#channel_not_found
+description: >
+  In typed-channel-only mode, a recv on a channel the agent is subscribed to
+  but which has never been registered in the typed-channel registry should
+  return channel_not_found. This is distinct from subscription_not_found (agent
+  has no subscription at all) — the agent has a subscription but the channel
+  itself does not exist in the typed-channel registry.
+  Marked pending because typed-channel mode is a planned v1 feature.
+pending: true
+
+server_config:
+  typed_channels:
+    "test:typed-only": {}
+
+agents:
+  - id: agent-cnf-recv
+    credential: secret-cnf-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-cnf-recv
+    input:
+      pattern: "test:nonexistent-typed"
+
+sequence:
+  - id: recv-nonexistent-typed
+    as_agent: agent-cnf-recv
+    operation: recv
+    input: {}
+    expected_error:
+      error_code: channel_not_found
+
+assertions: []

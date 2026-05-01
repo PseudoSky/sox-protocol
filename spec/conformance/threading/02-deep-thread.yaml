@@ -56,6 +56,11 @@ sequence:
     operation: recv
     input: {}
 
+  - id: recv-l2-drain-b
+    as_agent: agent-deep-b
+    operation: recv
+    input: {}
+
   - id: send-level-3
     as_agent: agent-deep-a
     operation: send

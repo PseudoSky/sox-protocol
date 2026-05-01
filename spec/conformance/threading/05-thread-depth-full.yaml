@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: Apache-2.0
+name: thread-depth-full
+spec_ref: spec/operations/recv.input.schema.json#thread_depth
+description: >
+  recv with thread_depth=-1 requests full ancestor chain expansion. In v1
+  implementations where ancestor expansion is not yet implemented, the reply_to
+  field must still be present and all required envelope fields (channel, sender,
+  body, sent_at, message_id, seq) must be present on each returned message.
+  This fixture is marked pending because full ancestor expansion is a v1 planned
+  feature; it verifies the required envelope field completeness regardless.
+pending: true
+
+agents:
+  - id: agent-tdf-a
+    credential: secret-tdf-a
+  - id: agent-tdf-b
+    credential: secret-tdf-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-tdf-b
+    input:
+      pattern: "test:thread-depth-full"
+
+sequence:
+  - id: send-level-1
+    as_agent: agent-tdf-a
+    operation: send
+    input:
+      channel: "test:thread-depth-full"
+      body:
+        type: clarification_request
+        question: level 1
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-level-1
+    as_agent: agent-tdf-b
+    operation: recv
+    input: {}
+
+  - id: send-level-2
+    as_agent: agent-tdf-b
+    operation: send
+    input:
+      channel: "test:thread-depth-full"
+      body:
+        type: clarification_reply
+        answer: level 2
+      reply_to: "{{capture:send-level-1.message_id}}"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 2
+
+  - id: recv-level-2
+    as_agent: agent-tdf-a
+    operation: recv
+    input: {}
+
+  - id: send-level-3
+    as_agent: agent-tdf-a
+    operation: send
+    input:
+      channel: "test:thread-depth-full"
+      body:
+        type: clarification_reply
+        answer: level 3
+      reply_to: "{{capture:send-level-2.message_id}}"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 3
+
+  - id: recv-full-chain
+    as_agent: agent-tdf-b
+    operation: recv
+    input:
+      thread_depth: -1
+    expected_output:
+      messages:
+        - channel: "test:thread-depth-full"
+          sender: "{{any_string}}"
+          seq: 3
+          message_id: "{{any_string}}"
+          sent_at: "{{any_number}}"
+          reply_to: "{{capture:send-level-2.message_id}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-full-chain
+    min: 1

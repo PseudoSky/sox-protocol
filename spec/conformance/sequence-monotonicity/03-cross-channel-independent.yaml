@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+name: cross-channel-independent
+spec_ref: spec/envelopes/sox-message.schema.json#seq-scope
+description: >
+  Sequence numbers are per-channel counters, not a global server counter.
+  When messages are sent to two different channels, each channel independently
+  starts its seq counter at 1. The first message on channel-A gets seq=1, and
+  the first message on channel-B also gets seq=1. A second send on channel-A
+  gets seq=2 while channel-B remains at seq=1.
+
+agents:
+  - id: agent-cross-sender
+    credential: secret-cross-sender
+  - id: agent-cross-recv
+    credential: secret-cross-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-cross-recv
+    input:
+      pattern: "test:cross-a"
+  - operation: subscribe
+    as_agent: agent-cross-recv
+    input:
+      pattern: "test:cross-b"
+
+sequence:
+  - id: send-a1
+    as_agent: agent-cross-sender
+    operation: send
+    input:
+      channel: "test:cross-a"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: send-b1
+    as_agent: agent-cross-sender
+    operation: send
+    input:
+      channel: "test:cross-b"
+      body: {n: 1}
+    expected_output:
+      seq: 1
+
+  - id: send-a2
+    as_agent: agent-cross-sender
+    operation: send
+    input:
+      channel: "test:cross-a"
+      body: {n: 2}
+    expected_output:
+      seq: 2
+
+  - id: recv-all
+    as_agent: agent-cross-recv
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+
+assertions:
+  - type: received_count
+    recv_step: recv-all
+    min: 3
+    max: 3
+  - type: ordering
+    recv_step: recv-all
+    channel: "test:cross-a"
+    by: seq
+  - type: ordering
+    recv_step: recv-all
+    channel: "test:cross-b"
+    by: seq

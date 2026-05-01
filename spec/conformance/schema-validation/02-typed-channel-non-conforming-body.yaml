@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+name: typed-channel-non-conforming-body
+spec_ref: spec/envelopes/sox-error.schema.json#validation_error
+description: >
+  A send to a typed channel with a body that violates the registered JSON Schema
+  must be rejected with validation_error. The server_config.typed_channels map
+  registers the channel's body schema requiring a 'type' field; sending without
+  it triggers a validation_error with detail.violations[] describing the failure.
+  Marked pending because typed-channel schema validation is a planned v1 feature.
+pending: true
+
+server_config:
+  typed_channels:
+    "test:typed-strict":
+      type: object
+      required: [type, subject]
+      properties:
+        type: {type: string}
+        subject: {type: string}
+      additionalProperties: false
+
+agents:
+  - id: agent-typed-bad
+    credential: secret-typed-bad
+
+sequence:
+  - id: send-non-conforming
+    as_agent: agent-typed-bad
+    operation: send
+    input:
+      channel: "test:typed-strict"
+      body:
+        wrong_field: "this violates the schema"
+    expected_error:
+      error_code: validation_error
+
+assertions: []

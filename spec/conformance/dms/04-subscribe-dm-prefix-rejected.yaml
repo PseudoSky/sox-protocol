@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+name: subscribe-dm-prefix-rejected
+spec_ref: spec/operations/subscribe.input.schema.json#not-anyOf
+description: >
+  A subscribe call with a wildcard pattern matching the dm/ prefix (e.g. 'dm/*')
+  must be rejected with a validation_error. The spec enforces that wildcard
+  subscriptions on the dm/ namespace are forbidden — agents must use the exact
+  dm/<sorted-pair> channel name to subscribe to a DM channel. This prevents
+  bulk surveillance of all DM channels via a single wildcard subscription.
+  Marked pending because wildcard-subscribe enforcement is in the MCP tools
+  layer which is bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-dm-sub-04
+    credential: secret-dm-sub-04
+
+sequence:
+  - id: subscribe-dm-wildcard
+    as_agent: agent-dm-sub-04
+    operation: subscribe
+    input:
+      pattern: "dm/*"
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

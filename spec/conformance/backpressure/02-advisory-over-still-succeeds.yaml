@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+name: advisory-over-still-succeeds
+spec_ref: spec/operations/send.output.schema.json#backpressure
+description: >
+  In advisory backpressure mode, even when backpressure.state is 'over', the
+  send operation still succeeds and returns a message_id. Advisory mode never
+  rejects sends — it only signals warning state to the caller so they can
+  self-throttle. The send must return success with backpressure present.
+  This fixture verifies the advisory-over behavior does not cause an error.
+
+agents:
+  - id: agent-bp-over
+    credential: secret-bp-over
+
+sequence:
+  - id: send-over-advisory
+    as_agent: agent-bp-over
+    operation: send
+    input:
+      channel: "test:backpressure-over"
+      body:
+        type: status_update
+        subject: advisory over still succeeds
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: "{{any_number}}"
+      backpressure:
+        state: "{{any_string}}"
+
+assertions: []

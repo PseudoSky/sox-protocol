@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: Apache-2.0
+name: dm-send-by-non-member-rejected
+spec_ref: spec/primitives/dms.md#pair-membership
+description: >
+  A send to dm/<pair> by an agent that is not one of the two named pair members
+  must be rejected. The server enforces DM pair membership at the send boundary.
+  Only the two agents named in the dm/<sorted-pair> channel name may send to or
+  receive from that channel. A third-party agent's send must return an error.
+  Marked pending because dm-pair enforcement requires the MCP tools middleware
+  layer which is bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-dm-alpha
+    credential: secret-dm-alpha
+  - id: agent-dm-beta
+    credential: secret-dm-beta
+  - id: agent-dm-third
+    credential: secret-dm-third
+
+sequence:
+  - id: third-party-send-dm
+    as_agent: agent-dm-third
+    operation: send
+    input:
+      channel: "dm/agent-dm-alpha~agent-dm-beta"
+      body:
+        type: status_update
+        subject: unauthorized dm send
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

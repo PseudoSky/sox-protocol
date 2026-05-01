@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+name: enforced-over-limit-error
+spec_ref: spec/envelopes/sox-error.schema.json#backpressure_over_limit
+description: >
+  In enforced backpressure mode, a send that would push the channel queue above
+  the configured limit must be rejected with backpressure_over_limit error code.
+  The server_config sets backpressure_mode=enforced and queue_limit=1 so the
+  second send to the same channel (with no consumer) triggers the limit.
+  This fixture is marked pending because enforced backpressure mode requires
+  server_config override support in the runner.
+pending: true
+
+server_config:
+  backpressure_mode: enforced
+  queue_limit: 1
+
+agents:
+  - id: agent-bp-enforced
+    credential: secret-bp-enforced
+
+sequence:
+  - id: send-first-enforced
+    as_agent: agent-bp-enforced
+    operation: send
+    input:
+      channel: "test:backpressure-enforced"
+      body:
+        type: status_update
+        subject: first send fills queue
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: send-second-enforced
+    as_agent: agent-bp-enforced
+    operation: send
+    input:
+      channel: "test:backpressure-enforced"
+      body:
+        type: status_update
+        subject: second send hits limit
+    expected_error:
+      error_code: backpressure_over_limit
+
+assertions: []

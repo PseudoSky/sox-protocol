@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+name: subscribe-sox-prefix-rejected
+spec_ref: spec/operations/subscribe.input.schema.json#not-anyOf
+description: >
+  A subscribe call with pattern 'sox/*' must be rejected. The sox/ prefix is
+  reserved for server-emitted channels and wildcard subscriptions on that
+  namespace should not be freely grantable to arbitrary agents. The reference
+  implementation rejects dm/* and group/* wildcards; sox/* wildcard rejection
+  is enforced to prevent mass surveillance of server-internal channels.
+  This fixture is marked pending because sox/* wildcard enforcement requires
+  an additional not/anyOf rule in the subscribe schema.
+pending: true
+
+agents:
+  - id: agent-sox-sub
+    credential: secret-sox-sub
+
+sequence:
+  - id: subscribe-sox-wildcard
+    as_agent: agent-sox-sub
+    operation: subscribe
+    input:
+      pattern: "sox/*"
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

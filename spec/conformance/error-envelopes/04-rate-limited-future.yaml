@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+name: rate-limited-future
+spec_ref: spec/envelopes/sox-error.schema.json#rate_limited
+description: >
+  When a send rate exceeds the configured cap, the server returns rate_limited
+  error with an optional retry_after timestamp. Rate limiting is implementation-
+  optional in v1.0 of the SOX protocol, so this fixture is marked pending.
+  Implementations that support rate limiting must return error_code=rate_limited
+  and MAY include retry_after as a Unix epoch seconds value.
+pending: true
+
+server_config:
+  fault_inject: rate_limited
+
+agents:
+  - id: agent-ratelimit
+    credential: secret-ratelimit
+
+sequence:
+  - id: send-rate-limited
+    as_agent: agent-ratelimit
+    operation: send
+    input:
+      channel: "test:rate-limited"
+      body:
+        type: status_update
+        subject: rate limited send
+    expected_error:
+      error_code: rate_limited
+
+assertions: []

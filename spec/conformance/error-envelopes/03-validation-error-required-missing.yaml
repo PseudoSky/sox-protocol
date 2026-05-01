@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+name: validation-error-required-missing
+spec_ref: spec/envelopes/sox-error.schema.json#validation_error
+description: >
+  A send call missing the required 'channel' field must return validation_error.
+  The send.input.schema.json lists channel as required. The server must validate
+  input before backing-store access and return a sox-error with error_code
+  validation_error and a message explaining the missing field.
+  Note: Since FastMCP type-checks parameters, this may surface as an MCP-level
+  error rather than a sox-error envelope; either is acceptable.
+pending: true
+
+agents:
+  - id: agent-valreq
+    credential: secret-valreq
+
+sequence:
+  - id: send-missing-channel
+    as_agent: agent-valreq
+    operation: send
+    input:
+      body:
+        type: status_update
+        subject: missing channel field
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

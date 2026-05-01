@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+name: list-channels-version-block
+spec_ref: spec/operations/list_channels.output.schema.json#_sox_protocol
+description: >
+  The list_channels response must contain a _sox_protocol block with
+  server_version (string), supported_versions (array of strings), and
+  min_client_version (string). This enables clients to detect version
+  mismatches before attempting protocol operations. Verifies the version
+  negotiation metadata is present and well-formed.
+
+agents:
+  - id: agent-ver-list
+    credential: secret-ver-list
+
+sequence:
+  - id: list-channels-ver
+    as_agent: agent-ver-list
+    operation: list_channels
+    input: {}
+    expected_output:
+      _sox_protocol:
+        server_version: "{{any_string}}"
+        supported_versions: "{{any_array}}"
+        min_client_version: "{{any_string}}"
+
+assertions: []

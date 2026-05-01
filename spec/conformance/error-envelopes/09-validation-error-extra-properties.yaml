@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+name: validation-error-extra-properties
+spec_ref: spec/envelopes/sox-error.schema.json#validation_error
+description: >
+  A send call with additionalProperties not permitted by send.input.schema.json
+  (which sets additionalProperties: false) should return validation_error with
+  detail.violations[] listing the unknown field. This validates that the server
+  enforces strict input schema compliance and rejects unknown fields.
+  Note: FastMCP may pass unknown properties through without error in v1; this
+  fixture is marked pending pending schema-driven validation enforcement.
+pending: true
+
+agents:
+  - id: agent-extra-props
+    credential: secret-extra-props
+
+sequence:
+  - id: send-extra-field
+    as_agent: agent-extra-props
+    operation: send
+    input:
+      channel: "test:extra-props"
+      body:
+        type: status_update
+        subject: extra properties test
+      unknown_field: "this should be rejected"
+    expected_error:
+      error_code: validation_error
+
+assertions: []

@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+name: meta-shape-and-timing-format
+spec_ref: spec/envelopes/sox-message.schema.json#_meta
+description: >
+  When include_meta=true, each message in recv output includes a _meta field.
+  The field may be null (not yet populated) or an object with trace_id (string),
+  middleware_timings (array), and server_node_id (string). This fixture verifies
+  that include_meta=true does not strip the _meta key from the envelope — the key
+  must be present (null is acceptable per v1 implementation status).
+
+agents:
+  - id: agent-meta-sender
+    credential: secret-meta-sender
+  - id: agent-meta-recv
+    credential: secret-meta-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-meta-recv
+    input:
+      pattern: "test:meta"
+
+sequence:
+  - id: send-meta
+    as_agent: agent-meta-sender
+    operation: send
+    input:
+      channel: "test:meta"
+      body:
+        type: status_update
+        subject: meta shape check
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-with-meta
+    as_agent: agent-meta-recv
+    operation: recv
+    input:
+      include_meta: true
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages:
+        - channel: "test:meta"
+          sender: agent-meta-sender
+          seq: 1
+          message_id: "{{any_string}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-with-meta
+    min: 1

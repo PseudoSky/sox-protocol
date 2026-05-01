@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+name: version-mismatch-error
+spec_ref: spec/envelopes/sox-error.schema.json#version_mismatch
+description: >
+  A client whose supported_versions range does not intersect the server's
+  supported_versions must receive a version_mismatch error. The as_client_version
+  step field signals to the runner that this call should be made with an
+  incompatible client version header/parameter. Marked pending because
+  client-version spoofing requires as_client_version step support in the runner.
+pending: true
+
+agents:
+  - id: agent-ver-mismatch
+    credential: secret-ver-mismatch
+
+sequence:
+  - id: list-channels-old-client
+    as_agent: agent-ver-mismatch
+    as_client_version: "0.1"
+    operation: list_channels
+    input: {}
+    expected_error:
+      error_code: version_mismatch
+
+assertions: []

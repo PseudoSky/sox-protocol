@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+name: advisory-warn-state
+spec_ref: spec/operations/send.output.schema.json#backpressure
+description: >
+  In advisory backpressure mode, a send response always includes a backpressure
+  object with a state field. When queue depth is below the threshold the state
+  is 'ok'. The send itself succeeds regardless of backpressure state in advisory
+  mode. This fixture verifies that the backpressure field is present and
+  well-formed on every successful send response.
+
+agents:
+  - id: agent-bp-adv
+    credential: secret-bp-adv
+
+sequence:
+  - id: send-advisory
+    as_agent: agent-bp-adv
+    operation: send
+    input:
+      channel: "test:backpressure-advisory"
+      body:
+        type: status_update
+        subject: advisory backpressure check
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+      backpressure:
+        state: "{{any_string}}"
+
+assertions: []

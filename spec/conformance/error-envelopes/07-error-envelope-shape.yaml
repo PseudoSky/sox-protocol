@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+name: error-envelope-shape
+spec_ref: spec/envelopes/sox-error.schema.json
+description: >
+  Every error response must conform to the sox-error envelope: required fields
+  error_code (from the enum) and message (non-empty string). No stack traces,
+  file paths, or internal details may appear in message. This fixture triggers
+  a known validation_error (group/* wildcard subscribe) and verifies the error
+  envelope shape is correct — error_code and message both present.
+  Marked pending because the wildcard-subscribe enforcement that triggers the
+  error is in the MCP tools layer, bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-err-shape
+    credential: secret-err-shape
+
+sequence:
+  - id: trigger-validation-error
+    as_agent: agent-err-shape
+    operation: subscribe
+    input:
+      pattern: "group/*"
+    expected_error:
+      error_code: "{{any_string}}"
+      message: "{{any_string}}"
+
+assertions: []

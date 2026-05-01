@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+name: typed-channel-conforming-body
+spec_ref: spec/operations/send.input.schema.json#body
+description: >
+  A send to a typed channel with a body that conforms to the registered JSON
+  Schema succeeds and the message is stored. A subsequent recv delivers it
+  correctly. The server_config.typed_channels map registers the channel's body
+  schema. Marked pending because typed-channel schema validation is a planned
+  v1 feature requiring server_config.typed_channels support.
+pending: true
+
+server_config:
+  typed_channels:
+    "test:typed-channel":
+      type: object
+      required: [type, subject]
+      properties:
+        type: {type: string}
+        subject: {type: string}
+
+agents:
+  - id: agent-typed-sender
+    credential: secret-typed-sender
+  - id: agent-typed-recv
+    credential: secret-typed-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-typed-recv
+    input:
+      pattern: "test:typed-channel"
+
+sequence:
+  - id: send-conforming
+    as_agent: agent-typed-sender
+    operation: send
+    input:
+      channel: "test:typed-channel"
+      body:
+        type: status_update
+        subject: conforming body
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-typed
+    as_agent: agent-typed-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:typed-channel"
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: recv-typed
+    min: 1

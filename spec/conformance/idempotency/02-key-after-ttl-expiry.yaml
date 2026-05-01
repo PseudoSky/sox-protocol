@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+name: key-after-ttl-expiry
+spec_ref: spec/operations/send.input.schema.json#idempotency_ttl
+description: >
+  A send with the same idempotency_key after the TTL has expired must be treated
+  as a new message and assigned a new message_id. The server_config sets a very
+  short TTL (100ms); after a 200ms sleep the same key produces a new message.
+  This fixture is marked pending because idempotency TTL tracking is a planned
+  v1 feature requiring server_config override support.
+pending: true
+
+server_config:
+  idempotency_ttl_ms: 100
+
+agents:
+  - id: agent-ttl-sender
+    credential: secret-ttl-sender
+  - id: agent-ttl-recv
+    credential: secret-ttl-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-ttl-recv
+    input:
+      pattern: "test:idem-ttl"
+
+sequence:
+  - id: send-first-ttl
+    as_agent: agent-ttl-sender
+    operation: send
+    input:
+      channel: "test:idem-ttl"
+      body:
+        type: status_update
+        subject: first send
+      idempotency_key: "ttl-key-001"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: wait-ttl-expiry
+    type: sleep
+    milliseconds: 200
+
+  - id: send-after-ttl
+    as_agent: agent-ttl-sender
+    operation: send
+    input:
+      channel: "test:idem-ttl"
+      body:
+        type: status_update
+        subject: send after TTL expiry
+      idempotency_key: "ttl-key-001"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 2
+
+  - id: recv-ttl
+    as_agent: agent-ttl-recv
+    operation: recv
+    input: {}
+
+assertions:
+  - type: received_count
+    recv_step: recv-ttl
+    min: 2
+    max: 2

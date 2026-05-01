@@ -1,0 +1,68 @@
+# SPDX-License-Identifier: Apache-2.0
+name: thread-depth-one
+spec_ref: spec/operations/recv.input.schema.json#thread_depth
+description: >
+  recv with thread_depth=1 should inline the immediate parent in an ancestors
+  field. In v1 implementations where ancestor expansion is not yet implemented,
+  the reply_to field must still be present with the parent message_id. This
+  fixture is marked pending because full ancestor expansion is a v1 planned
+  feature; it verifies the reply_to linkage is preserved regardless.
+pending: true
+
+agents:
+  - id: agent-td1-a
+    credential: secret-td1-a
+  - id: agent-td1-b
+    credential: secret-td1-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-td1-b
+    input:
+      pattern: "test:thread-depth-one"
+
+sequence:
+  - id: send-parent-td1
+    as_agent: agent-td1-a
+    operation: send
+    input:
+      channel: "test:thread-depth-one"
+      body:
+        type: clarification_request
+        question: parent for depth-1 test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-parent-td1
+    as_agent: agent-td1-b
+    operation: recv
+    input: {}
+
+  - id: send-reply-td1
+    as_agent: agent-td1-a
+    operation: send
+    input:
+      channel: "test:thread-depth-one"
+      body:
+        type: clarification_reply
+        answer: child message
+      reply_to: "{{capture:send-parent-td1.message_id}}"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 2
+
+  - id: recv-depth-one
+    as_agent: agent-td1-b
+    operation: recv
+    input:
+      thread_depth: 1
+    expected_output:
+      messages:
+        - seq: 2
+          reply_to: "{{capture:send-parent-td1.message_id}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-depth-one
+    min: 1

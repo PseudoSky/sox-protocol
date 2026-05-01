@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+name: send-by-non-member-rejected
+spec_ref: spec/primitives/groups.md#membership-enforcement
+description: >
+  A send to a group/<id> channel by an agent that is not a member of that group
+  must be rejected. The server enforces group membership at the send boundary.
+  The error envelope must have error_code indicating the authorization failure.
+  In the reference implementation this is returned as identity_failure since the
+  agent is not authorized for that channel.
+  Marked pending because group-membership enforcement on send is in the MCP
+  tools middleware layer, bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-group-owner-04
+    credential: secret-group-owner-04
+  - id: agent-nonmember-04
+    credential: secret-nonmember-04
+
+sequence:
+  - id: create-group-04
+    as_agent: agent-group-owner-04
+    operation: group_create
+    input:
+      group_id: "test-group-04"
+    expected_output:
+      group_id: "{{any_string}}"
+
+  - id: send-by-nonmember
+    as_agent: agent-nonmember-04
+    operation: send
+    input:
+      channel: "group/test-group-04"
+      body:
+        type: status_update
+        subject: unauthorized send attempt
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

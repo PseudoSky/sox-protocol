@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+name: collect-partial-timed-out
+spec_ref: spec/operations/channels_collect.output.schema.json#timed_out
+description: >
+  [pending] channels_collect with a short timeout and fewer replies than the
+  requested count returns timed_out=true along with received[] containing the
+  replies that did arrive and missing[] indicating the shortfall. This fixture
+  verifies the partial-completion contract for collect. Marked pending because
+  channels_collect is x-status: planned in v1.0.
+pending: true
+
+agents:
+  - id: agent-partial-orchestrator
+    credential: secret-partial-orchestrator
+  - id: agent-partial-worker-1
+    credential: secret-partial-worker-1
+
+setup:
+  - operation: subscribe
+    as_agent: agent-partial-worker-1
+    input:
+      pattern: "test:partial-collect"
+
+sequence:
+  - id: partial-broadcast
+    as_agent: agent-partial-orchestrator
+    operation: send
+    input:
+      channel: "test:partial-collect"
+      body:
+        type: clarification_request
+        question: please respond
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: one-reply
+    as_agent: agent-partial-worker-1
+    operation: send
+    input:
+      channel: "test:partial-collect"
+      body:
+        type: clarification_reply
+        answer: worker 1 ready
+      reply_to: "{{capture:partial-broadcast.message_id}}"
+
+  - id: partial-collect
+    as_agent: agent-partial-orchestrator
+    operation: channels_collect
+    input:
+      reply_to: "{{capture:partial-broadcast.message_id}}"
+      count: 5
+      timeout: 0.1
+    expected_output:
+      received: "{{any_array}}"
+      missing: "{{any_array}}"
+      timed_out: true
+
+assertions: []

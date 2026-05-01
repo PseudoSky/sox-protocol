@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+name: channel-not-found-on-send
+spec_ref: spec/envelopes/sox-error.schema.json#channel_not_found
+description: >
+  In typed-channel-only mode a send to a channel that has not been registered
+  returns channel_not_found. This fixture is marked pending because typed-channel
+  registration is a planned v1 feature requiring server_config.typed_channels
+  support in the runner and reference impl.
+pending: true
+
+server_config:
+  typed_channels:
+    "test:typed-strict": {}
+
+agents:
+  - id: agent-cnf-sender
+    credential: secret-cnf-sender
+
+sequence:
+  - id: send-unregistered
+    as_agent: agent-cnf-sender
+    operation: send
+    input:
+      channel: "test:unregistered-channel"
+      body:
+        type: status_update
+        subject: send to unregistered typed channel
+    expected_error:
+      error_code: channel_not_found
+
+assertions: []

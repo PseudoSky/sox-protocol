@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+name: internal-error
+spec_ref: spec/envelopes/sox-error.schema.json#internal_error
+description: >
+  When the server encounters an unexpected internal error, it must return an
+  error envelope with error_code=internal_error. The server_config.fault_inject
+  =internal_error activates the SOX_TEST_FAULTS=1 fault-injection hook in the
+  reference implementation. The message field must be non-empty but MUST NOT
+  leak stack traces, file paths, or credentials.
+  Marked pending if target lacks fault-injection support.
+pending: true
+
+server_config:
+  fault_inject: internal_error
+
+agents:
+  - id: agent-internal-fault
+    credential: secret-internal-fault
+
+sequence:
+  - id: send-internal-error
+    as_agent: agent-internal-fault
+    operation: send
+    input:
+      channel: "test:internal-error"
+      body:
+        type: status_update
+        subject: internal error inject
+    expected_error:
+      error_code: internal_error
+
+assertions: []

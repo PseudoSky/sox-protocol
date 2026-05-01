@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+name: thread-depth-zero
+spec_ref: spec/operations/recv.input.schema.json#thread_depth
+description: >
+  recv with thread_depth=0 (the default) returns the message with reply_to field
+  present showing the parent message_id, but no ancestor expansion. The message
+  envelope contains reply_to as a string reference; no ancestors array is
+  inlined. This is the standard behavior when thread context is not requested.
+
+agents:
+  - id: agent-td0-a
+    credential: secret-td0-a
+  - id: agent-td0-b
+    credential: secret-td0-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-td0-b
+    input:
+      pattern: "test:thread-depth-zero"
+
+sequence:
+  - id: send-parent-td0
+    as_agent: agent-td0-a
+    operation: send
+    input:
+      channel: "test:thread-depth-zero"
+      body:
+        type: clarification_request
+        question: parent message
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-parent-td0
+    as_agent: agent-td0-b
+    operation: recv
+    input: {}
+
+  - id: send-reply-td0
+    as_agent: agent-td0-a
+    operation: send
+    input:
+      channel: "test:thread-depth-zero"
+      body:
+        type: clarification_reply
+        answer: reply message
+      reply_to: "{{capture:send-parent-td0.message_id}}"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 2
+
+  - id: recv-reply-td0
+    as_agent: agent-td0-b
+    operation: recv
+    input:
+      thread_depth: 0
+    expected_output:
+      messages:
+        - seq: 2
+          reply_to: "{{capture:send-parent-td0.message_id}}"
+
+assertions:
+  - type: no_loss
+    recv_step: recv-reply-td0
+    min: 1

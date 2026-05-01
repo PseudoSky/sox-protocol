@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+name: delivered-to-lifecycle
+spec_ref: spec/envelopes/sox-message.schema.json#delivered_to
+description: >
+  After a successful recv, the message is marked as delivered to the receiving
+  agent and will not be re-delivered on a subsequent recv call. This verifies
+  the at-most-once delivery guarantee: a second recv returns an empty messages
+  list for the same agent.
+
+agents:
+  - id: agent-dl-sender
+    credential: secret-dl-sender
+  - id: agent-dl-recv
+    credential: secret-dl-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-dl-recv
+    input:
+      pattern: "test:delivered-to"
+
+sequence:
+  - id: send-msg
+    as_agent: agent-dl-sender
+    operation: send
+    input:
+      channel: "test:delivered-to"
+      body:
+        type: status_update
+        subject: delivery lifecycle
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-first
+    as_agent: agent-dl-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:delivered-to"
+          seq: 1
+
+  - id: recv-second
+    as_agent: agent-dl-recv
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions:
+  - type: no_loss
+    recv_step: recv-first
+    min: 1
+  - type: no_redelivery
+    recv_step: recv-second
+    expected_count: 0

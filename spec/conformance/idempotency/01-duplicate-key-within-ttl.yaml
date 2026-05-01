@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: duplicate-key-within-ttl
+spec_ref: spec/operations/send.input.schema.json#idempotency_key
+description: >
+  A send with an idempotency_key that matches a prior send within the TTL window
+  must return the original message_id without storing a new message. A subsequent
+  recv must return exactly one message (not two), verifying no duplicate storage.
+  This fixture is marked pending because idempotency deduplication requires
+  server-side idempotency_key tracking which is a planned v1 feature.
+pending: true
+
+server_config:
+  idempotency_ttl_ms: 5000
+
+agents:
+  - id: agent-idem-sender
+    credential: secret-idem-sender
+  - id: agent-idem-recv
+    credential: secret-idem-recv
+
+setup:
+  - operation: subscribe
+    as_agent: agent-idem-recv
+    input:
+      pattern: "test:idempotency"
+
+sequence:
+  - id: send-original
+    as_agent: agent-idem-sender
+    operation: send
+    input:
+      channel: "test:idempotency"
+      body:
+        type: status_update
+        subject: original message
+      idempotency_key: "idem-key-001"
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: send-duplicate
+    as_agent: agent-idem-sender
+    operation: send
+    input:
+      channel: "test:idempotency"
+      body:
+        type: status_update
+        subject: duplicate — same key
+      idempotency_key: "idem-key-001"
+    expected_output:
+      message_id: "{{capture:send-original.message_id}}"
+
+  - id: recv-idem
+    as_agent: agent-idem-recv
+    operation: recv
+    input: {}
+
+assertions:
+  - type: no_duplication
+    recv_step: recv-idem
+  - type: received_count
+    recv_step: recv-idem
+    min: 1
+    max: 1

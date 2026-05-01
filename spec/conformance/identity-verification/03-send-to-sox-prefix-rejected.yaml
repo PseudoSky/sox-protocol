@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+name: send-to-sox-prefix-rejected
+spec_ref: spec/primitives/channels.md#reserved-namespaces
+description: >
+  An agent must not be able to send to a sox/ channel. The sox/ prefix is
+  reserved for server-emitted derived channels (e.g. sox/presence). Any agent
+  send to sox/anything must be rejected. The error indicates the agent is not
+  authorized to write to that namespace.
+  Marked pending because sox/ prefix enforcement on send requires the MCP
+  tools middleware layer which is bypassed in the runner's in-process dispatch.
+pending: true
+
+agents:
+  - id: agent-sox-prefix
+    credential: secret-sox-prefix
+
+sequence:
+  - id: send-to-sox-channel
+    as_agent: agent-sox-prefix
+    operation: send
+    input:
+      channel: "sox/anything"
+      body:
+        type: status_update
+        subject: attempt to write to reserved channel
+    expected_error:
+      error_code: "{{any_string}}"
+
+assertions: []

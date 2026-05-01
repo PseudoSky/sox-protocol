@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+name: recv-without-subscribe
+spec_ref: spec/envelopes/sox-error.schema.json#subscription_not_found
+description: >
+  A recv call by an agent that has no active subscriptions returns an empty
+  messages list (not an error). In the SOX protocol, recv is non-blocking and
+  drains only messages matching existing subscriptions. An agent with no
+  subscriptions will always receive an empty messages array. This fixture
+  verifies that recv on an agent with no subscriptions returns gracefully with
+  messages=[] rather than raising subscription_not_found.
+
+agents:
+  - id: agent-no-sub
+    credential: secret-no-sub
+
+sequence:
+  - id: recv-no-subscription
+    as_agent: agent-no-sub
+    operation: recv
+    input: {}
+    expected_output:
+      drained_at: "{{any_number}}"
+      messages: []
+
+assertions: []
