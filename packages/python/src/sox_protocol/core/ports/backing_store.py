@@ -15,7 +15,26 @@ layout, etc.) belongs in the concrete adapter package.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+
+
+@dataclass
+class BackpressureInfo:
+    """Backpressure status returned alongside a successful send.
+
+    Attributes:
+        queue_depth: Number of messages currently buffered for the target channel.
+        threshold: Configured limit before backpressure is enforced.
+        over_limit: True when queue_depth >= threshold (backpressure active).
+        mode: Enforcement mode — ``"enforced"`` raises an error; ``"warn"`` continues.
+    """
+
+    queue_depth: int = 0
+    threshold: int = 1000
+    over_limit: bool = False
+    mode: str = "enforced"
+    state: str = "ok"
 
 
 class BackingStore(ABC):
@@ -49,8 +68,8 @@ class BackingStore(ABC):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
-    ) -> tuple[str, float]:
-        """Append a message to *channel* and return ``(message_id, sent_at)``.
+    ) -> tuple[str, float, int, BackpressureInfo]:
+        """Append a message to *channel* and return ``(message_id, sent_at, seq)``.
 
         Spec reference: ``spec/ports/backing-store.md §2.1``
 
@@ -63,10 +82,13 @@ class BackingStore(ABC):
                 deduplication (``spec/ports/backing-store.md §4.1``).
 
         Returns:
-            A ``(message_id, sent_at)`` pair where *message_id* is a
-            backing-store-assigned unique identifier and *sent_at* is the Unix
-            epoch seconds (floating-point) at which the store accepted the
-            message.
+            A ``(message_id, sent_at, seq, backpressure)`` 4-tuple where
+            *message_id* is a backing-store-assigned unique identifier,
+            *sent_at* is the Unix epoch seconds (floating-point) at which the
+            store accepted the message, *seq* is the per-channel monotone
+            sequence number (starting at 1) assigned to this message, and
+            *backpressure* is a :class:`BackpressureInfo` describing the
+            channel's current queue depth relative to its threshold.
 
         Raises:
             Exception: If the store cannot durably accept the message.  A
@@ -214,3 +236,85 @@ class BackingStore(ABC):
         # subclasses can override with ``async def watch(...): yield ...``).
         raise NotImplementedError  # pragma: no cover
         yield {}  # pragma: no cover  # makes this an async generator
+
+    @abstractmethod
+    async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
+        """Remove subscriptions matching *patterns* for *agent_id*.
+
+        Returns (removed_patterns, pending_cleared) where pending_cleared is
+        the count of queued-but-unread messages discarded for removed subscriptions.
+        Spec: spec/operations/unsubscribe.input.schema.json
+        """
+
+    @abstractmethod
+    async def ack(self, agent_id: str, message_id: str, status: str, reason: str | None = None) -> dict[str, object]:
+        """Record an ACK/NACK for message_id. Control-plane only — no channel message.
+
+        Returns {"message_id": str, "status": str, "acked_at": float}.
+        Spec: spec/operations/channels_ack.output.schema.json
+        """
+
+    @abstractmethod
+    async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
+        """Update liveness record for agent_id.
+
+        Returns {"agent_id": str, "status": str, "recorded_at": float, "expires_at": float}.
+        Default TTL: 30s for stale threshold. expires_at = recorded_at + (ttl or 30).
+        Spec: spec/operations/channels_heartbeat.output.schema.json
+        """
+
+    @abstractmethod
+    async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
+        """Return liveness table for all known agents.
+
+        Each entry: {"agent_id": str, "status": str, "last_heartbeat_at": float | null}.
+        Spec: spec/operations/list_agents.output.schema.json
+        """
+
+    @abstractmethod
+    async def replay(self, channel: str, since: int = 0, until: int | None = None, limit: int = 100) -> tuple[list[dict[str, object]], bool]:
+        """Replay messages from channel with seq >= since.
+
+        Returns (messages, has_more).
+        Spec: spec/operations/replay.output.schema.json
+        """
+
+    @abstractmethod
+    async def group_create(self, creator_id: str, group_id: str | None = None) -> dict[str, object]:
+        """Create a group channel, add creator as first active member.
+
+        Returns {"group_id": str, "created_at": float}.
+        Spec: spec/operations/group_create.output.schema.json
+        """
+
+    @abstractmethod
+    async def group_invite(self, inviter_id: str, group_id: str, invitee_id: str) -> dict[str, object]:
+        """Invite agent to group. Inviter must be active member.
+
+        Returns {"invited": True, "agent_id": str, "invited_at": float}.
+        Spec: spec/operations/group_invite.output.schema.json
+        """
+
+    @abstractmethod
+    async def group_join(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Accept invitation and join group.
+
+        Returns {"joined": True, "group_id": str, "member_count": int, "joined_at": float}.
+        Spec: spec/operations/group_join.output.schema.json
+        """
+
+    @abstractmethod
+    async def group_leave(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Leave a group.
+
+        Returns {"left": True, "group_id": str, "left_at": float}.
+        Spec: spec/operations/group_leave.output.schema.json
+        """
+
+    @abstractmethod
+    async def group_list_members(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """List members of a group.
+
+        Returns {"group_id": str, "members": [{"agent_id": str, "status": str, "joined_at": float}]}.
+        Spec: spec/operations/group_list_members.output.schema.json
+        """

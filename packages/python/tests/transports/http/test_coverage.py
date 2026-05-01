@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -14,7 +12,6 @@ from httpx import ASGITransport, AsyncClient
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.transports.http.auth import (
     PassthroughIdentityResolver,
-    extract_bearer_token,
     resolve_agent_id,
 )
 from sox_protocol.adapters.transports.http.config import HttpConfig
@@ -24,15 +21,14 @@ from sox_protocol.adapters.transports.http.errors import (
     validation_error_response,
 )
 from sox_protocol.adapters.transports.http.liveness import (
-    AgentRecord,
-    LivenessStore,
     _OFFLINE_THRESHOLD_S,
     _STALE_THRESHOLD_S,
+    AgentRecord,
+    LivenessStore,
 )
 from sox_protocol.adapters.transports.http.server import HttpTransport, create_app
-from sox_protocol.adapters.transports.http.sse import build_sse_router, format_sse_event
+from sox_protocol.adapters.transports.http.sse import build_sse_router
 from tests.transports.http.conftest import auth_headers
-
 
 # ---------------------------------------------------------------------------
 # config.py
@@ -320,7 +316,6 @@ async def test_sse_endpoint_rejects_empty_bearer() -> None:
 @pytest.mark.asyncio
 async def test_routes_invalid_json_body(client: AsyncClient) -> None:
     """Sending non-JSON body is handled gracefully."""
-    import httpx
     resp = await client.post(
         "/v1/ops/recv",
         content=b"not-json",
@@ -387,10 +382,10 @@ async def test_group_list_members_missing_group_id(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_list_channels_with_since(client: AsyncClient) -> None:
-    """list_channels with 'since' parameter is handled."""
+    """list_channels with empty body is valid (since param removed from spec schema)."""
     resp = await client.post(
         "/v1/ops/list_channels",
-        json={"since": 0.0},
+        json={},
         headers=auth_headers("agent-a"),
     )
     assert resp.status_code == 200
@@ -398,10 +393,10 @@ async def test_list_channels_with_since(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_channels_ack_default_status(client: AsyncClient) -> None:
-    """channels_ack with empty body defaults to 'received' status."""
+    """channels_ack with required fields returns 'received' status."""
     resp = await client.post(
         "/v1/ops/channels_ack",
-        json={},
+        json={"message_id": "msg-001", "status": "received"},
         headers=auth_headers("agent-a"),
     )
     assert resp.status_code == 200
@@ -418,7 +413,8 @@ async def test_channels_collect_times_out(client: AsyncClient) -> None:
     )
     resp = await client.post(
         "/v1/ops/channels_collect",
-        json={"channel": "empty-collect-ch", "count": 5, "timeout_s": 0.05},
+        # Spec fields: reply_to, count, timeout (not channel/timeout_s)
+        json={"reply_to": "msg-broadcast-none", "count": 5, "timeout": 0.1},
         headers=auth_headers("agent-a"),
     )
     assert resp.status_code == 200
@@ -427,8 +423,8 @@ async def test_channels_collect_times_out(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_heartbeat_busy_status(client: AsyncClient, liveness) -> None:
-    """channels_heartbeat with 'busy' status updates liveness correctly."""
+async def test_heartbeat_busy_status(client: AsyncClient) -> None:
+    """channels_heartbeat with 'busy' status returns correct status."""
     resp = await client.post(
         "/v1/ops/channels_heartbeat",
         json={"status": "busy"},
@@ -443,7 +439,8 @@ async def test_replay_empty_channel(client: AsyncClient) -> None:
     """replay on non-existent channel returns empty messages."""
     resp = await client.post(
         "/v1/ops/replay",
-        json={"channel": "nonexistent-ch", "since_seq": 1},
+        # Spec fields: channel, since, limit (not since_seq)
+        json={"channel": "nonexistent-ch", "since": 1, "limit": 100},
         headers=auth_headers("agent-a"),
     )
     assert resp.status_code == 200

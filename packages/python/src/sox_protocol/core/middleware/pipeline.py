@@ -58,6 +58,7 @@ class Pipeline:
         input: dict[str, object],
         *,
         connection_id: str,
+        metadata: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Dispatch *operation* through the pipeline.
 
@@ -67,6 +68,9 @@ class Pipeline:
             operation: The SOX operation name (e.g. ``"send"``).
             input: Mutable input dict for this tool call.
             connection_id: Opaque connection identifier from the transport.
+            metadata: Optional pre-populated metadata dict.  Use this to
+                inject connection-bound data (e.g. ``_connection_credential``)
+                that MUST NOT appear in the tool-call input dict (spec §6).
 
         Returns:
             Response dict from the first middleware or terminal that produces
@@ -76,6 +80,7 @@ class Pipeline:
             operation=operation,
             input=dict(input),  # shallow copy so callers don't see mutations
             connection_id=connection_id,
+            metadata=dict(metadata) if metadata is not None else None,
         )
         ctx.freeze_correlation_id()
 

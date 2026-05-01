@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """In-process liveness / presence backing store for the HTTP transport.
 
-Tracks agent heartbeats and derives presence states per
-``spec/primitives/presence.md §3``.
+.. deprecated::
+    ``LivenessStore`` is no longer used by the HTTP transport routes.
+    As of phase ``05-list-agents-port-migration``, all liveness data is
+    managed exclusively by the canonical ``BackingStore`` port via
+    :meth:`~sox_protocol.core.ports.backing_store.BackingStore.heartbeat`
+    and :meth:`~sox_protocol.core.ports.backing_store.BackingStore.list_agents`.
 
-This is a lightweight in-memory store that is NOT persisted.  It is updated
-by the ``channels_heartbeat`` route handler and queried by ``list_agents``.
+    This module is retained only for backward compatibility with code that
+    imports it directly.  New code MUST use the ``BackingStore`` port instead.
 
 Spec reference: ``spec/primitives/presence.md``
 """

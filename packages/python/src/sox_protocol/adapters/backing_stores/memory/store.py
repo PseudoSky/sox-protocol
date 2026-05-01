@@ -21,10 +21,10 @@ import asyncio
 import copy
 import fnmatch
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator
 
-from sox_protocol.core.ports.backing_store import BackingStore
+from sox_protocol.core.ports.backing_store import BackingStore, BackpressureInfo
 
 
 @dataclass
@@ -37,6 +37,8 @@ class _StoredMessage:
     body: dict[str, object]
     correlation_id: str | None
     sent_at: float
+    seq: int = 0
+    reply_to: str | None = None
     delivered_to: set[str] = field(default_factory=set)
 
     def to_wire(self) -> dict[str, object]:
@@ -48,6 +50,12 @@ class _StoredMessage:
             "body": copy.deepcopy(self.body),
             "correlation_id": self.correlation_id,
             "sent_at": self.sent_at,
+            "seq": self.seq,
+            "ts": None,
+            "reply_to": self.reply_to,
+            "delivered_to": None,
+            "origin_server": None,
+            "_meta": None,
         }
 
 
@@ -61,7 +69,7 @@ class MemoryStore(BackingStore):
 
         store = MemoryStore()
         await store.initialize()
-        msg_id, sent_at = await store.send("ch", "agent-a", {"k": "v"})
+        msg_id, sent_at, seq = await store.send("ch", "agent-a", {"k": "v"})
     """
 
     schema_version: str = "1.0"
@@ -70,8 +78,12 @@ class MemoryStore(BackingStore):
         self._messages: list[_StoredMessage] = []
         self._subscriptions: dict[str, list[str]] = {}  # agent_id -> [patterns]
         self._next_id: int = 1
+        self._channel_seq: dict[str, int] = {}  # per-channel seq counter
         self._lock: asyncio.Lock = asyncio.Lock()
         self._new_message_event: asyncio.Event = asyncio.Event()
+        self._ack_records: dict[str, dict[str, object]] = {}  # keyed by message_id
+        self._liveness: dict[str, dict[str, object]] = {}  # keyed by agent_id
+        self._groups: dict[str, list[dict[str, object]]] = {}  # keyed by full group_id
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -80,7 +92,7 @@ class MemoryStore(BackingStore):
     async def initialize(self) -> None:
         """No-op for the in-memory adapter; present for interface parity."""
 
-    async def __aenter__(self) -> "MemoryStore":
+    async def __aenter__(self) -> MemoryStore:
         await self.initialize()
         return self
 
@@ -110,8 +122,8 @@ class MemoryStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
-    ) -> tuple[str, float]:
-        """Persist a message in memory and return ``(message_id, sent_at)``.
+    ) -> tuple[str, float, int, BackpressureInfo]:
+        """Persist a message in memory and return ``(message_id, sent_at, seq, backpressure)``.
 
         Spec: ``spec/ports/backing-store.md §2.1``, ``§3.1``
         """
@@ -119,6 +131,8 @@ class MemoryStore(BackingStore):
         async with self._lock:
             msg_id = self._next_id
             self._next_id += 1
+            seq = self._channel_seq.get(channel, 0) + 1
+            self._channel_seq[channel] = seq
             msg = _StoredMessage(
                 id=msg_id,
                 channel=channel,
@@ -126,10 +140,23 @@ class MemoryStore(BackingStore):
                 body=copy.deepcopy(body),
                 correlation_id=correlation_id,
                 sent_at=sent_at,
+                seq=seq,
             )
             self._messages.append(msg)
+            # Compute queue depth: undelivered messages on this channel
+            queue_depth = sum(
+                1 for m in self._messages
+                if m.channel == channel and not m.delivered_to
+            )
         self._new_message_event.set()
-        return (str(msg_id), sent_at)
+        threshold = 1000
+        bp = BackpressureInfo(
+            queue_depth=queue_depth,
+            threshold=threshold,
+            over_limit=queue_depth >= threshold,
+            mode="enforced",
+        )
+        return (str(msg_id), sent_at, seq, bp)
 
     async def recv(
         self,
@@ -227,7 +254,7 @@ class MemoryStore(BackingStore):
                     self._new_message_event.wait(),
                     timeout=0.05,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             finally:
                 self._new_message_event.clear()
@@ -248,3 +275,198 @@ class MemoryStore(BackingStore):
 
             for msg in wire:
                 yield msg
+
+    async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
+        """Remove matching subscriptions and discard queued-but-unread messages.
+
+        Spec: spec/operations/unsubscribe.input.schema.json
+        """
+        removed: list[str] = []
+        pending_cleared: int = 0
+        async with self._lock:
+            existing = self._subscriptions.get(agent_id, [])
+            new_patterns: list[str] = []
+            for p in existing:
+                if p in patterns:
+                    removed.append(p)
+                    for msg in self._messages:
+                        if (
+                            agent_id not in msg.delivered_to
+                            and fnmatch.fnmatchcase(msg.channel, p)
+                        ):
+                            msg.delivered_to.add(agent_id)
+                            pending_cleared += 1
+                else:
+                    new_patterns.append(p)
+            self._subscriptions[agent_id] = new_patterns
+        return (removed, pending_cleared)
+
+    async def ack(self, agent_id: str, message_id: str, status: str, reason: str | None = None) -> dict[str, object]:
+        """Record an ACK/NACK for message_id.
+
+        Spec: spec/operations/channels_ack.output.schema.json
+        """
+        acked_at = time.time()
+        async with self._lock:
+            self._ack_records[message_id] = {
+                "agent_id": agent_id,
+                "status": status,
+                "reason": reason,
+                "acked_at": acked_at,
+            }
+        return {"message_id": message_id, "status": status, "acked_at": acked_at}
+
+    async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
+        """Update liveness record for agent_id.
+
+        Spec: spec/operations/channels_heartbeat.output.schema.json
+        """
+        now = time.time()
+        expires_at = now + (ttl or 30)
+        async with self._lock:
+            existing = self._liveness.get(agent_id, {})
+            self._liveness[agent_id] = {
+                "status": status,
+                "recorded_at": now,
+                "expires_at": expires_at,
+                "namespace": existing.get("namespace"),
+            }
+        return {
+            "agent_id": agent_id,
+            "status": status,
+            "recorded_at": now,
+            "expires_at": expires_at,
+        }
+
+    async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
+        """Return liveness table for all known agents.
+
+        Each entry conforms to ``spec/operations/list_agents.output.schema.json``:
+        - ``agent_id``: str
+        - ``presence_state``: one of "online", "busy", "stale", "offline"
+        - ``last_heartbeat_at``: Unix nanoseconds (int); 0 if never heartbeated
+        - ``namespace``: str | None
+        """
+        now = time.time()
+        async with self._lock:
+            records = dict(self._liveness)
+        result: list[dict[str, object]] = []
+        for aid, rec in records.items():
+            ns = rec.get("namespace")
+            if namespace is not None and ns != namespace:
+                continue
+            expires_at = float(str(rec["expires_at"]))
+            reported = str(rec["status"])
+            if reported == "offline":
+                presence = "offline"
+            elif expires_at <= now:
+                presence = "stale"
+            else:
+                presence = reported  # "online" or "busy"
+            if status_filter is not None and presence not in status_filter:
+                continue
+            # last_heartbeat_at: int nanoseconds per output schema
+            recorded_at_ns = int(float(str(rec["recorded_at"])) * 1_000_000_000)
+            result.append({
+                "agent_id": aid,
+                "presence_state": presence,
+                "last_heartbeat_at": recorded_at_ns,
+                "namespace": ns,
+            })
+        return result
+
+    async def replay(self, channel: str, since: int = 0, until: int | None = None, limit: int = 100) -> tuple[list[dict[str, object]], bool]:
+        """Replay messages from channel with seq >= since.
+
+        Spec: spec/operations/replay.output.schema.json
+        """
+        async with self._lock:
+            matches = [
+                m for m in self._messages
+                if m.channel == channel
+                and m.seq >= since
+                and (until is None or m.seq <= until)
+            ]
+        matches.sort(key=lambda m: (m.seq, m.id))
+        has_more = len(matches) > limit
+        return ([m.to_wire() for m in matches[:limit]], has_more)
+
+    async def group_create(self, creator_id: str, group_id: str | None = None) -> dict[str, object]:
+        """Create a group channel, add creator as first active member.
+
+        Spec: spec/operations/group_create.output.schema.json
+        """
+        now = time.time()
+        bare = group_id if group_id else f"grp-{int(now)}"
+        full_id = f"group/{bare}"
+        async with self._lock:
+            self._groups[full_id] = [
+                {"agent_id": creator_id, "status": "active", "joined_at": now}
+            ]
+            patterns = self._subscriptions.setdefault(creator_id, [])
+            if full_id not in patterns:
+                patterns.append(full_id)
+        return {"group_id": full_id, "created_at": now}
+
+    async def group_invite(self, inviter_id: str, group_id: str, invitee_id: str) -> dict[str, object]:
+        """Invite agent to group. Inviter must be active member.
+
+        Spec: spec/operations/group_invite.output.schema.json
+        """
+        now = time.time()
+        async with self._lock:
+            members = self._groups.get(group_id, [])
+            caller_active = any(
+                m["agent_id"] == inviter_id and m["status"] == "active"
+                for m in members
+            )
+            if not caller_active:
+                raise ValueError(
+                    f"Agent {inviter_id!r} is not an active member of {group_id!r}"
+                )
+            already = any(m["agent_id"] == invitee_id for m in members)
+            if not already:
+                members.append({"agent_id": invitee_id, "status": "invited", "joined_at": now})
+            self._groups[group_id] = members
+        return {"invited": True, "agent_id": invitee_id, "invited_at": now}
+
+    async def group_join(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Accept invitation and join group.
+
+        Spec: spec/operations/group_join.output.schema.json
+        """
+        now = time.time()
+        async with self._lock:
+            members = self._groups.get(group_id, [])
+            for m in members:
+                if m["agent_id"] == agent_id and m["status"] == "invited":
+                    m["status"] = "active"
+                    m["joined_at"] = now
+                    break
+            patterns = self._subscriptions.setdefault(agent_id, [])
+            if group_id not in patterns:
+                patterns.append(group_id)
+            member_count = sum(1 for m in members if m["status"] == "active")
+        return {"joined": True, "group_id": group_id, "member_count": member_count, "joined_at": now}
+
+    async def group_leave(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Leave a group.
+
+        Spec: spec/operations/group_leave.output.schema.json
+        """
+        now = time.time()
+        async with self._lock:
+            members = self._groups.get(group_id, [])
+            self._groups[group_id] = [m for m in members if m["agent_id"] != agent_id]
+            patterns = self._subscriptions.get(agent_id, [])
+            self._subscriptions[agent_id] = [p for p in patterns if p != group_id]
+        return {"left": True, "group_id": group_id, "left_at": now}
+
+    async def group_list_members(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """List members of a group.
+
+        Spec: spec/operations/group_list_members.output.schema.json
+        """
+        async with self._lock:
+            members = list(self._groups.get(group_id, []))
+        return {"group_id": group_id, "members": members}

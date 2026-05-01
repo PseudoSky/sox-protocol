@@ -225,6 +225,7 @@ class IdentityVerifier:
             agent_id=record.agent_id,
             verified_at=now,
             connection_id=connection_id,
+            origin_server=None,  # always None in v1.0; reserved for federation (spec §7)
         )
 
     async def bind_for_send(
@@ -252,4 +253,8 @@ class IdentityVerifier:
             IdentityFailure: Any verification failure (see :meth:`verify`).
         """
         identity = await self.verify(request, operation="send")
-        return {**send_input, "sender": identity.agent_id}
+        return {
+            **send_input,
+            "sender": identity.agent_id,
+            "origin_server": identity.origin_server,  # None in v1.0 (spec §7 12-field envelope)
+        }

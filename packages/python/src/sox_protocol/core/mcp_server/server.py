@@ -52,8 +52,8 @@ import json
 import logging
 import os
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
 
 import jsonschema
 from fastmcp import FastMCP
@@ -80,6 +80,8 @@ _SCHEMA_SMOKE_SAMPLES: dict[str, dict[str, object]] = {
     "send.output.schema.json": {
         "sent_at": 1_714_300_000.0,
         "message_id": "1",
+        "seq": 1,
+        "backpressure": {"queue_depth": 0, "threshold": 1000, "state": "ok"},
     },
     "recv.output.schema.json": {
         "drained_at": 1_714_300_000.0,
@@ -90,7 +92,11 @@ _SCHEMA_SMOKE_SAMPLES: dict[str, dict[str, object]] = {
     },
     "list-channels.output.schema.json": {
         "channels": [],
-        "protocol_version": "1.0",
+        "_sox_protocol": {
+            "server_version": "1.0",
+            "supported_versions": ["1.0"],
+            "min_client_version": "1.0",
+        },
     },
 }
 
@@ -309,5 +315,5 @@ def main() -> None:
         mcp.run(transport="stdio")
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    main()  # pragma: no cover

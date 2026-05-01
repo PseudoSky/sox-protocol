@@ -54,10 +54,10 @@ class _StoreTerminal:
 
     async def __call__(self, ctx: MiddlewareContext) -> dict[str, object]:
         """Invoke store_mw with a no-op call_next."""
-        async def _noop(c: MiddlewareContext) -> dict[str, object]:  # pragma: no cover
-            return {}
+        async def _noop(c: MiddlewareContext) -> dict[str, object]:
+            return {}  # terminal never calls next
 
-        return await self._store_mw(ctx, _noop)  # pragma: no cover
+        return await self._store_mw(ctx, _noop)
 
 
 def build_default_pipeline(

@@ -182,7 +182,7 @@ class StateStore:
             await self._conn.close()
             self._conn = None
 
-    async def __aenter__(self) -> "StateStore":
+    async def __aenter__(self) -> StateStore:
         await self.open()
         return self
 

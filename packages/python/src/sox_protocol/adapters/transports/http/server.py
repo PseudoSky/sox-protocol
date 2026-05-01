@@ -72,7 +72,7 @@ def create_app(
 
     # Operation routes
     ops_router = APIRouter()
-    register_operation_routes(ops_router, store, identity, liveness)
+    register_operation_routes(ops_router, store, identity)
     app.include_router(ops_router)
 
     # SSE stream router

@@ -40,7 +40,9 @@ def _make_identity_error(reason: str) -> dict[str, object]:
     }
 
 
-_IDENTITY_ENFORCED_OPERATIONS: frozenset[str] = frozenset({"send", "recv", "subscribe"})
+_IDENTITY_ENFORCED_OPERATIONS: frozenset[str] = frozenset(
+    {"send", "recv", "subscribe", "list_agents"}
+)
 
 
 class IdentityMiddleware:

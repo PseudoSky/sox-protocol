@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 import json
 import pathlib
-import time
 
 import pytest
 import pytest_asyncio
@@ -198,7 +197,7 @@ class TestFsWatch:
 
         try:
             await asyncio.wait_for(task, timeout=3.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             task.cancel()
 
         assert len(collected) == 1
@@ -225,7 +224,7 @@ class TestFsWatch:
 
         try:
             await asyncio.wait_for(watcher(), timeout=3.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         assert len(collected) == 1
@@ -335,5 +334,5 @@ class TestContextManager:
         """async with FilesystemStore(...) as s: should initialize cleanly."""
         root = tmp_path / "ctx_test"
         async with FilesystemStore(root=root) as s:
-            msg_id, _ = await s.send("ch:ctx", "s", {"x": 1})
+            msg_id, *_ = await s.send("ch:ctx", "s", {"x": 1})
             assert isinstance(msg_id, str)

@@ -9,8 +9,6 @@ import pytest
 from httpx import AsyncClient
 
 from sox_protocol.adapters.transports.http.sse import format_sse_event
-from tests.transports.http.conftest import auth_headers
-
 
 # ---------------------------------------------------------------------------
 # format_sse_event unit tests
@@ -129,6 +127,7 @@ async def test_sse_last_event_id_accepted(client: AsyncClient) -> None:
 async def test_sse_extract_bearer_token() -> None:
     """extract_bearer_token parses Authorization: Bearer correctly."""
     from unittest.mock import MagicMock
+
     from sox_protocol.adapters.transports.http.auth import extract_bearer_token
 
     request = MagicMock()

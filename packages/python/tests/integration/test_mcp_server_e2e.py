@@ -28,9 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -41,7 +39,6 @@ from fastmcp import Client
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
-from sox_protocol.core.mcp_server.server import create_server
 
 # ---------------------------------------------------------------------------
 # Schema loader
@@ -120,7 +117,7 @@ async def _make_server_with_store(
     do this by re-implementing the minimal create_server logic inline.
     """
     import contextlib
-    from typing import AsyncIterator
+    from collections.abc import AsyncIterator
 
     from fastmcp import FastMCP
 
@@ -372,7 +369,7 @@ async def test_all_tool_outputs_conform_to_spec_schemas() -> None:
         lst = await client.call_tool("channels__list_channels", {})
         assert isinstance(lst.data, dict)
         _validate(lst.data, _SCHEMA_LIST_OUT)
-        assert lst.data["protocol_version"] == "1.0"
+        assert lst.data["_sox_protocol"]["server_version"] == "1.0"
 
 
 # ---------------------------------------------------------------------------
@@ -438,13 +435,13 @@ async def test_recv_is_non_blocking_when_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# channels__list_channels: protocol_version must be "1.0"
+# channels__list_channels: _sox_protocol must be present with server_version "1.0"
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_list_channels_includes_protocol_version() -> None:
-    """channels__list_channels must include protocol_version: '1.0'."""
+async def test_list_channels_includes_sox_protocol() -> None:
+    """channels__list_channels must include _sox_protocol.server_version: '1.0'."""
     store = MemoryStore()
     mcp = await _make_server_with_store(store, agent_id="agent-zeta")
 
@@ -452,7 +449,7 @@ async def test_list_channels_includes_protocol_version() -> None:
         result = await client.call_tool("channels__list_channels", {})
         data = result.data
         assert isinstance(data, dict)
-        assert data["protocol_version"] == "1.0"
+        assert data["_sox_protocol"]["server_version"] == "1.0"
         assert "channels" in data
         _validate(data, _SCHEMA_LIST_OUT)
 

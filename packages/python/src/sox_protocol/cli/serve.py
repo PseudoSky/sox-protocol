@@ -18,7 +18,6 @@ Spec reference: ``spec/ports/transport.md §2``
 from __future__ import annotations
 
 import argparse
-import sys
 
 
 def add_serve_subcommand(subparsers: argparse._SubParsersAction) -> None:  # type: ignore[type-arg]

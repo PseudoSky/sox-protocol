@@ -1314,6 +1314,17 @@ paths:
       tags:
       - channels
       x-experimental: true
+      x-degraded-mode:
+        reason: >
+          This endpoint implements channels__collect via an internal poll-loop rather
+          than SSE or long-poll as recommended by spec/ports/transport.md §5.
+          This degrades efficiency for long timeout windows. NOT RECOMMENDED for
+          production deployments with large timeout values. The stdio binding satisfies
+          collect via asyncio blocking with no extra transport requirement.
+        alternative: >
+          Implement SSE (Server-Sent Events) or HTTP long-poll for efficient
+          collect in production HTTP deployments.
+        spec_ref: spec/ports/transport.md §5
   /v1/ops/channels_heartbeat:
     post:
       operationId: channels_heartbeat

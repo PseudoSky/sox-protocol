@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS messages (
     body          TEXT    NOT NULL,           -- JSON-encoded object
     correlation_id TEXT,                      -- NULL when not supplied
     sent_at       REAL    NOT NULL,           -- Unix epoch seconds (float)
-    delivered_to  TEXT    NOT NULL DEFAULT '[]'  -- JSON array of agent_ids that have drained
+    delivered_to  TEXT    NOT NULL DEFAULT '[]',  -- JSON array of agent_ids that have drained
+    seq           INTEGER NOT NULL DEFAULT 0  -- per-channel monotone sequence number (>=1)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel);

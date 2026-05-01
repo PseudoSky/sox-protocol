@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import importlib.resources
 import json
-import os
 import shutil
 import stat
 import sys
@@ -382,25 +381,25 @@ def install(project_dir: Path | None = None, *, verbose: bool = True) -> None:
     if _write_skill(project_dir):
         actions.append(f"  Wrote SKILL.md → {_skills_dir(project_dir) / 'SKILL.md'}")
     else:
-        actions.append(f"  SKILL.md already up-to-date")
+        actions.append("  SKILL.md already up-to-date")
 
     # 2. Hooks
     if _write_hooks(project_dir):
         actions.append(f"  Wrote hook scripts → {_hooks_install_dir(project_dir)}/")
     else:
-        actions.append(f"  Hook scripts already up-to-date")
+        actions.append("  Hook scripts already up-to-date")
 
     # 3. .mcp.json  (project MCP server discovery — read by Claude Code at startup)
     if _update_mcp_json(project_dir):
         actions.append(f"  Written {_mcp_json_path(project_dir)}")
     else:
-        actions.append(f"  .mcp.json already up-to-date")
+        actions.append("  .mcp.json already up-to-date")
 
     # 4. settings.json  (hooks + allowedMcpServers)
     if _update_settings(project_dir):
         actions.append(f"  Updated {_settings_path(project_dir)}")
     else:
-        actions.append(f"  settings.json already up-to-date")
+        actions.append("  settings.json already up-to-date")
 
     # 5. Bootstrap lines
     modified_agents = _insert_bootstrap(project_dir)
@@ -453,5 +452,5 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__":  # pragma: no cover
+    main()  # pragma: no cover

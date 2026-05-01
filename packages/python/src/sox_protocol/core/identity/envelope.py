@@ -60,11 +60,16 @@ class VerifiedIdentity:
         verified_at: Unix epoch seconds at which the verification succeeded.
         connection_id: Opaque connection identifier, if provided by the
             transport layer. ``None`` for in-process / test usage.
+        origin_server: Originating SOX server node identifier.  Always
+            ``None`` in v1.0 single-server deployments.  Reserved for
+            federated v2 deployments where agent IDs take the form
+            ``<server-id>/<agent-id>``.  See ``spec/ports/identity.md §7``.
     """
 
     agent_id: str
     verified_at: float
     connection_id: str | None
+    origin_server: str | None = None
 
 
 def compute_body_hash(body: dict[str, object]) -> str:

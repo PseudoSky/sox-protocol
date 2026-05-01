@@ -38,7 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    return args.func(args)
+    rc: int = args.func(args)
+    return rc
 
 
 if __name__ == "__main__":

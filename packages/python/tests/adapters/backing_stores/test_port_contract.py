@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-import tempfile
 from collections.abc import AsyncIterator, Callable, Coroutine
 from typing import Any
 
@@ -94,7 +93,7 @@ async def _collect_watch(
 
     try:
         await asyncio.wait_for(_drain(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
     return collected
 
@@ -110,11 +109,13 @@ class TestRoundTrip:
     async def test_send_and_recv(self, store: BackingStore) -> None:
         """A message sent to a channel is returned by recv for a subscribed agent."""
         await store.subscribe("agent-a", "ch:test")
-        msg_id, sent_at = await store.send("ch:test", "agent-b", {"hello": "world"})
+        msg_id, sent_at, seq, _bp = await store.send("ch:test", "agent-b", {"hello": "world"})
 
         assert isinstance(msg_id, str)
         assert isinstance(sent_at, float)
         assert sent_at > 0
+        assert isinstance(seq, int)
+        assert seq >= 1
 
         messages = await store.recv("agent-a")
         assert len(messages) == 1
@@ -402,7 +403,7 @@ class TestWatchLoop:
 
         try:
             await asyncio.wait_for(task, timeout=3.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             task.cancel()
 
         assert len(collected) == 2
@@ -491,3 +492,95 @@ class TestStressTest:
         channel_msgs = [m for m in received if m["channel"] == channel]
         times = [m["sent_at"] for m in channel_msgs]
         assert times == sorted(times), "Per-channel ordering violated"
+
+
+# ---------------------------------------------------------------------------
+# list_agents — spec/operations/list_agents.output.schema.json
+# ---------------------------------------------------------------------------
+
+
+class TestListAgents:
+    """BackingStore.list_agents() conforms to spec/operations/list_agents.output.schema.json."""
+
+    async def test_empty_before_heartbeat(self, store: BackingStore) -> None:
+        """list_agents returns empty list before any heartbeat is recorded."""
+        agents = await store.list_agents()
+        assert agents == []
+
+    async def test_agent_appears_after_heartbeat(self, store: BackingStore) -> None:
+        """An agent appears in list_agents after a heartbeat call."""
+        await store.heartbeat("agent-alpha", "online")
+        agents = await store.list_agents()
+        agent_ids = [a["agent_id"] for a in agents]
+        assert "agent-alpha" in agent_ids
+
+    async def test_output_shape_conforms_to_schema(self, store: BackingStore) -> None:
+        """Each record has agent_id, presence_state, last_heartbeat_at (int), namespace.
+
+        Conforms to spec/operations/list_agents.output.schema.json.
+        """
+        await store.heartbeat("agent-beta", "online")
+        agents = await store.list_agents()
+        assert len(agents) >= 1
+        for rec in agents:
+            assert "agent_id" in rec
+            assert "presence_state" in rec
+            assert "last_heartbeat_at" in rec
+            # presence_state must be one of the spec-defined values
+            assert rec["presence_state"] in ("online", "busy", "stale", "offline"), (
+                f"presence_state {rec['presence_state']!r} not in allowed set"
+            )
+            # last_heartbeat_at must be a non-negative integer (nanoseconds)
+            assert isinstance(rec["last_heartbeat_at"], int), (
+                f"last_heartbeat_at must be int (ns), got {type(rec['last_heartbeat_at'])}"
+            )
+            assert rec["last_heartbeat_at"] >= 0
+            # namespace is allowed to be present and null
+            assert "namespace" in rec
+
+    async def test_status_filter_online(self, store: BackingStore) -> None:
+        """status_filter=['online'] returns only online agents."""
+        await store.heartbeat("agent-online", "online")
+        await store.heartbeat("agent-busy", "busy")
+        agents = await store.list_agents(status_filter=["online"])
+        for rec in agents:
+            assert rec["presence_state"] == "online"
+        ids = [a["agent_id"] for a in agents]
+        assert "agent-online" in ids
+
+    async def test_status_filter_busy(self, store: BackingStore) -> None:
+        """status_filter=['busy'] returns only busy agents."""
+        await store.heartbeat("agent-online2", "online")
+        await store.heartbeat("agent-busy2", "busy")
+        agents = await store.list_agents(status_filter=["busy"])
+        for rec in agents:
+            assert rec["presence_state"] == "busy"
+        ids = [a["agent_id"] for a in agents]
+        assert "agent-busy2" in ids
+
+    async def test_multiple_agents(self, store: BackingStore) -> None:
+        """Multiple agents are all returned."""
+        for i in range(5):
+            await store.heartbeat(f"multi-agent-{i}", "online")
+        agents = await store.list_agents()
+        ids = [a["agent_id"] for a in agents]
+        for i in range(5):
+            assert f"multi-agent-{i}" in ids
+
+    async def test_heartbeat_updates_record(self, store: BackingStore) -> None:
+        """A second heartbeat updates the existing record (not duplicated)."""
+        await store.heartbeat("agent-update", "online")
+        await store.heartbeat("agent-update", "busy")
+        agents = await store.list_agents()
+        matching = [a for a in agents if a["agent_id"] == "agent-update"]
+        assert len(matching) == 1
+        assert matching[0]["presence_state"] == "busy"
+
+    async def test_no_filter_returns_all(self, store: BackingStore) -> None:
+        """Calling list_agents() with no filters returns all recorded agents."""
+        await store.heartbeat("filter-a", "online")
+        await store.heartbeat("filter-b", "busy")
+        agents = await store.list_agents()
+        ids = [a["agent_id"] for a in agents]
+        assert "filter-a" in ids
+        assert "filter-b" in ids

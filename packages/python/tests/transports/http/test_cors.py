@@ -8,7 +8,6 @@ from httpx import AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.transports.http.config import HttpConfig
-from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import create_app
 
 
@@ -22,7 +21,7 @@ async def cors_client() -> AsyncClient:
         port=9998,
         cors_origins=["http://allowed.example.com"],
     )
-    app = create_app(store=store, config=cfg, liveness=LivenessStore())
+    app = create_app(store=store, config=cfg)
     from httpx import ASGITransport
     async with AsyncClient(
         transport=ASGITransport(app=app),

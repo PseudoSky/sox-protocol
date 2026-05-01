@@ -25,13 +25,12 @@ import asyncio
 import fnmatch
 import json
 import time
-from importlib.resources import files
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
 
 import aiosqlite
 
-from sox_protocol.core.ports.backing_store import BackingStore
+from sox_protocol.core.ports.backing_store import BackingStore, BackpressureInfo
 
 # Poll interval for the watch() loop (seconds).
 _WATCH_POLL_INTERVAL: float = 0.05
@@ -57,6 +56,12 @@ def _build_message(row: aiosqlite.Row) -> dict[str, object]:
         "body": json.loads(row["body"]),
         "correlation_id": row["correlation_id"],
         "sent_at": row["sent_at"],
+        "seq": row["seq"],
+        "ts": None,
+        "reply_to": None,
+        "delivered_to": None,
+        "origin_server": None,
+        "_meta": None,
     }
 
 
@@ -74,7 +79,7 @@ class SqliteStore(BackingStore):
 
         store = SqliteStore("sox.db")
         await store.initialize()
-        msg_id, sent_at = await store.send("ticket:X", "agent-a", {"text": "hi"})
+        msg_id, sent_at, seq = await store.send("ticket:X", "agent-a", {"text": "hi"})
     """
 
     schema_version: str = "1.0"
@@ -92,6 +97,10 @@ class SqliteStore(BackingStore):
         # Serialises concurrent recv() calls (SELECT + UPDATE must be atomic
         # per-agent; an asyncio.Lock prevents interleaving across coroutines).
         self._recv_lock: asyncio.Lock = asyncio.Lock()
+        # TODO: persist to DB in future
+        self._ack_records: dict[str, dict[str, object]] = {}
+        self._liveness: dict[str, dict[str, object]] = {}
+        self._groups: dict[str, list[dict[str, object]]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -122,7 +131,7 @@ class SqliteStore(BackingStore):
             await self._conn.close()
             self._conn = None
 
-    async def __aenter__(self) -> "SqliteStore":
+    async def __aenter__(self) -> SqliteStore:
         await self.initialize()
         return self
 
@@ -164,8 +173,8 @@ class SqliteStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
-    ) -> tuple[str, float]:
-        """Persist a message and return ``(message_id, sent_at)``.
+    ) -> tuple[str, float, int, BackpressureInfo]:
+        """Persist a message and return ``(message_id, sent_at, seq, backpressure)``.
 
         Spec: ``spec/ports/backing-store.md §2.1``, ``§3.1``
         """
@@ -173,17 +182,39 @@ class SqliteStore(BackingStore):
         sent_at = time.time()
         body_json = json.dumps(body)
         async with conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE channel = ?",
+            (channel,),
+        ) as cur:
+            row = await cur.fetchone()
+            assert row is not None  # COALESCE always returns a row  # noqa: S101
+            seq: int = row[0]
+        # Compute queue depth: messages on this channel not yet fully delivered
+        async with conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE channel = ?",
+            (channel,),
+        ) as cur:
+            depth_row = await cur.fetchone()
+            assert depth_row is not None  # COUNT always returns a row  # noqa: S101
+            queue_depth: int = depth_row[0]
+        async with conn.execute(
             """
-            INSERT INTO messages (channel, sender, body, correlation_id, sent_at, delivered_to)
-            VALUES (?, ?, ?, ?, ?, '[]')
+            INSERT INTO messages (channel, sender, body, correlation_id, sent_at, delivered_to, seq)
+            VALUES (?, ?, ?, ?, ?, '[]', ?)
             """,
-            (channel, sender, body_json, correlation_id, sent_at),
+            (channel, sender, body_json, correlation_id, sent_at, seq),
         ) as cur:
             row_id = cur.lastrowid
         await conn.commit()
         # Wake any watch() loops that are sleeping.
         self._new_message_event.set()
-        return (str(row_id), sent_at)
+        threshold = 1000
+        bp = BackpressureInfo(
+            queue_depth=queue_depth,
+            threshold=threshold,
+            over_limit=queue_depth >= threshold,
+            mode="enforced",
+        )
+        return (str(row_id), sent_at, seq, bp)
 
     async def recv(
         self,
@@ -226,7 +257,7 @@ class SqliteStore(BackingStore):
         # interleave between our SELECT and UPDATE within this process.
         async with conn.execute(
             """
-            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to
+            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
             FROM messages
             ORDER BY channel, sent_at ASC, id ASC
             """
@@ -362,7 +393,7 @@ class SqliteStore(BackingStore):
                     self._new_message_event.wait(),
                     timeout=self._watch_poll_interval,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             finally:
                 self._new_message_event.clear()
@@ -410,7 +441,7 @@ class SqliteStore(BackingStore):
 
         async with conn.execute(
             """
-            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to
+            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
             FROM messages
             WHERE id > ?
             ORDER BY channel, sent_at ASC, id ASC
@@ -428,6 +459,251 @@ class SqliteStore(BackingStore):
                 continue
             result.append(_build_message(row))
         return result
+
+    # ------------------------------------------------------------------
+    # Extended BackingStore operations
+    # ------------------------------------------------------------------
+
+    async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
+        """Remove matching subscriptions and discard queued-but-unread messages.
+
+        Spec: spec/operations/unsubscribe.input.schema.json
+        """
+        conn = self._require_conn()
+        removed: list[str] = []
+        pending_cleared: int = 0
+
+        async with self._recv_lock:
+            existing = await self._get_patterns_for_agent(agent_id)
+            for p in existing:
+                if p in patterns:
+                    removed.append(p)
+
+            if removed:
+                for p in removed:
+                    await conn.execute(
+                        "DELETE FROM subscriptions WHERE agent_id = ? AND channel_pattern = ?",
+                        (agent_id, p),
+                    )
+                await conn.commit()
+
+                # Count and mark delivered messages that matched removed patterns.
+                async with conn.execute(
+                    "SELECT id, channel, delivered_to FROM messages ORDER BY id ASC"
+                ) as cur:
+                    rows = await cur.fetchall()
+
+                for row in rows:
+                    delivered_to: list[str] = json.loads(row["delivered_to"])
+                    if agent_id in delivered_to:
+                        continue
+                    if any(_matches_pattern(row["channel"], p) for p in removed):
+                        delivered_to.append(agent_id)
+                        await conn.execute(
+                            "UPDATE messages SET delivered_to = ? WHERE id = ?",
+                            (json.dumps(delivered_to), row["id"]),
+                        )
+                        pending_cleared += 1
+                if pending_cleared:
+                    await conn.commit()
+
+        return (removed, pending_cleared)
+
+    async def ack(self, agent_id: str, message_id: str, status: str, reason: str | None = None) -> dict[str, object]:
+        """Record an ACK/NACK for message_id.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/channels_ack.output.schema.json
+        """
+        acked_at = time.time()
+        self._ack_records[message_id] = {
+            "agent_id": agent_id,
+            "status": status,
+            "reason": reason,
+            "acked_at": acked_at,
+        }
+        return {"message_id": message_id, "status": status, "acked_at": acked_at}
+
+    async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
+        """Update liveness record for agent_id.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/channels_heartbeat.output.schema.json
+        """
+        now = time.time()
+        expires_at = now + (ttl or 30)
+        existing = self._liveness.get(agent_id, {})
+        self._liveness[agent_id] = {
+            "status": status,
+            "recorded_at": now,
+            "expires_at": expires_at,
+            "namespace": existing.get("namespace"),
+        }
+        return {
+            "agent_id": agent_id,
+            "status": status,
+            "recorded_at": now,
+            "expires_at": expires_at,
+        }
+
+    async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
+        """Return liveness table for all known agents.
+
+        Each entry conforms to ``spec/operations/list_agents.output.schema.json``:
+        - ``agent_id``: str
+        - ``presence_state``: one of "online", "busy", "stale", "offline"
+        - ``last_heartbeat_at``: Unix nanoseconds (int); 0 if never heartbeated
+        - ``namespace``: str | None
+
+        TODO: persist to DB in future
+        """
+        now = time.time()
+        result: list[dict[str, object]] = []
+        for aid, rec in self._liveness.items():
+            ns = rec.get("namespace")
+            if namespace is not None and ns != namespace:
+                continue
+            expires_at = float(str(rec["expires_at"]))
+            reported = str(rec["status"])
+            if reported == "offline":
+                presence = "offline"
+            elif expires_at <= now:
+                presence = "stale"
+            else:
+                presence = reported  # "online" or "busy"
+            if status_filter is not None and presence not in status_filter:
+                continue
+            recorded_at_ns = int(float(str(rec["recorded_at"])) * 1_000_000_000)
+            result.append({
+                "agent_id": aid,
+                "presence_state": presence,
+                "last_heartbeat_at": recorded_at_ns,
+                "namespace": ns,
+            })
+        return result
+
+    async def replay(self, channel: str, since: int = 0, until: int | None = None, limit: int = 100) -> tuple[list[dict[str, object]], bool]:
+        """Replay messages from channel with seq >= since.
+
+        Spec: spec/operations/replay.output.schema.json
+        """
+        conn = self._require_conn()
+        if until is not None:
+            async with conn.execute(
+                """
+                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+                FROM messages
+                WHERE channel = ? AND seq >= ? AND seq <= ?
+                ORDER BY seq ASC, id ASC
+                """,
+                (channel, since, until),
+            ) as cur:
+                fetched = await cur.fetchall()
+        else:
+            async with conn.execute(
+                """
+                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+                FROM messages
+                WHERE channel = ? AND seq >= ?
+                ORDER BY seq ASC, id ASC
+                """,
+                (channel, since),
+            ) as cur:
+                fetched = await cur.fetchall()
+        rows: list[aiosqlite.Row] = list(fetched)
+
+        has_more = len(rows) > limit
+        return ([_build_message(r) for r in rows[:limit]], has_more)
+
+    async def group_create(self, creator_id: str, group_id: str | None = None) -> dict[str, object]:
+        """Create a group channel, add creator as first active member.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/group_create.output.schema.json
+        """
+        now = time.time()
+        bare = group_id if group_id else f"grp-{int(now)}"
+        full_id = f"group/{bare}"
+        self._groups[full_id] = [
+            {"agent_id": creator_id, "status": "active", "joined_at": now}
+        ]
+        conn = self._require_conn()
+        await conn.execute(
+            "INSERT OR IGNORE INTO subscriptions (agent_id, channel_pattern) VALUES (?, ?)",
+            (creator_id, full_id),
+        )
+        await conn.commit()
+        return {"group_id": full_id, "created_at": now}
+
+    async def group_invite(self, inviter_id: str, group_id: str, invitee_id: str) -> dict[str, object]:
+        """Invite agent to group. Inviter must be active member.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/group_invite.output.schema.json
+        """
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        caller_active = any(
+            m["agent_id"] == inviter_id and m["status"] == "active"
+            for m in members
+        )
+        if not caller_active:
+            raise ValueError(
+                f"Agent {inviter_id!r} is not an active member of {group_id!r}"
+            )
+        already = any(m["agent_id"] == invitee_id for m in members)
+        if not already:
+            members.append({"agent_id": invitee_id, "status": "invited", "joined_at": now})
+        self._groups[group_id] = members
+        return {"invited": True, "agent_id": invitee_id, "invited_at": now}
+
+    async def group_join(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Accept invitation and join group.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/group_join.output.schema.json
+        """
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        for m in members:
+            if m["agent_id"] == agent_id and m["status"] == "invited":
+                m["status"] = "active"
+                m["joined_at"] = now
+                break
+        conn = self._require_conn()
+        await conn.execute(
+            "INSERT OR IGNORE INTO subscriptions (agent_id, channel_pattern) VALUES (?, ?)",
+            (agent_id, group_id),
+        )
+        await conn.commit()
+        member_count = sum(1 for m in members if m["status"] == "active")
+        return {"joined": True, "group_id": group_id, "member_count": member_count, "joined_at": now}
+
+    async def group_leave(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Leave a group.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/group_leave.output.schema.json
+        """
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        self._groups[group_id] = [m for m in members if m["agent_id"] != agent_id]
+        conn = self._require_conn()
+        await conn.execute(
+            "DELETE FROM subscriptions WHERE agent_id = ? AND channel_pattern = ?",
+            (agent_id, group_id),
+        )
+        await conn.commit()
+        return {"left": True, "group_id": group_id, "left_at": now}
+
+    async def group_list_members(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """List members of a group.
+
+        TODO: persist to DB in future
+        Spec: spec/operations/group_list_members.output.schema.json
+        """
+        members = list(self._groups.get(group_id, []))
+        return {"group_id": group_id, "members": members}
 
     # ------------------------------------------------------------------
     # SQLite-specific extras (not part of the BackingStore port)

@@ -47,7 +47,10 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sox_protocol.core.enforcer.events import Event
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +86,6 @@ async def _inbox_non_empty(agent_id: str) -> bool:
     url = _resolve_backing_store_url()
     try:
         from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
-        from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 
         store: Any
         if url.startswith("sqlite://") or url.startswith("sqlite:///"):
@@ -122,12 +124,12 @@ def _extract_agent_id(hook_data: dict[str, Any]) -> str:
     for key in ("agent_name", "session_id", "agentName"):
         val = hook_data.get(key)
         if val and isinstance(val, str):
-            return val
+            return str(val)
     env_id = os.environ.get("CLAUDE_AGENT_NAME") or os.environ.get("SOX_AGENT_ID")
     return env_id or "unknown-agent"
 
 
-def _build_tool_used_event(hook_data: dict[str, Any]) -> "Event":
+def _build_tool_used_event(hook_data: dict[str, Any]) -> Event:
     from sox_protocol.core.enforcer.events import Event, EventType
 
     agent_id = _extract_agent_id(hook_data)
@@ -141,7 +143,7 @@ def _build_tool_used_event(hook_data: dict[str, Any]) -> "Event":
     )
 
 
-def _build_stop_event(hook_data: dict[str, Any], inbox_non_empty: bool) -> "Event":
+def _build_stop_event(hook_data: dict[str, Any], inbox_non_empty: bool) -> Event:
     from sox_protocol.core.enforcer.events import Event, EventType
 
     agent_id = _extract_agent_id(hook_data)
@@ -162,7 +164,6 @@ def _build_stop_event(hook_data: dict[str, Any], inbox_non_empty: bool) -> "Even
 async def _run(hook_type: str, hook_data: dict[str, Any]) -> dict[str, Any] | None:
     """Run the enforcer for *hook_type* and return a Decision dict or None."""
     from sox_protocol.core.enforcer.decide import decide
-    from sox_protocol.core.enforcer.events import EventType
     from sox_protocol.core.enforcer.policy import Policy
     from sox_protocol.core.enforcer.state import StateStore
 

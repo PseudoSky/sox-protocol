@@ -19,16 +19,23 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-# The 8 SOX v1 operations mirroring spec/operations/*.input.schema.json.
+# All 15 SOX v1 MUST operations mirroring spec/operations/*.input.schema.json.
 Operation = Literal[
     "send",
     "recv",
     "subscribe",
+    "unsubscribe",
     "list_channels",
+    "list_agents",
     "channels_ack",
     "channels_heartbeat",
     "channels_collect",
     "replay",
+    "group_create",
+    "group_invite",
+    "group_join",
+    "group_leave",
+    "group_list_members",
 ]
 
 
@@ -39,7 +46,7 @@ class MiddlewareContext:
     call; MUST NOT be shared across concurrent dispatches.
 
     Args:
-        operation: One of the 8 SOX v1 operation names.
+        operation: One of the 15 SOX v1 operation names.
         input: Mutable dict of tool-call input arguments.
         connection_id: Opaque connection identifier assigned by the transport layer.
         metadata: Extensible dict for inter-middleware communication.
@@ -54,6 +61,7 @@ class MiddlewareContext:
         "operation",
         "input",
         "metadata",
+        "_meta",
         "_connection_id",
         "_agent_id",
         "_correlation_id",
@@ -70,6 +78,7 @@ class MiddlewareContext:
         self.operation: str = operation
         self.input: dict[str, object] = input
         self.metadata: dict[str, object] = metadata if metadata is not None else {}
+        self._meta: dict[str, object] = {"middleware_timings": []}
         self._connection_id: str = connection_id
         self._agent_id: str | None = None
         self._correlation_id: str = uuid.uuid4().hex

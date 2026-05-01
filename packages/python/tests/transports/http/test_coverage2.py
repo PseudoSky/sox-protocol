@@ -5,14 +5,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.transports.http.auth import PassthroughIdentityResolver
-from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import HttpTransport, create_app
 from sox_protocol.adapters.transports.http.sse import (
     build_sse_router,
@@ -20,7 +19,6 @@ from sox_protocol.adapters.transports.http.sse import (
     sse_event_generator,
 )
 from tests.transports.http.conftest import auth_headers
-
 
 # ---------------------------------------------------------------------------
 # SSE generator coverage — test the inner async generator logic directly
@@ -37,7 +35,6 @@ async def test_sse_generator_yields_message_from_watch() -> None:
     await store.subscribe("gen-agent", "gen-ch")
 
     # Build the router and extract the generator function via the ASGI app
-    from fastapi import FastAPI
     app = create_app(store=store, identity=resolver)
 
     # We test the SSE generator by directly calling the store.watch() loop
@@ -295,7 +292,7 @@ async def test_sse_generator_keepalive_path() -> None:
     keepalive_text = ": keepalive\n\n"
     try:
         await asyncio.wait_for(queue.get(), timeout=0.01)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         keepalive_seen = True
 
     assert keepalive_seen, "Keepalive branch should trigger on queue timeout"
@@ -454,7 +451,8 @@ async def test_route_replay_exception() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/v1/ops/replay",
-            json={"channel": "ch"},
+            # Spec fields: channel, since, limit (not since_seq)
+            json={"channel": "ch", "since": 0, "limit": 10},
             headers=auth_headers("agent-a"),
         )
         assert resp.status_code == 500
@@ -475,7 +473,8 @@ async def test_route_channels_collect_exception() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/v1/ops/channels_collect",
-            json={"channel": "err-ch", "count": 1, "timeout_s": 0.1},
+            # Spec fields: reply_to, count, timeout (not channel/timeout_s)
+            json={"reply_to": "msg-broadcast-err", "count": 1, "timeout": 0.1},
             headers=auth_headers("agent-a"),
         )
         assert resp.status_code == 500
@@ -572,7 +571,8 @@ async def test_route_unsubscribe_exception() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         resp = await ac.post(
             "/v1/ops/unsubscribe",
-            json={"patterns": ["ch"]},
+            # Spec field is "channels" (not "patterns")
+            json={"channels": ["ch"]},
             headers=auth_headers("agent-a"),
         )
         assert resp.status_code == 500

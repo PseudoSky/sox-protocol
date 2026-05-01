@@ -30,7 +30,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -98,8 +97,9 @@ def _check_backing_store(project_dir: Path) -> bool:
             _ok("Backing store", "sqlite::memory: (ephemeral)")
             return True
         db_path = Path(db_path_str)
-        if not db_path.is_absolute():
-            db_path = project_dir / db_path
+        if not db_path.is_absolute():  # pragma: no cover
+            # urlparse always returns absolute paths for sqlite:// URIs.
+            db_path = project_dir / db_path  # pragma: no cover
         if db_path.exists():
             _ok("Backing store", f"SQLite reachable at {db_path}")
             return True
@@ -211,7 +211,7 @@ def verify(project_dir: Path | None = None) -> int:
         project_dir = Path.cwd()
     project_dir = project_dir.resolve()
 
-    print(f"SOX Protocol — configuration health check")
+    print("SOX Protocol — configuration health check")
     print(f"  Project dir: {project_dir}")
     print()
 

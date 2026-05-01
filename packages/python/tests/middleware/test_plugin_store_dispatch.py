@@ -226,7 +226,7 @@ async def test_store_dispatch_list_channels_with_since(stub_store: StubBackingSt
 async def test_store_dispatch_unsupported_operation(stub_store: StubBackingStore) -> None:
     pipeline = _make_pipeline(stub_store)
     result = await pipeline.dispatch(
-        "channels_ack",  # not handled by store_dispatch
+        "unknown_future_op",  # not a known v1 operation
         {},
         connection_id="c",
     )

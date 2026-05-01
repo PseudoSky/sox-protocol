@@ -3,10 +3,8 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -60,10 +58,9 @@ async def client(
     store: MemoryStore,
     resolver: PassthroughIdentityResolver,
     config: HttpConfig,
-    liveness: LivenessStore,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Return an httpx.AsyncClient backed by the test ASGI app."""
-    app = create_app(store=store, identity=resolver, config=config, liveness=liveness)
+    app = create_app(store=store, identity=resolver, config=config)
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",

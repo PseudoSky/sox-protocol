@@ -15,7 +15,7 @@ from sox_protocol.core.identity.keys import generate_keypair
 from sox_protocol.core.identity.registry import InMemoryCredentialRegistry
 from sox_protocol.core.identity.verifier import IdentityVerifier
 from sox_protocol.core.middleware.context import MiddlewareContext
-from sox_protocol.core.ports.backing_store import BackingStore
+from sox_protocol.core.ports.backing_store import BackingStore, BackpressureInfo
 
 # ---------------------------------------------------------------------------
 # Stubs
@@ -38,10 +38,11 @@ class StubBackingStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
-    ) -> tuple[str, float]:
+    ) -> tuple[str, float, int, BackpressureInfo]:
         import time
 
         msg_id = str(self._next_seq)
+        seq = self._next_seq
         self._next_seq += 1
         sent_at = time.time()
         self._messages.append(
@@ -52,10 +53,10 @@ class StubBackingStore(BackingStore):
                 "body": body,
                 "correlation_id": correlation_id,
                 "sent_at": sent_at,
-                "seq": self._next_seq - 1,
+                "seq": seq,
             }
         )
-        return (msg_id, sent_at)
+        return (msg_id, sent_at, seq, BackpressureInfo(queue_depth=0, threshold=1000, state="ok"))
 
     async def recv(
         self,
@@ -75,6 +76,46 @@ class StubBackingStore(BackingStore):
     async def watch(self, agent_id: str) -> AsyncIterator[dict[str, object]]:
         return
         yield  # make it an async generator  # noqa: unreachable
+
+    async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
+        existing = self._subscriptions.get(agent_id, [])
+        removed = [p for p in existing if p in patterns]
+        self._subscriptions[agent_id] = [p for p in existing if p not in patterns]
+        return (removed, 0)
+
+    async def ack(self, agent_id: str, message_id: str, status: str, reason: str | None = None) -> dict[str, object]:
+        import time
+        return {"message_id": message_id, "status": status, "acked_at": time.time()}
+
+    async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
+        import time
+        now = time.time()
+        return {"agent_id": agent_id, "status": status, "recorded_at": now, "expires_at": now + (ttl or 30)}
+
+    async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
+        return []
+
+    async def replay(self, channel: str, since: int = 0, until: int | None = None, limit: int = 100) -> tuple[list[dict[str, object]], bool]:
+        return ([], False)
+
+    async def group_create(self, creator_id: str, group_id: str | None = None) -> dict[str, object]:
+        import time
+        return {"group_id": f"group/{group_id or 'grp'}", "created_at": time.time()}
+
+    async def group_invite(self, inviter_id: str, group_id: str, invitee_id: str) -> dict[str, object]:
+        import time
+        return {"invited": True, "agent_id": invitee_id, "invited_at": time.time()}
+
+    async def group_join(self, agent_id: str, group_id: str) -> dict[str, object]:
+        import time
+        return {"joined": True, "group_id": group_id, "member_count": 1, "joined_at": time.time()}
+
+    async def group_leave(self, agent_id: str, group_id: str) -> dict[str, object]:
+        import time
+        return {"left": True, "group_id": group_id, "left_at": time.time()}
+
+    async def group_list_members(self, agent_id: str, group_id: str) -> dict[str, object]:
+        return {"group_id": group_id, "members": []}
 
 
 class RecordingMiddleware:

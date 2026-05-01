@@ -47,10 +47,10 @@ import os
 import tempfile
 import time
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import AsyncIterator
 
-from sox_protocol.core.ports.backing_store import BackingStore
+from sox_protocol.core.ports.backing_store import BackingStore, BackpressureInfo
 
 _WATCH_POLL_INTERVAL: float = 0.05
 
@@ -147,7 +147,7 @@ class FilesystemStore(BackingStore):
         self._channels_dir().mkdir(exist_ok=True)
         self._subscriptions_dir().mkdir(exist_ok=True)
 
-    async def __aenter__(self) -> "FilesystemStore":
+    async def __aenter__(self) -> FilesystemStore:
         await self.initialize()
         return self
 
@@ -208,8 +208,8 @@ class FilesystemStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
-    ) -> tuple[str, float]:
-        """Write a message file and return ``(message_id, sent_at)``.
+    ) -> tuple[str, float, int, BackpressureInfo]:
+        """Write a message file and return ``(message_id, sent_at, seq, backpressure)``.
 
         Spec: ``spec/ports/backing-store.md §2.1``, ``§3.1``
 
@@ -222,6 +222,12 @@ class FilesystemStore(BackingStore):
         filename = f"{sent_at:.6f}_{msg_uuid}.json"
         message_id = f"{_encode_channel(channel)}/{filename}"
 
+        # Compute per-channel seq by counting existing messages.
+        msgs_dir = self._messages_dir(channel)
+        msgs_dir.mkdir(parents=True, exist_ok=True)
+        queue_depth = len(list(msgs_dir.glob("*.json")))
+        seq = queue_depth + 1
+
         payload: dict[str, object] = {
             "message_id": message_id,
             "channel": channel,
@@ -229,13 +235,21 @@ class FilesystemStore(BackingStore):
             "body": body,
             "correlation_id": correlation_id,
             "sent_at": sent_at,
+            "seq": seq,
         }
-        dest = self._messages_dir(channel) / filename
+        dest = msgs_dir / filename
         _atomic_write(dest, json.dumps(payload))
 
         # Signal any sleeping watch() loops.
         self._new_message_event.set()
-        return (message_id, sent_at)
+        threshold = 1000
+        bp = BackpressureInfo(
+            queue_depth=queue_depth,
+            threshold=threshold,
+            over_limit=queue_depth >= threshold,
+            mode="enforced",
+        )
+        return (message_id, sent_at, seq, bp)
 
     async def recv(
         self,
@@ -379,7 +393,7 @@ class FilesystemStore(BackingStore):
                     self._new_message_event.wait(),
                     timeout=self._watch_poll_interval,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             finally:
                 self._new_message_event.clear()
@@ -396,7 +410,7 @@ class FilesystemStore(BackingStore):
                     fname = path.name
                     if fname in seen:
                         continue
-                    if fname in delivered:
+                    if fname in delivered:  # pragma: no cover — race guard for multi-process delivery
                         seen.add(fname)
                         continue
                     try:
@@ -407,3 +421,233 @@ class FilesystemStore(BackingStore):
                         continue
                     seen.add(fname)
                     yield msg
+
+    # ------------------------------------------------------------------
+    # Extended BackingStore operations
+    # (in-memory for group/liveness; TODO: persist to filesystem in future)
+    # ------------------------------------------------------------------
+
+    def __init_extras(self) -> None:
+        """Lazily initialise extra in-memory state if not yet present."""
+        if not hasattr(self, "_ack_records"):
+            self._ack_records: dict[str, dict[str, object]] = {}
+        if not hasattr(self, "_liveness"):
+            self._liveness: dict[str, dict[str, object]] = {}
+        if not hasattr(self, "_groups"):
+            self._groups: dict[str, list[dict[str, object]]] = {}
+
+    async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
+        """Remove matching subscriptions and discard queued-but-unread messages.
+
+        Spec: spec/operations/unsubscribe.input.schema.json
+        """
+        existing = self._get_patterns(agent_id)
+        removed: list[str] = []
+        new_patterns: list[str] = []
+        pending_cleared: int = 0
+
+        for p in existing:
+            if p in patterns:
+                removed.append(p)
+            else:
+                new_patterns.append(p)
+
+        if removed:
+            _atomic_write(self._subscriptions_file(agent_id), json.dumps(new_patterns))
+            # Count and mark delivered messages matching removed patterns.
+            for channel in self._known_channels():
+                if not any(fnmatch.fnmatchcase(channel, p) for p in removed):
+                    continue
+                delivered = self._get_delivered_set(channel, agent_id)
+                msg_files = self._list_message_files(channel)
+                to_mark: list[str] = []
+                for path in msg_files:
+                    fname = path.name
+                    if fname not in delivered:
+                        to_mark.append(fname)
+                        pending_cleared += 1
+                if to_mark:
+                    self._mark_delivered(channel, agent_id, to_mark)
+
+        return (removed, pending_cleared)
+
+    async def ack(self, agent_id: str, message_id: str, status: str, reason: str | None = None) -> dict[str, object]:
+        """Record an ACK/NACK for message_id.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/channels_ack.output.schema.json
+        """
+        self.__init_extras()
+        acked_at = time.time()
+        self._ack_records[message_id] = {
+            "agent_id": agent_id,
+            "status": status,
+            "reason": reason,
+            "acked_at": acked_at,
+        }
+        return {"message_id": message_id, "status": status, "acked_at": acked_at}
+
+    async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
+        """Update liveness record for agent_id.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/channels_heartbeat.output.schema.json
+        """
+        self.__init_extras()
+        now = time.time()
+        expires_at = now + (ttl or 30)
+        existing = self._liveness.get(agent_id, {})
+        self._liveness[agent_id] = {
+            "status": status,
+            "recorded_at": now,
+            "expires_at": expires_at,
+            "namespace": existing.get("namespace"),
+        }
+        return {
+            "agent_id": agent_id,
+            "status": status,
+            "recorded_at": now,
+            "expires_at": expires_at,
+        }
+
+    async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
+        """Return liveness table for all known agents.
+
+        Each entry conforms to ``spec/operations/list_agents.output.schema.json``:
+        - ``agent_id``: str
+        - ``presence_state``: one of "online", "busy", "stale", "offline"
+        - ``last_heartbeat_at``: Unix nanoseconds (int); 0 if never heartbeated
+        - ``namespace``: str | None
+
+        TODO: persist to filesystem in future
+        """
+        self.__init_extras()
+        now = time.time()
+        result: list[dict[str, object]] = []
+        for aid, rec in self._liveness.items():
+            ns = rec.get("namespace")
+            if namespace is not None and ns != namespace:
+                continue
+            expires_at = float(str(rec["expires_at"]))
+            reported = str(rec["status"])
+            if reported == "offline":
+                presence = "offline"
+            elif expires_at <= now:
+                presence = "stale"
+            else:
+                presence = reported  # "online" or "busy"
+            if status_filter is not None and presence not in status_filter:
+                continue
+            recorded_at_ns = int(float(str(rec["recorded_at"])) * 1_000_000_000)
+            result.append({
+                "agent_id": aid,
+                "presence_state": presence,
+                "last_heartbeat_at": recorded_at_ns,
+                "namespace": ns,
+            })
+        return result
+
+    async def replay(self, channel: str, since: int = 0, until: int | None = None, limit: int = 100) -> tuple[list[dict[str, object]], bool]:
+        """Replay messages from channel with seq >= since.
+
+        Spec: spec/operations/replay.output.schema.json
+        """
+        msg_files = self._list_message_files(channel)
+        matches: list[dict[str, object]] = []
+        for path in msg_files:
+            try:
+                msg: dict[str, object] = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            seq = int(str(msg.get("seq", 0)))
+            if seq < since:
+                continue
+            if until is not None and seq > until:
+                continue
+            matches.append(msg)
+        matches.sort(key=lambda m: (int(str(m.get("seq", 0))), str(m.get("message_id", ""))))
+        has_more = len(matches) > limit
+        return (matches[:limit], has_more)
+
+    async def group_create(self, creator_id: str, group_id: str | None = None) -> dict[str, object]:
+        """Create a group channel, add creator as first active member.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/group_create.output.schema.json
+        """
+        self.__init_extras()
+        now = time.time()
+        bare = group_id if group_id else f"grp-{int(now)}"
+        full_id = f"group/{bare}"
+        self._groups[full_id] = [
+            {"agent_id": creator_id, "status": "active", "joined_at": now}
+        ]
+        await self.subscribe(creator_id, full_id)
+        return {"group_id": full_id, "created_at": now}
+
+    async def group_invite(self, inviter_id: str, group_id: str, invitee_id: str) -> dict[str, object]:
+        """Invite agent to group. Inviter must be active member.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/group_invite.output.schema.json
+        """
+        self.__init_extras()
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        caller_active = any(
+            m["agent_id"] == inviter_id and m["status"] == "active"
+            for m in members
+        )
+        if not caller_active:
+            raise ValueError(
+                f"Agent {inviter_id!r} is not an active member of {group_id!r}"
+            )
+        already = any(m["agent_id"] == invitee_id for m in members)
+        if not already:
+            members.append({"agent_id": invitee_id, "status": "invited", "joined_at": now})
+        self._groups[group_id] = members
+        return {"invited": True, "agent_id": invitee_id, "invited_at": now}
+
+    async def group_join(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Accept invitation and join group.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/group_join.output.schema.json
+        """
+        self.__init_extras()
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        for m in members:
+            if m["agent_id"] == agent_id and m["status"] == "invited":
+                m["status"] = "active"
+                m["joined_at"] = now
+                break
+        await self.subscribe(agent_id, group_id)
+        member_count = sum(1 for m in members if m["status"] == "active")
+        return {"joined": True, "group_id": group_id, "member_count": member_count, "joined_at": now}
+
+    async def group_leave(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """Leave a group.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/group_leave.output.schema.json
+        """
+        self.__init_extras()
+        now = time.time()
+        members = self._groups.get(group_id, [])
+        self._groups[group_id] = [m for m in members if m["agent_id"] != agent_id]
+        # Remove subscription to group channel.
+        existing = self._get_patterns(agent_id)
+        new_patterns = [p for p in existing if p != group_id]
+        _atomic_write(self._subscriptions_file(agent_id), json.dumps(new_patterns))
+        return {"left": True, "group_id": group_id, "left_at": now}
+
+    async def group_list_members(self, agent_id: str, group_id: str) -> dict[str, object]:
+        """List members of a group.
+
+        TODO: persist to filesystem in future
+        Spec: spec/operations/group_list_members.output.schema.json
+        """
+        self.__init_extras()
+        members = list(self._groups.get(group_id, []))
+        return {"group_id": group_id, "members": members}

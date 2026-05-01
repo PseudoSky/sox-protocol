@@ -18,7 +18,6 @@ from sox_protocol.core.middleware.context import MiddlewareContext
 from sox_protocol.core.middleware.pipeline import Pipeline
 from sox_protocol.core.middleware.plugins.auth import AuthMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Terminal
 # ---------------------------------------------------------------------------

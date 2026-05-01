@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+
 def _find_free_port() -> int:
     """Find an available TCP port on localhost."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -69,8 +70,9 @@ def test_cli_serve_http_health() -> None:
 
 def test_cli_serve_stdio_delegates() -> None:
     """``sox serve --transport stdio`` imports without error (smoke test)."""
-    from sox_protocol.cli.serve import serve_command
     import argparse
+
+    from sox_protocol.cli.serve import serve_command
 
     args = argparse.Namespace(transport="stdio", host=None, port=None, func=serve_command)
     # We can't easily run the MCP server in a unit test, but we verify
@@ -91,12 +93,12 @@ def test_cli_main_no_subcommand_prints_help(capsys) -> None:
 def test_cli_main_serve_http_returns_zero() -> None:
     """``main(['serve', '--transport', 'http', '--port', 'N'])`` starts and we kill it."""
     # This is covered by the subprocess test above; just verify the arg parse path.
-    from sox_protocol.cli.__main__ import main
     import argparse
-    from sox_protocol.cli.serve import serve_command
 
     # Just verify that parsing 'serve' results in the right func
     import sys
+
+    from sox_protocol.cli.serve import serve_command
     old_argv = sys.argv
     sys.argv = ["sox", "serve", "--transport", "http", "--port", "0"]
     try:

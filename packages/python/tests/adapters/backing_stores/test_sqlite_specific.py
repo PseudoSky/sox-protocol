@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import pathlib
 
-import aiosqlite
-import pytest
 import pytest_asyncio
 
 from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
@@ -201,7 +199,6 @@ class TestConcurrentWritersStress:
 
     async def test_stress_sqlite_1000_messages(self, tmp_path: pathlib.Path) -> None:
         """1000 messages: no loss, no duplication, ordering preserved per channel."""
-        import asyncio
 
         db_path = tmp_path / "stress.db"
         store = SqliteStore(db_path=db_path)
