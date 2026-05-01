@@ -256,6 +256,12 @@ def _update_mcp_json(project_dir: Path, *, dry_run: bool = False) -> bool:
             "args": ["-m", "sox_protocol.core.mcp_server"],
             "env": {
                 "SOX_BACKING_STORE": f"sqlite:///{db_path}",
+                # Per spec/ports/identity.md §6: credential lives on the
+                # connection seam, not in tool-call inputs.  This env var
+                # documents to the MCP server which runtime channel supplies
+                # the verified agent_id; for Claude Code, that is the
+                # session-scoped CLAUDE_AGENT_NAME the runtime injects.
+                "SOX_AGENT_ID_SOURCE": "claude_code_agent_name",
             },
         }
 
@@ -306,6 +312,12 @@ def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
             "args": ["-m", "sox_protocol.core.mcp_server"],
             "env": {
                 "SOX_BACKING_STORE": f"sqlite:///{db_path}",
+                # Per spec/ports/identity.md §6: credential lives on the
+                # connection seam, not in tool-call inputs.  This env var
+                # documents to the MCP server which runtime channel supplies
+                # the verified agent_id; for Claude Code, that is the
+                # session-scoped CLAUDE_AGENT_NAME the runtime injects.
+                "SOX_AGENT_ID_SOURCE": "claude_code_agent_name",
             },
         }
 

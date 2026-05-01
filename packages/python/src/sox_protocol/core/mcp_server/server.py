@@ -220,11 +220,24 @@ def create_server() -> FastMCP[dict[str, object]]:
         SystemExit: If ``SOX_AGENT_ID`` is unset or ``SOX_BACKING_STORE``
             has an unrecognised URI scheme.
     """
-    agent_id = (
-        os.environ.get("SOX_AGENT_ID", "").strip()
-        or os.environ.get("CLAUDE_AGENT_NAME", "").strip()
-        or "default"
-    )
+    # Resolve the agent_id from the configured source.
+    # Per spec/ports/identity.md §6, the credential — including agent_id —
+    # lives on the connection seam (here: MCP launch params), not in
+    # tool-call inputs.  ``SOX_AGENT_ID_SOURCE`` declares which env channel
+    # the runtime adapter is using to inject the verified identity.
+    agent_id_source = os.environ.get("SOX_AGENT_ID_SOURCE", "").strip()
+    if agent_id_source == "claude_code_agent_name":
+        agent_id = (
+            os.environ.get("CLAUDE_AGENT_NAME", "").strip()
+            or os.environ.get("SOX_AGENT_ID", "").strip()
+            or "default"
+        )
+    else:
+        agent_id = (
+            os.environ.get("SOX_AGENT_ID", "").strip()
+            or os.environ.get("CLAUDE_AGENT_NAME", "").strip()
+            or "default"
+        )
 
     backing_store_uri = os.environ.get("SOX_BACKING_STORE", "memory://")
     _log.info(

@@ -168,21 +168,20 @@ def test_settings_json_mcp_server_registered(project: Path) -> None:
     assert "sox_protocol.core.mcp_server" in server.get("args", [])
 
 
-@pytest.mark.skip(
-    reason="Installer does not yet set SOX_AGENT_ID_SOURCE. "
-    "Tracked in .workflow/plans/SALVAGE-AUDIT-2026-04-30.md — "
-    "identity-primitive:05-spec-realignment moved credential to MCP launch params per "
-    "spec/ports/identity.md §6, but the runtime adapter installer was not updated to "
-    "propagate the credential-source env var. Re-enable when installer is wired."
-)
 def test_settings_json_mcp_server_env(project: Path) -> None:
+    """Installer sets SOX_BACKING_STORE and the SOX_AGENT_ID_SOURCE declaration.
+
+    Per spec/ports/identity.md §6, credential plumbs through MCP launch params,
+    not tool-call inputs.  ``SOX_AGENT_ID_SOURCE`` documents which env channel
+    the runtime adapter is using to inject the verified agent_id.
+    """
     install(project_dir=project, verbose=False)
     settings = json.loads((project / ".claude" / "settings.json").read_text())
     env = settings["mcpServers"][_MCP_SERVER_NAME].get("env", {})
     assert "SOX_BACKING_STORE" in env
     assert env["SOX_BACKING_STORE"].startswith("sqlite:///")
     assert ".sox/messages.db" in env["SOX_BACKING_STORE"]
-    assert "SOX_AGENT_ID_SOURCE" in env
+    assert env.get("SOX_AGENT_ID_SOURCE") == "claude_code_agent_name"
 
 
 def test_settings_json_hooks_registered(project: Path) -> None:
@@ -194,21 +193,23 @@ def test_settings_json_hooks_registered(project: Path) -> None:
         assert len(hooks[event]) > 0, f"No hook entries for event {event!r}"
 
 
-@pytest.mark.skip(
-    reason="Installer hook entries currently lack a top-level 'command' key (likely "
-    "wrapped under a 'hooks' sub-list per Claude Code's nested hook schema). "
-    "Tracked in .workflow/plans/SALVAGE-AUDIT-2026-04-30.md — assertion needs to "
-    "traverse the nested shape or installer needs to flatten. Out of scope for salvage."
-)
 def test_settings_json_hooks_point_to_scripts(project: Path) -> None:
+    """Hook entries follow Claude Code's nested schema:
+    ``{matcher: ..., hooks: [{type: command, command: <path>.sh}, ...]}``.
+    """
     install(project_dir=project, verbose=False)
     settings = json.loads((project / ".claude" / "settings.json").read_text())
     hooks = settings.get("hooks", {})
     for event in _HOOK_EVENTS:
         for entry in hooks.get(event, []):
-            cmd = entry.get("command", "")
-            assert cmd.endswith(".sh"), f"Hook command for {event} must be a .sh script: {cmd}"
-            assert Path(cmd).name in ("post_tool_use.sh", "stop.sh")
+            inner_hooks = entry.get("hooks", [])
+            assert inner_hooks, f"Hook entry for {event} must contain inner hooks list"
+            for inner in inner_hooks:
+                cmd = inner.get("command", "")
+                assert cmd.endswith(".sh"), (
+                    f"Hook command for {event} must be a .sh script: {cmd}"
+                )
+                assert Path(cmd).name in ("post_tool_use.sh", "stop.sh")
 
 
 def test_settings_json_merged_with_existing(project: Path) -> None:
@@ -314,13 +315,12 @@ def test_install_is_fully_idempotent(project: Path) -> None:
         )
 
 
-@pytest.mark.skip(
-    reason="Same nested-hook-schema issue as test_settings_json_hooks_point_to_scripts — "
-    "entries lack a top-level 'command' key. Out of scope for salvage; "
-    "tracked in .workflow/plans/SALVAGE-AUDIT-2026-04-30.md."
-)
 def test_idempotent_settings_no_duplicate_hooks(project: Path) -> None:
-    """Running install three times must not append duplicate hook entries."""
+    """Running install three times must not append duplicate hook entries.
+
+    Traverses the nested Claude Code hook schema:
+    ``hooks[event] -> [{matcher, hooks: [{type, command}]}]``.
+    """
     for _ in range(3):
         install(project_dir=project, verbose=False)
 
@@ -328,7 +328,12 @@ def test_idempotent_settings_no_duplicate_hooks(project: Path) -> None:
     hooks = settings.get("hooks", {})
     for event in _HOOK_EVENTS:
         entries = hooks.get(event, [])
-        commands = [e["command"] for e in entries]
+        commands = [
+            inner["command"]
+            for entry in entries
+            for inner in entry.get("hooks", [])
+            if "command" in inner
+        ]
         assert len(commands) == len(set(commands)), (
             f"Duplicate hook commands for event {event!r}: {commands}"
         )
