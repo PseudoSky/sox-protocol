@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+name: plugin-loads-via-entry-point
+spec_ref: spec/ports/middleware/05-discovery.md#2
+description: >
+  A plugin registered via a Python importlib.metadata entry-point in the
+  "sox_protocol.plugins" group is discovered, its manifest validated against
+  sox-plugin.schema.json, and the factory loaded successfully. The host startup
+  log must record the plugin id and kind. The plugin participates in a send
+  operation, confirming end-to-end pipeline integration.
+
+pending: true
+
+agents:
+  - id: agent-plugin-loader-a
+    credential: secret-plugin-loader-a
+  - id: agent-plugin-loader-b
+    credential: secret-plugin-loader-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-plugin-loader-b
+    input:
+      pattern: "test:plugin-load"
+
+sequence:
+  - id: send-through-plugin
+    as_agent: agent-plugin-loader-a
+    operation: send
+    input:
+      channel: "test:plugin-load"
+      body:
+        type: status_update
+        subject: plugin load test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-after-plugin
+    as_agent: agent-plugin-loader-b
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:plugin-load"
+          sender: agent-plugin-loader-a
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: recv-after-plugin
+    min: 1

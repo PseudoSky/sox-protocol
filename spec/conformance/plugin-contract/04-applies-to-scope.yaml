@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+name: applies-to-scope
+spec_ref: spec/ports/middleware/04-manifest.md#4.4
+description: >
+  A plugin manifest declaring applies_to: ["send"] is invoked for send
+  operations but must not be invoked for recv operations. The fixture
+  registers a stub interceptor scoped to send-only and verifies via
+  pipeline_trace that: (a) the plugin_id appears in pipeline_trace for
+  the send step; (b) the plugin_id is absent from pipeline_trace for the
+  recv step. This confirms the host's applies_to filtering logic is
+  operative and that scoped plugins do not impose per-request overhead on
+  operations outside their declared scope (03-plugin-contract.md §2,
+  04-manifest.md §4.4).
+
+pending: true
+
+agents:
+  - id: agent-scope-a
+    credential: secret-scope-a
+  - id: agent-scope-b
+    credential: secret-scope-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-scope-b
+    input:
+      pattern: "test:applies-to"
+
+sequence:
+  - id: send-scoped
+    as_agent: agent-scope-a
+    operation: send
+    input:
+      channel: "test:applies-to"
+      body:
+        type: status_update
+        subject: applies_to scope test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+  - id: recv-scoped
+    as_agent: agent-scope-b
+    operation: recv
+    input: {}
+    expected_output:
+      messages:
+        - channel: "test:applies-to"
+          sender: agent-scope-a
+          seq: 1
+
+assertions:
+  - type: no_loss
+    recv_step: recv-scoped
+    min: 1

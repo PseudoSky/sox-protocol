@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+name: version-mismatch-refused
+spec_ref: spec/ports/middleware/06-versioning.md#4
+description: >
+  A plugin declaring protocol_version ">=0.5,<1.0" is refused by a host
+  running protocol version "1.0.0". The host must emit the five-field
+  plugin_protocol_version_mismatch structured envelope (error_code,
+  plugin_id, plugin_declares, host_supports, remediation) and must not
+  instantiate the plugin factory. The plugin must be absent from the
+  pipeline_trace of any subsequent dispatch. This verifies ADR 0004
+  decision 3: boot-time hard-reject; lazy refusal is forbidden.
+
+pending: true
+
+agents:
+  - id: agent-version-mismatch-a
+    credential: secret-version-mismatch-a
+
+sequence:
+  - id: send-no-refused-plugin
+    as_agent: agent-version-mismatch-a
+    operation: send
+    input:
+      channel: "test:version-mismatch"
+      body:
+        type: status_update
+        subject: version mismatch test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+assertions: []

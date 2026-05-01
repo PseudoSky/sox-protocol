@@ -53,7 +53,17 @@ spec/
 │   ├── backing-store.md             # BackingStore port (south / driven)
 │   ├── transport.md                 # Transport port (wire / HTTP)
 │   ├── identity.md                  # Identity port (auth)
-│   ├── middleware.md                # Middleware port (pipeline)
+│   ├── middleware.md                # Redirect stub → see middleware/ directory below
+│   ├── middleware/                  # Middleware port (pipeline + plugin architecture) — 8 files
+│   │   ├── README.md                # Directory index and reading guide
+│   │   ├── 01-context.md            # MiddlewareContext shape and structural invariants
+│   │   ├── 02-pipeline.md           # Pipeline flow, short-circuit, mutability, error handling
+│   │   ├── 03-plugin-contract.md    # Plugin kinds, failure semantics, ordering, allowlist, observability
+│   │   ├── 04-manifest.md           # sox-plugin.yaml envelope; schema and example references
+│   │   ├── 05-discovery.md          # Python entry-points, Node package.json#sox, register_plugin
+│   │   ├── 06-versioning.md         # protocol_version dual wire forms; refusal envelope; signing
+│   │   ├── 07-default-chain.md      # DEFAULT_ORDER constant; slot specs; schema_validator contract
+│   │   └── 08-conformance.md        # Conformance checklists; plugin-contract/ fixture pointers
 │   ├── runtime-discipline-renderer.md  # DisciplineRenderer port (north / driving)
 │   └── runtime-enforcer-binding.md    # EnforcerBinding port (north / driving)
 └── conformance/                     # language-neutral conformance test harness

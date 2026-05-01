@@ -144,6 +144,7 @@ The following SOX operation names are valid in `operation:` fields:
 | `replay/` | 2 | Replay since_seq, empty future cursor |
 | `namespace-isolation/` | 2 | Scoped channels (pending), version block |
 | `channels-collect/` | 1 | collect N replies (pending — x-status: planned) |
+| `plugin-contract/` | 7 | Plugin load via entry-point, version-mismatch refusal, kind-taxonomy enforcement, applies-to scope, ordering constraints, short-circuit halt, synthetic provider lifecycle — **all pending** until P4 (`plugin-discovery-py`) + P5 (`reference-plugins`) ship |
 
 ---
 
@@ -217,6 +218,12 @@ Use `pending: true` for:
   after 30 s timeout).
 - Fixtures that require multi-server namespace configuration not available in
   the default single-server setup.
+- Fixtures whose required implementation has not yet shipped. All 7 fixtures in
+  `plugin-contract/` are `pending: true` until engagement P4 (`plugin-discovery-py`)
+  wires the Python entry-point loader and engagement P5 (`reference-plugins`) ships
+  the `io.sox.schema-strict` transformer plugin. When those engagements complete,
+  `pending: true` MUST be removed from each fixture that passes. Any fixture that
+  cannot be un-skipped at that point MUST document the blocking reason.
 
 ---
 

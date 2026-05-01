@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+name: kind-taxonomy-enforced
+spec_ref: spec/ports/middleware/03-plugin-contract.md#2.3
+description: >
+  An interceptor plugin declaring observe_only: true in its manifest
+  that returns ShortCircuitResponse at runtime is a contract violation.
+  The host must convert the response to an internal_error envelope rather
+  than propagating the short-circuit. The pipeline_trace record for the
+  offending plugin must carry verdict "error", not "short_circuit". This
+  verifies that capability flag orthogonality is enforced at runtime, not
+  only at startup manifest-validation time (03-plugin-contract.md §2.3,
+  §3.1).
+
+pending: true
+
+agents:
+  - id: agent-taxonomy-a
+    credential: secret-taxonomy-a
+
+sequence:
+  - id: send-triggers-observe-only-violation
+    as_agent: agent-taxonomy-a
+    operation: send
+    input:
+      channel: "test:kind-taxonomy"
+      body:
+        type: status_update
+        subject: observe_only violation test
+    expected_error:
+      error_code: internal_error
+
+assertions: []

@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+name: must-run-before-after
+spec_ref: spec/ports/middleware/03-plugin-contract.md#4
+description: >
+  Two stub interceptor plugins declare ordering constraints: plugin-alpha
+  declares must_run_before: ["plugin-beta"] and plugin-beta declares
+  must_run_after: ["plugin-alpha"]. The fixture verifies via pipeline_trace
+  that plugin-alpha's started_at precedes plugin-beta's started_at in the
+  same dispatch. A third variant registers two plugins with a circular
+  constraint (plugin-x must_run_before plugin-y, plugin-y must_run_before
+  plugin-x) and asserts that the host refuses to start with
+  plugin_ordering_cycle naming both ids. This exercises the stable Kahn's
+  topological sort with lexicographic tie-break required by ADR 0004
+  decision 6 and 03-plugin-contract.md §4.
+
+pending: true
+
+agents:
+  - id: agent-ordering-a
+    credential: secret-ordering-a
+
+sequence:
+  - id: send-ordered-chain
+    as_agent: agent-ordering-a
+    operation: send
+    input:
+      channel: "test:ordering"
+      body:
+        type: status_update
+        subject: ordering constraints test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+assertions: []

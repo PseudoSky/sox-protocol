@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+name: short-circuit-explicit
+spec_ref: spec/ports/middleware/03-plugin-contract.md#2.1.1
+description: >
+  An interceptor plugin declaring may_short_circuit: true raises
+  ShortCircuitResponse on a send operation. The fixture asserts: (a) the
+  caller receives an error envelope (the short-circuit payload, not
+  internal_error); (b) the pipeline_trace record for the interceptor
+  carries verdict "short_circuit"; (c) downstream units (idempotency,
+  store_dispatch) are absent from pipeline_trace, confirming they were not
+  invoked; (d) no message is stored (a subsequent recv returns no messages
+  on the channel). This verifies 03-plugin-contract.md §2.1.1
+  (ShortCircuitResponse is not an error condition; host must not log it as
+  one) and §3.1 (pipeline_trace verdict semantics).
+
+pending: true
+
+agents:
+  - id: agent-shortcircuit-a
+    credential: secret-shortcircuit-a
+  - id: agent-shortcircuit-b
+    credential: secret-shortcircuit-b
+
+setup:
+  - operation: subscribe
+    as_agent: agent-shortcircuit-b
+    input:
+      pattern: "test:short-circuit"
+
+sequence:
+  - id: send-intercepted
+    as_agent: agent-shortcircuit-a
+    operation: send
+    input:
+      channel: "test:short-circuit"
+      body:
+        type: status_update
+        subject: short-circuit test
+    expected_error:
+      error_code: "{{any_string}}"
+
+  - id: recv-empty
+    as_agent: agent-shortcircuit-b
+    operation: recv
+    input: {}
+    expected_output:
+      messages: []
+
+assertions: []

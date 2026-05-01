@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: Apache-2.0
+name: provider-lifecycle-synthetic
+spec_ref: spec/ports/middleware/03-plugin-contract.md#2.2.1
+description: >
+  A synthetic in-memory provider plugin (no real external resource) is
+  registered programmatically via register_plugin. The provider's factory
+  returns a stub resource object that records lifecycle events. The fixture
+  verifies: (a) on_startup is called exactly once after the factory, before
+  the host begins accepting requests; (b) on_shutdown is called exactly once
+  when the host initiates graceful shutdown; (c) the events are recorded in
+  the correct order: factory → on_startup → [requests] → on_shutdown; (d)
+  the stub resource is accessible to other plugins that declare
+  requires: ["test.synthetic_resource"] in their manifests; (e) the
+  pipeline_trace startup record for the provider carries verdict "continue"
+  on success.
+  This fixture exercises the provider kind contract (factory signature,
+  lifecycle ordering, capability registration) without requiring a real
+  external resource. It catches obvious provider-contract bugs before the
+  first real provider plugin (redis-pool, reference-plugins-extended) ships.
+  Motivated by suggestions-v2.md §Q6 NR-2: "ship a conformance fixture that
+  exercises the provider kind with a synthetic in-memory provider (no real
+  resource), even if no real provider plugin ships in v1."
+
+pending: true
+
+agents:
+  - id: agent-provider-a
+    credential: secret-provider-a
+
+sequence:
+  - id: send-uses-provider-resource
+    as_agent: agent-provider-a
+    operation: send
+    input:
+      channel: "test:provider-lifecycle"
+      body:
+        type: status_update
+        subject: provider lifecycle test
+    expected_output:
+      message_id: "{{any_string}}"
+      seq: 1
+
+assertions: []

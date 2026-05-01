@@ -139,3 +139,19 @@ This engagement produces a *candidate* contract. B2 conformance fixtures may sur
 - NestJS issues #541, #9269, #337 — production usage collapse
 - Fastify `fastify-plugin` — encapsulation and registration shape
 - PEP 440 — canonical wire form for `protocol_version`
+
+## Spec Cross-References (`spec/ports/middleware/`)
+
+The normative bodies of this ADR's decisions are distributed across the following files. All eight files together constitute the middleware port specification.
+
+| File | ADR decisions covered |
+|---|---|
+| `spec/ports/middleware/README.md` | Directory index and reading guide |
+| `spec/ports/middleware/01-context.md` | Pipeline purpose; `MiddlewareContext` shape; structural invariants |
+| `spec/ports/middleware/02-pipeline.md` | Pipeline flow; short-circuit semantics; async requirement |
+| `spec/ports/middleware/03-plugin-contract.md` | Decisions 1 (kinds), 5 (failure semantics), 6 (ordering), 7 (config), 8 (observability), 9 (v1 limitations) |
+| `spec/ports/middleware/04-manifest.md` | Decision 2 (manifest format); envelope shape; schema references |
+| `spec/ports/middleware/05-discovery.md` | Decision 4 (discovery mechanism); allowlist; `--no-discovery` |
+| `spec/ports/middleware/06-versioning.md` | Decision 3 (version negotiation); refusal envelope; signing reservation |
+| `spec/ports/middleware/07-default-chain.md` | `DEFAULT_ORDER` constant; slot specifications; `schema_validator` contract |
+| `spec/ports/middleware/08-conformance.md` | Conformance checklists; pointer to `spec/conformance/plugin-contract/` fixtures |

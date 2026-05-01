@@ -4,6 +4,7 @@
 **Deciders:** SOX Protocol architecture working group
 **Supersedes:** —
 **Related:** `docs/decisions/schema-validation-layer.md`, `docs/decisions/namespace-isolation-layer.md`, `docs/decisions/admin-api-colocation.md`, `docs/DESIGN.md` §runtime-adapter
+**See also:** `docs/adr/0004-plugin-architecture.md` — closes the open questions left by this ADR (versioning, error propagation per kind, hook execution model, chain introspection). The normative bodies of ADR 0004's decisions are in `spec/ports/middleware/03-plugin-contract.md` and `spec/ports/middleware/06-versioning.md`.
 
 ## Status: Accepted (2026-04-29)
 
