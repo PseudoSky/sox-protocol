@@ -13,11 +13,15 @@ orchestrator_protocol: v1
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-housekeeping | License switch + SWHID + signed commits + OIN tracker | `DONE` | general-purpose | 1 | 2026-04-30T00:00:00Z |
-| 02-preprint | arXiv preprint draft | `READY` | content-marketer | 0 | 2026-04-30T00:00:00Z |
+| 02-preprint | arXiv preprint draft | `DONE` | content-marketer | 1 | 2026-05-01T11:05:00Z |
 
 ## Currently next action
 
-`02-preprint` is `READY`. Spawn `content-marketer`.
+`02-preprint` is `DONE`. Engagement complete.
+
+## Transitions
+
+- 2026-05-01T11:05:00Z — 02-preprint DONE (content-marketer): sox-protocol.md (5,345 words), sox-protocol.tex, refs.bib (19 entries), SUBMISSION.md. All acceptance criteria met. Ready for arXiv submission.
 
 ## Termination targets
 

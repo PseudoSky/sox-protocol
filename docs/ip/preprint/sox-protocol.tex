@@ -1,0 +1,350 @@
+\documentclass[11pt]{article}
+\usepackage[utf-8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{setspace}
+\usepackage{booktabs}
+
+% Code listing style
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  numbers=left,
+  numbersep=5pt,
+  showstringspaces=false,
+  language=Python
+}
+
+\title{SOX Protocol: A Real-Time Many-to-Many Messaging Substrate for LLM Agent Collaboration}
+
+\author{
+  SOX Protocol Contributors \\
+  \texttt{https://github.com/your-org/sox-protocol}
+}
+
+\date{May 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  Multi-agent systems composed of large language models (LLMs) require a communication layer distinct from orchestration frameworks and tool-calling protocols. Existing frameworks (AutoGen, MetaGPT, CrewAI) either enforce turn-taking synchrony or provide raw actor primitives without a documented asynchronous discipline. This paper presents SOX Protocol, a real-time many-to-many messaging specification where LLM agents are first-class peers. SOX provides named, persistent channels; non-blocking send and pull-based receive; group broadcast with membership enforcement; direct messages; threaded conversations; presence tracking; and explicit acknowledgement semantics. The novelty lies in packaging both the channel substrate and a documented pattern for \emph{speculative-execute-while-awaiting-clarification}: an agent posts a clarification request to peers, continues under a best-guess interpretation, and non-destructively integrates the late-arriving reply. SOX is runtime-agnostic, exposing operations via MCP (Model Context Protocol) and delegating backing-store implementation to pluggable ports (SQLite, filesystem, NATS, Redis). A language-neutral conformance suite validates third-party implementations. This artifact establishes SOX as timestamped prior art for defensive publication and signals adoption across multiple LLM runtimes (Claude Code, OpenAI Agents SDK, LangGraph). The protocol fills a structural gap: concurrent asynchronous agent collaboration without blocking, without orchestrator bottlenecks, and without rewriting agent codebases.
+\end{abstract}
+
+\noindent\textbf{Keywords:} multi-agent systems, LLM agents, asynchronous messaging, protocol design, agent communication, speculative execution, concurrent reasoning.
+
+\section{Introduction}
+
+The rapid adoption of agentic AI has exposed a communications gap. Large language models can now execute autonomously over extended horizons, calling tools, reasoning between steps, and maintaining state. In multi-agent systems, independent agents must coordinate decisions and share context. Current frameworks handle this in one of three ways, each with drawbacks.
+
+\textbf{Turn-taking schedulers} (CrewAI, LangGraph, OpenAI Swarm) run a single agent while others idle. Agent A acts, blocks, and yields to agent B. This is synchronous and sequential; if B's response would unblock A's reasoning before $T=10$, A waits until $T=10$ anyway. Concurrent work is impossible.
+
+\textbf{Handoff frameworks} (OpenAI Agents SDK handoffs) transfer control between agents. When A hands off to B, A stops. This is useful for sequential delegation but prevents ``A keeps working under best-guess while B formulates an answer'' scenarios.
+
+\textbf{Actor-model frameworks with primitives but no packaged discipline} (AutoGen 0.4, MetaGPT) provide mailboxes and pub/sub topics but leave the scheduling discipline to the developer. AutoGen ships actor mailboxes and concurrent execution; MetaGPT ships a shared message pool with role subscriptions. Neither documents a turnkey pattern for the hard case: what should an agent do when it posts a high-priority question, gets no immediate answer, and needs to proceed anyway?
+
+\textbf{Messaging substrates without LLM shells} (NATS, Kafka, MQTT, Redis pub/sub) solve the infrastructure problem but require developers to build the agent-side mailbox loop, cadence discipline, and reconciliation logic from scratch.
+
+This paper presents SOX Protocol, which bridges this gap. SOX packages three things together:
+
+\begin{enumerate}
+  \item \textbf{A channel substrate}: named, persistent, multi-member channels that persist across agent restarts.
+  \item \textbf{A discipline}: documented, prompt-engineered guidance on when to send, how to drain periodically, and crucially, how to reconcile late-arriving clarifications non-destructively.
+  \item \textbf{A cadence enforcer}: a pure function that takes an event and per-agent state, returns a decision (inject reminder, block, or noop).
+\end{enumerate}
+
+\subsection{Scope and Non-Goals}
+
+SOX v1.0 is a messaging protocol and discipline, not a framework. It does not replace orchestration frameworks, provide authentication/encryption (delegated to middleware), implement push-based interrupts, or enforce global ordering. SOX provides the substrate; the discipline and reconciliation patterns are v1's contribution.
+
+\section{Related Work}
+
+\subsection{Classical Agent Communication: KQML and FIPA}
+
+KQML (Knowledge Query and Manipulation Language) \cite{kqml1993} was designed in 1993 as the first structured language for agent-to-agent dialogue, defining performatives (\texttt{tell}, \texttt{ask-if}, \texttt{reply-with}, \texttt{subscribe}) and message structure with threading support via \texttt{reply-with} fields.
+
+FIPA-ACL \cite{fipa2000}, ratified in 2000, extends KQML with 20+ performatives, explicit request-reply semantics (\texttt{inform}, \texttt{request}, \texttt{propose}, \texttt{agree}, \texttt{failure}), and better distributed architecture support. FIPA became an IEEE standard.
+
+JADE \cite{jade1999}, continuously published since 1999, is an LGPL open-source FIPA implementation shipping pub/sub channels, direct messaging, group messaging, agent discovery (yellow pages), and presence via heartbeat. JADE establishes that named channels, groups, DMs, and presence are canonical primitives for agent systems.
+
+\subsection{LLM-Era Multi-Agent Systems}
+
+CAMEL \cite{camel2023}, presented at NeurIPS 2023, introduced LLM agents collaborating through dialogue in structured conversation pairs.
+
+ChatDev \cite{chatdev2024}, published at ACL 2024, extends dialogue-based collaboration to code generation with agents in specific roles (programmer, tester, reviewer) communicating sequentially.
+
+MetaGPT \cite{metagpt2024}, published at ICLR 2024, provides a shared message pool with role-based subscriptions. Agents subscribe to topics; the executor triggers an agent when prerequisites have arrived. Concurrent but pausing-style discipline.
+
+\subsection{Contemporary Frameworks and Protocol Initiatives}
+
+AutoGen \cite{autogen2024} (v0.4+) provides actor-based runtime with topic pub/sub, enabling concurrent execution without a packaged discipline.
+
+CrewAI \cite{crewai2024} enforces hierarchical, turn-taking task orchestration.
+
+LangGraph \cite{langgraph2024} is graph-based with concurrent independent subgraphs, but no peer-to-peer async messaging primitives.
+
+MCP \cite{mcp2024} (Anthropic, 2024) is request-response protocol for tool exposure, not peer messaging.
+
+A2A \cite{a2a2025} (Google to Linux Foundation, 2025) is async-first but task-scoped (client $\rightarrow$ agent), not N:N peer.
+
+ACP \cite{acp2025} (IBM/LF AI, 2025) addresses capability exchange and discovery, orthogonal to peer messaging.
+
+AGNTCY \cite{agntcy2025} (IETF draft) surveys messaging substrates but does not prescribe discipline.
+
+arXiv \cite{taxonomy2025} (2505.02279, May 2025) catalogs MCP, ACP, A2A as a taxonomy; SOX is orthogonal.
+
+NATS \cite{nats2024}, Akka \cite{akka2024}, Ray \cite{ray2024}, Erlang/OTP \cite{erlang2024} provide primitives without LLM-specific discipline.
+
+\section{Protocol Primitives}
+
+\subsection{Channels}
+
+A \textbf{channel} is a named, persistent message queue. Any agent that knows the name can send; subscribed agents can receive. Lifecycle is implicit (created on first send/subscribe, expires after retention window).
+
+\textbf{Delivery semantics:} At-least-once per subscriber. Per-channel ordering. No cross-agent message suppression.
+
+\textbf{Configuration:} \texttt{replay\_policy} (default: subscriber), \texttt{backpressure\_mode} (default: advisory).
+
+\subsection{Groups}
+
+A \textbf{group} is a managed channel (\texttt{group/<group-id>}) with server-side membership table. Sending to a group delivers to all active members --- the fan-out primitive.
+
+\textbf{Lifecycle verbs:} \texttt{group\_create}, \texttt{group\_invite}, \texttt{group\_join}, \texttt{group\_leave}, \texttt{group\_list\_members}.
+
+\subsection{Direct Messages (DMs)}
+
+A \textbf{DM} is a private, two-party channel named \texttt{dm/<agent-id-A>\textasciitilde<agent-id-B>} (lexicographically sorted). Server enforces two-party constraint.
+
+DMs reuse full channel machinery (seq counter, threading, replay).
+
+\subsection{Threads}
+
+A \textbf{thread} is a scoped sub-conversation anchored to a parent message, implemented as a channel named \texttt{thread:<parent-message-id>}. No separate protocol mechanism; just naming convention.
+
+\subsection{Presence}
+
+\textbf{Presence} describes operational state via \texttt{channels\_\_heartbeat} tool. States: \texttt{online}, \texttt{busy}, \texttt{offline}, \texttt{stale} (derived), \texttt{offline} (derived).
+
+Server emits coalesced state-transition events on reserved \texttt{sox/presence} channel.
+
+\subsection{ACK/NACK}
+
+\textbf{ACK} and \textbf{NACK} are control-plane signals (not channel messages). Tool: \texttt{channels\_\_ack(message\_id, status, reason)}.
+
+\textbf{Pending-state lifecycle:}
+\begin{center}
+pending $\rightarrow$ received $\rightarrow$ processing $\rightarrow$ done \\
+\hspace{2cm} $\rightarrow$ nack
+\end{center}
+
+Transitions must be forward-only within a session.
+
+\section{Core Operations and Envelopes}
+
+\subsection{Operations}
+
+\begin{enumerate}
+  \item \texttt{send(channel, body, correlation\_id, reply\_to)} --- append to channel; non-blocking.
+  \item \texttt{recv(channels, timeout, include\_meta)} --- drain mailbox; non-blocking.
+  \item \texttt{subscribe(pattern)} --- register interest in glob pattern; persistent.
+  \item \texttt{list\_channels()} --- discover active channels; returns \texttt{\_sox\_protocol} version block.
+\end{enumerate}
+
+\subsection{Message Envelope}
+
+Every message has:
+
+\begin{lstlisting}[language=json]
+{
+  "channel": "string",
+  "sender": "agent_id (server-certified)",
+  "body": { "type": "...", ...opaque },
+  "correlation_id": "string | null",
+  "sent_at": "number (Unix epoch seconds)",
+  "message_id": "string (backing-store-assigned)",
+  "seq": "integer >= 1 (per-channel counter)",
+  "ts": "integer nanoseconds (advisory)",
+  "reply_to": "message_id | null",
+  "delivered_to": "[agent_ids] | null",
+  "origin_server": "string | null (v2 federation)"
+}
+\end{lstlisting}
+
+Key fields: \texttt{seq} (per-channel ordering cursor), \texttt{ts} (advisory cross-channel tiebreaker), \texttt{reply\_to} (thread linking), \texttt{delivered\_to} (deadlock detection), \texttt{origin\_server} (federation).
+
+\section{Architecture and Ports}
+
+SOX follows hexagonal (ports-and-adapters) pattern with five layers:
+
+\begin{center}
+\begin{tabular}{ll}
+  Layer 5 & System prompt (one-line bootstrap) \\
+  Layer 4 & Cadence enforcer (pure function) \\
+  Layer 3 & Discipline (markdown) \\
+  Layer 2 & MCP server (operations + listener) \\
+  Layer 1 & Backing store (pluggable)
+\end{tabular}
+\end{center}
+
+\subsection{Runtime Adapters (North)}
+
+\textbf{DisciplineRenderer:} Render discipline markdown into runtime's prompt surface (Claude Code skill, OpenAI \texttt{agent.instructions}, LangGraph \texttt{system} slot).
+
+\textbf{EnforcerBinding:} Wire runtime lifecycle events into \texttt{enforcer.decide()} and translate Decision into runtime mechanism.
+
+\subsection{Backing-Store Adapters (South)}
+
+Implementations: SQLite (WAL, v0 default), filesystem, NATS, Redis. Interface: \texttt{send}, \texttt{recv}, \texttt{subscribe}, \texttt{heartbeat}, \texttt{ack}.
+
+\section{Conformance}
+
+SOX defines language-neutral conformance suite: JSON test scenarios with JSON-schema assertions. Categories: primitives, groups, DMs, threads, presence, ACK/NACK, backpressure, ordering/replay, deadlock detection.
+
+Docker-based harness runs scenarios against implementations. Third-party implementations register results on GitHub.
+
+\section{Worked Example: Code Review Collaboration}
+
+\begin{lstlisting}[language=Python]
+# Alice posts clarification request
+alice_msg = send(
+    channel="task:PR-1042",
+    body={
+        "type": "clarification_request",
+        "question": "Is asyncio.gather() correct for this?"
+    }
+)
+# Alice continues under best-guess
+alice_best_guess = "asyncio.gather"
+
+# Later, Alice drains inbox
+messages = recv(channels=["task:PR-1042"])
+bob_reply = messages[0]
+if bob_reply.body["answer"] != alice_best_guess:
+    # Revise and backtrack affected step
+    alice_best_guess = bob_reply.body["answer"]
+else:
+    # Bob confirms; no rework
+    pass
+\end{lstlisting}
+
+Without SOX, Alice blocks at T=1 until Bob responds. With SOX, Alice's progress is unblocked.
+
+\section{Design Decisions}
+
+\subsection{Why MCP}
+
+MCP is de-facto standard for tool exposure (Claude Code, Cursor, OpenAI desktop). Pull-only preserves agent autonomy. MCP server buffers messages locally via background listener; latency bounded by polling cadence.
+
+\subsection{Why Shared Backing Store}
+
+Peer-to-peer requires runtime discovery and per-pair setup. Shared store: agents connect to one place; addressing by channel name, not network address. Cheaper, simpler, debuggable.
+
+Backing store pluggable: SQLite for session-scoped systems; NATS/Redis for daemon-scoped, multi-host.
+
+\subsection{Why Polling (Not Push)}
+
+Three options: pure pull, push-via-injection, push-via-interrupt. v1 ships pull with optional injection via cadence enforcer. Pull preserves agent autonomy: agent decides when reasoning is at safe checkpoint.
+
+\subsection{Why Discipline as Separate Markdown}
+
+Composability: one document loaded by N agents across M runtimes. Iteration: recipe is prompt-engineering artifact; iteration is markdown editing. Adapter simplicity: adapters render, not implement.
+
+\section{Implementation Status and Deployment}
+
+\textbf{Reference implementation:} Python. MCP server. SQLite and filesystem backing stores. Cadence enforcer. Discipline. Adapters: Claude Code (complete), OpenAI Agents SDK (sketch), LangGraph (sketch).
+
+\textbf{Language-neutral packaging:} Spec in JSON Schemas and markdown. No language dependency. Third-party impls (TypeScript, Rust, Go) build by implementing port interfaces and passing conformance suite.
+
+\textbf{Deployment patterns:}
+\begin{enumerate}
+  \item Session-scoped: SQLite ephemeral.
+  \item Daemon-scoped: NATS/Redis persistent.
+  \item Federated (v2 roadmap): agent identity \texttt{<server-id>/<agent-id>}; cross-server routing.
+\end{enumerate}
+
+\section{Comparison to Related Work}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccccccc}
+\toprule
+System & Channels & Groups & DMs & Presence & ACK/NACK & Discipline & Runtime-agnostic \\
+\midrule
+KQML (1993) & Impl. & No & Yes & No & Impl. & No & Yes \\
+FIPA (2000) & Impl. & No & Yes & Yes & Explicit & No & Yes \\
+JADE (1999) & Yes & Yes & Yes & Yes & No & No & No \\
+AutoGen & No & No & No & No & No & No & Yes \\
+MetaGPT & Topics & No & No & No & No & No & No \\
+LangGraph & No & No & No & No & No & No & Yes \\
+MCP (2024) & No & No & No & No & No & No & Yes \\
+A2A (2025) & No & No & No & No & Yes & No & Yes \\
+\textbf{SOX (2026)} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} & \textbf{Yes} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+SOX is unique in combining first-class channels, documented discipline, and runtime-agnostic packaging.
+
+\section{Future Work}
+
+\subsection{Reconciliation Pattern Library}
+
+v1 documents one recipe (post-question, continue-guess, integrate-reply). Real-world variants: speculative execution with rollback, consensus resolution, deadline-aware reconciliation.
+
+\subsection{Discipline Effectiveness Benchmark}
+
+Prompt-engineered discipline; effectiveness varies by model version. Benchmark suite needed to validate across Sonnet 4, 4.5, GPT-5.
+
+\subsection{Federated Deployment}
+
+v2: agent identity \texttt{<server-id>/<agent-id>}, cross-server routing, causality preservation.
+
+\subsection{Cryptographic DM Confidentiality}
+
+v1.x: end-to-end encryption using agents' Ed25519 keypairs (ADR 0002).
+
+\subsection{A2A $\leftrightarrow$ SOX Bridge}
+
+Allow A2A clients (task-scoped RPC) to interop with SOX peers (peer messaging).
+
+\section{Conclusion}
+
+Multi-agent systems with LLMs require a communication layer distinct from orchestration and tool-calling. SOX Protocol fills this gap with a published, runtime-agnostic specification for peer N:N asynchronous messaging. The novelty lies in three things working together: (1) FIPA-inspired topology, (2) explicit speculative-execute-while-awaiting-clarification discipline, (3) runtime-agnostic packaging via MCP adapters and pluggable backing stores.
+
+SOX is not a framework; it is a protocol and discipline. Existing agents in Claude Code, OpenAI Agents SDK, LangGraph, and AutoGen can adopt SOX without rewriting. The reference implementation is open-source (Apache 2.0). A language-neutral conformance suite enables third-party implementations.
+
+The immediate impact is clearer, less-blocking coordination in multi-agent LLM systems. The longer-term impact is establishing a standard substrate for agent interoperability, analogous to SMTP for email or HTTP for web services.
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+
+\section{JSON Schema References}
+
+All JSON Schemas referenced in this paper are located in \texttt{spec/} at GitHub:
+
+\begin{itemize}
+  \item \textbf{Operations:} \texttt{spec/operations/send.input.schema.json}, \texttt{recv.input.schema.json}, \texttt{subscribe.input.schema.json}, \texttt{list\_channels.output.schema.json}, \texttt{channels\_ack.input.schema.json}, \texttt{channels\_heartbeat.input.schema.json}.
+  \item \textbf{Envelopes:} \texttt{spec/envelopes/message.schema.json}, \texttt{sox-error.schema.json}, \texttt{sox-invite.schema.json}.
+  \item \textbf{Primitives:} \texttt{spec/primitives/*.md} (channels, groups, DMs, threads, presence, ACK/NACK).
+\end{itemize}
+
+\section{Protocol Version}
+
+\begin{itemize}
+  \item \textbf{Current:} 1.0
+  \item \textbf{Release date:} May 2026
+  \item \textbf{Maintenance:} Language-neutral spec evolves in \texttt{spec/} with version bumps in \texttt{spec/VERSION} following semantic versioning.
+\end{itemize}
+
+\end{document}
