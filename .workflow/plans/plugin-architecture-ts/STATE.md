@@ -15,13 +15,21 @@ narrowed_from: 6-phase 1-week port → 1-day spike (per analysis §7.6 / optimiz
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-types | Author `packages/typescript/src/core/middleware/protocol.ts` — interface-only port of MiddlewareContext, Middleware, CallNext, PluginKind enum, manifest types matching sox-plugin.schema.json. No runtime, no Pipeline class, no Registry class | `BLOCKED` | typescript-pro | 0 | 2026-05-01T15:00:00Z |
-| 02-manifest-roundtrip | Validate `sox-plugin.yaml` round-trips through `yaml` + `ajv` against the SAME JSON Schema the Python side uses. Produces a 30-line `validate-manifest.ts` test script | `BLOCKED` | typescript-pro | 0 | 2026-05-01T15:00:00Z |
-| 03-doc-deferral | Update `packages/typescript/README.md` with explicit deferral note: "TS reference shape; full Pipeline + Registry runtime ships with first TS production code" | `BLOCKED` | typescript-pro | 0 | 2026-05-01T15:00:00Z |
+| 01-types | Author `packages/typescript/src/core/middleware/protocol.ts` + `manifest.ts` — interface-only port of MiddlewareContext, Middleware, CallNext, PluginKind, manifest types matching sox-plugin.schema.json. No runtime. | `DONE` | typescript-pro | 1 | 2026-05-01T00:00:00Z |
+| 02-manifest-roundtrip | Validate `sox-plugin.yaml` round-trips through `yaml` + `ajv` against the SAME JSON Schema the Python side uses. `scripts/validate-manifest.ts` — 5 tests (3 positive + 2 negative), exits 0. | `DONE` | typescript-pro | 1 | 2026-05-01T00:00:00Z |
+| 03-stub-pipeline | `pipeline.ts` stub Pipeline (dispatch throws) + `registry.ts` stub MiddlewareRegistry (register throws). README updated with §"v1 Plugin Architecture Spike". | `DONE` | typescript-pro | 1 | 2026-05-01T00:00:00Z |
 
 ## Currently next action
 
-All phases `BLOCKED` on `plugin-contract-freeze` (must freeze the contract before porting types).
+All 3 phases DONE. Engagement complete.
+
+Next reactivation: `plugin-architecture-ts-runtime` — when first TS production code lands, implement Pipeline.dispatch and MiddlewareRegistry.register from the types shipped here.
+
+## Transitions
+
+- 2026-05-01T00:00:00Z 01-types — DONE (typescript-pro)
+- 2026-05-01T00:00:00Z 02-manifest-roundtrip — DONE (typescript-pro)
+- 2026-05-01T00:00:00Z 03-stub-pipeline — DONE (typescript-pro)
 
 ## Termination targets
 

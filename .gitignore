@@ -9,3 +9,9 @@ htmlcov/
 # Local-only working dirs
 private/
 packages/python/private/
+
+# Node / TypeScript spike (plugin-architecture-ts P6)
+node_modules/
+packages/typescript/node_modules/
+packages/typescript/package-lock.json
+packages/typescript/dist/

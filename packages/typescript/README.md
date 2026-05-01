@@ -210,6 +210,42 @@ Once merged, you can iterate on improvements (additional backing stores, additio
 
 ---
 
+---
+
+## v1 Plugin Architecture Spike
+
+**Engagement:** `plugin-architecture-ts` (P6) — completed 2026-05-01.
+
+The following files ship as a 1-day contract spike under `src/core/middleware/`:
+
+| File | Contents |
+|---|---|
+| `protocol.ts` | `MiddlewareContext`, `Middleware`, `CallNext`, `PluginKind`, `PluginCapabilities`, `Response`, `ShortCircuitResponse`, `HookDecision` — types only, no runtime |
+| `manifest.ts` | `SoxPluginManifest`, `SoxPluginSpec`, `SoxPluginMetadata`, `SoxPluginSignature`, `CapabilityItem` — TypeScript binding of `spec/schemas/sox-plugin.schema.json` |
+| `pipeline.ts` | `Pipeline` class — **stub only**; `dispatch()` throws with an explicit not-implemented message |
+| `registry.ts` | `MiddlewareRegistry` class — **stub only**; `register()` throws with an explicit not-implemented message |
+
+**Full Pipeline + Registry runtime ships with the first TS production code engagement (`plugin-architecture-ts-runtime`).** The stubs are a sociological forcing function (ADR 0004 analysis §7.6 / NR-3): when real TS production code lands, the obvious import (`Pipeline` from `@sox/middleware`) exists and throws, directing implementers to fill it in rather than reinventing in handlers.
+
+**Manifest round-trip validation:** `scripts/validate-manifest.ts` validates all three example fixtures (`interceptor`, `transformer`, `provider`) against `spec/schemas/sox-plugin.schema.json` using AJV, plus two negative tests (wrong `apiVersion`; capability conflict `observe_only + may_short_circuit`). Run via:
+
+```bash
+cd packages/typescript
+npm install
+npm run validate-manifest
+```
+
+**TypeScript compile check:**
+
+```bash
+cd packages/typescript
+npx tsc --noEmit   # must exit 0
+```
+
+**Reactivation trigger:** engagement `plugin-architecture-ts-runtime` — opened when the first real TS production code lands and requires a working Pipeline dispatch.
+
+---
+
 ## References
 
 - **Spec overview:** [spec/README.md](../../spec/README.md)
