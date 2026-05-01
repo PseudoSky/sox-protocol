@@ -58,8 +58,12 @@ from pathlib import Path
 import jsonschema
 from fastmcp import FastMCP
 
+from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry
+from sox_protocol.core.identity.keys import generate_keypair
+from sox_protocol.core.identity.verifier import IdentityVerifier
 from sox_protocol.core.mcp_server.listener import Listener
 from sox_protocol.core.mcp_server.tools import register_tools
+from sox_protocol.core.middleware import build_default_pipeline
 from sox_protocol.core.ports.backing_store import BackingStore
 
 _log = logging.getLogger(__name__)
@@ -219,6 +223,30 @@ def create_server() -> FastMCP[dict[str, object]]:
     Raises:
         SystemExit: If ``SOX_AGENT_ID`` is unset or ``SOX_BACKING_STORE``
             has an unrecognised URI scheme.
+
+    Lifespan result keys
+    --------------------
+    ``store``
+        The initialised :class:`~sox_protocol.core.ports.backing_store.BackingStore`.
+    ``listener``
+        The background :class:`~sox_protocol.core.mcp_server.listener.Listener` task.
+    ``agent_id``
+        The resolved agent identifier string (v1 transitional; kept for
+        legacy-compat readers).
+    ``pipeline``
+        The configured :class:`~sox_protocol.core.middleware.pipeline.Pipeline`
+        that all tool handlers dispatch through.
+    ``verifier``
+        The :class:`~sox_protocol.core.identity.verifier.IdentityVerifier`
+        constructed at startup.
+    ``registry``
+        The :class:`~sox_protocol.core.identity.registry.InMemoryCredentialRegistry`
+        holding the agent's synthetic keypair.
+    ``_private_key``
+        The ephemeral Ed25519 private key (v1 transitional) used by
+        :func:`~sox_protocol.core.mcp_server._credential.resolve_credential`
+        to produce per-call :class:`~sox_protocol.core.identity.envelope.SignedRequest`
+        envelopes.  Not for direct use by tool handlers.
     """
     # Resolve the agent_id from the configured source.
     # Per spec/ports/identity.md §6, the credential — including agent_id —
@@ -256,14 +284,32 @@ def create_server() -> FastMCP[dict[str, object]]:
     async def _lifespan(
         server: FastMCP[dict[str, object]],
     ) -> AsyncIterator[dict[str, object]]:
-        """FastMCP lifespan: validate schemas, init store, start listener."""
+        """FastMCP lifespan: validate schemas, init store, build pipeline, start listener."""
         # 1. Fail-fast schema validation.
         _load_and_validate_schemas()
 
         # 2. Initialise the backing store.
         await store.initialize()  # type: ignore[attr-defined]
 
-        # 3. Start the background listener.
+        # 3. Build the identity stack.
+        #    v1 transitional: generate a synthetic Ed25519 keypair for this
+        #    agent so that per-call SignedRequest envelopes can be verified
+        #    by AuthMiddleware without requiring external key material.
+        #    v1.1 will replace this with a real key loaded from disk.
+        #    See _credential.py and implementation-plan.json risk R8.
+        registry = InMemoryCredentialRegistry()
+        audit = AuditLogWriter()
+        verifier = IdentityVerifier(registry=registry, audit=audit)
+        private_seed, public_key_bytes = generate_keypair()
+
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        private_key: Ed25519PrivateKey = Ed25519PrivateKey.from_private_bytes(private_seed)
+        await registry.register(agent_id, public_key_bytes)
+
+        # 4. Build the middleware pipeline.
+        pipeline = build_default_pipeline(verifier=verifier, store=store)
+
+        # 5. Start the background listener.
         listener = Listener(store=store, agent_id=agent_id)
         task = listener.start()
 
@@ -272,9 +318,13 @@ def create_server() -> FastMCP[dict[str, object]]:
                 "store": store,
                 "listener": listener,
                 "agent_id": agent_id,
+                "pipeline": pipeline,
+                "verifier": verifier,
+                "registry": registry,
+                "_private_key": private_key,
             }
         finally:
-            # 4. Graceful shutdown.
+            # 6. Graceful shutdown.
             await listener.stop()
             close = getattr(store, "close", None)
             if callable(close):

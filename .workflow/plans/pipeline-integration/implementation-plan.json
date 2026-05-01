@@ -1,0 +1,376 @@
+{
+  "summary": "This engagement makes Pipeline.dispatch the only path from a transport to BackingStore in production code. It does NOT redesign Pipeline, MiddlewareRegistry, MiddlewareContext, HookDispatcher, or AuthMiddleware — those are stable, tested, and shipped. It WIRES them. Phase 02 (build-stdio) extends mcp_server/server.py's lifespan to construct `pipeline = build_default_pipeline(verifier=..., store=...)` once, stash it in `lifespan_result['pipeline']`, and then converts every one of the 15 tool handlers in mcp_server/tools.py from `await store.<op>(...)` calls into `await pipeline.dispatch(operation=..., input=..., connection_id=..., metadata={'_connection_credential': _resolve_credential(ctx)})`. A new `_resolve_credential(ctx)` helper builds a SignedRequest from MCP launch params (legacy compat: also accepts a bare agent_id when `SOX_AGENT_ID_SOURCE` selected the env-var path). Phase 03 (build-http) introduces a `build_app(store, pipeline, *, identity=None)` factory in transports/http/server.py, plumbs `pipeline` to `register_operation_routes`, and replaces the `_auth_and_body` + `await store.<op>(...)` pattern in all 22 routes (op_send/recv/subscribe/unsubscribe/list_channels/channels_ack/channels_heartbeat/channels_collect/replay/list_agents/group_create/group_invite/group_join/group_leave/group_list_members and any helper routes) with a single `await pipeline.dispatch(...)` call; `auth.py` is reduced from 125 LOC to ~5 LOC of `extract_bearer_token` only — `IdentityResolver` Protocol, `PassthroughIdentityResolver`, and `resolve_agent_id` all DELETED. Per analysis §5.4 the `applies_to.transports` problem is solved by constructing per-transport pipelines at load time; both transports share the default registry by default but tests can pin different sets.",
+  "summary_continued": "Phase 04 (observability) generalises AuthMiddleware's existing `_record_timing` mechanism into a per-plugin trace emission performed by Pipeline base. Pipeline.dispatch wraps every plugin invocation in a timing window and appends a structured record `{plugin_id, kind, started_at, finished_at, verdict, error_code?, correlation_id}` to `ctx._meta['pipeline_trace']`. The `correlation_id` is echoed from the existing frozen `MiddlewareContext.correlation_id` field. The legacy `middleware_timings` array is left untouched for one release as a back-compat shim emitted alongside; v1.1 will drop it. AuthMiddleware's bespoke `_record_timing` calls become no-ops or are removed. Phase 05 (concurrency-fix) wraps verifier.py:198-223's prune+nonce-check+nonce-insert sequence in `async with self._lock:` (where `self._lock = asyncio.Lock()` initialised in `__init__`). Phase 06 (delete-harness-substitution) deletes tools/conformance_runner.py:805-813 (the `_registered_agents` substitution block plus the comment 'This mirrors the middleware layer...'), removes the `_registered_agents` field from SharedMemoryTarget, AND in the same commit edits .github/workflows/conformance.yml to uncomment the `python-reference-http` matrix line and rename the matrix entry to `conformance-substitution-removed` (no `conformance-legacy` mode is added — there is no rollback hatch). Phase 07 ships a new conformance fixture asserting that an unregistered-credential rejection arrives via a sox-error envelope from the server (not synthesised client-side). Phase 08 is review.",
+  "summary_continued_2": "The phase ordering honours NR-1: phases 06 and 07 MAY land before 04 and 05 once 01/02/03 are complete. The file-dependency graph is built so phase 06's edits (conformance_runner.py + conformance.yml + the new fixture file) do NOT depend on phase 04's pipeline.py edits — phase 04 only changes the *content* of metadata that conformance fixtures already consume opaquely; phase 06 only changes whether the harness short-circuits. The credential-format question (bearer-token-as-agent-id vs SignedRequest header) is per-transport: stdio reads launch params (already half-wired in core/identity/middleware.py and AuthMiddleware), HTTP accepts a bearer token in `Authorization: Bearer <agent_id>` for legacy compat AND an optional `X-Sox-Signed-Request` header carrying a base64'd SignedRequest envelope for forward-compat. The credential resolver normalises both into the `_connection_credential` metadata slot AuthMiddleware already consumes.",
+  "files": [
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/mcp_server/server.py",
+      "phase": "02-build-stdio",
+      "spec_ref": "analysis.md §4.1 Stdio item 1; spec/ports/middleware.md §3 (lifespan composition)",
+      "purpose": "Build the Pipeline once at lifespan startup and stash it in lifespan_result so tools.py can dispatch through it.",
+      "current_state": "Lines 202-274: `create_server()` builds `store`, `listener`, resolves `agent_id` via SOX_AGENT_ID_SOURCE env var, and yields `lifespan_result = {'store': store, 'listener': listener, 'agent_id': agent_id}` (line 274). No Pipeline is built; tools.py calls `store.<op>` directly using `agent_id` from lifespan_result.",
+      "target_state": "Same lifespan, plus: after `await store.initialize()`, build `verifier = IdentityVerifier(...)` (or accept a host-provided one via env-var-controlled wiring), then `pipeline = build_default_pipeline(verifier=verifier, store=store)`, then add `'pipeline': pipeline` to lifespan_result. `agent_id` remains in lifespan_result for legacy-compat credential resolution (Phase 02 still tolerates the env-var-trusted path; AuthMiddleware sees an agent_id-bearing credential and verifies via the verifier's registry).",
+      "delta": [
+        "Add imports: `from sox_protocol.core.middleware import build_default_pipeline`, `from sox_protocol.core.identity import IdentityVerifier, InMemoryCredentialRegistry, AuditLogWriter`.",
+        "After `await store.initialize()` in `_lifespan` (currently line 264), construct `registry = InMemoryCredentialRegistry()`, `audit = AuditLogWriter()`, `verifier = IdentityVerifier(registry=registry, audit=audit)`, and pre-register `agent_id` with a synthetic keypair so legacy launch-param-trusted callers continue to verify (documented as v1 transitional behaviour; v1.1 will require explicit registration).",
+        "Build `pipeline = build_default_pipeline(verifier=verifier, store=store)`.",
+        "Extend `lifespan_result` (line 269-274) to include `'pipeline': pipeline`, `'verifier': verifier`, `'registry': registry` alongside the existing `store`, `listener`, `agent_id`.",
+        "Update the docstring (lines 210-214) to note the new lifespan_result keys."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/mcp_server/tools.py",
+      "phase": "02-build-stdio",
+      "spec_ref": "analysis.md §4.1 Stdio item 2; spec/ports/middleware.md §4",
+      "purpose": "Convert all 15 tool handlers from direct-store calls to Pipeline.dispatch; introduce _resolve_credential(ctx) helper.",
+      "current_state": "Lines 52-531: `register_tools(mcp)` defines 15 tool functions. Each reads `lr = ctx.fastmcp._lifespan_result; store = lr['store']; agent_id = lr['agent_id']` then calls `await store.<op>(agent_id, ...)`. Operations: channels__send, channels__recv, channels__subscribe, channels__unsubscribe, channels__ack, channels__heartbeat, channels__list_agents, channels__replay, channels__collect, group__create, group__invite, group__join, group__leave, group__list_members, channels__list_channels.",
+      "target_state": "Each tool handler reads `pipeline = lr['pipeline']` and calls `result = await pipeline.dispatch(operation='<op_name>', input=<args_dict>, connection_id=lr.get('connection_id'), metadata={'_connection_credential': _resolve_credential(ctx, lr)}); return result`. A module-level `_resolve_credential(ctx, lr)` helper builds a SignedRequest (or returns the bare agent_id wrapped in a credential dict for legacy launch-param trust).",
+      "delta": [
+        "Add helper `def _resolve_credential(ctx, lr) -> dict[str, object]` near line 50: returns `{'agent_id': lr['agent_id'], 'launch_param_trusted': True}` for v1 (documents that AuthMiddleware accepts this shape per analysis §5 owner-deferred decision). When SOX_AGENT_ID_SOURCE selects a signed path in v1.1, this helper builds a real SignedRequest.",
+        "For each of the 15 handlers, replace the direct-store call body. Example: channels__send (lines 68-110): replace `message_id, sent_at, seq, bp = await store.send(agent_id, channel, body, headers, idempotency_key)` plus result-shaping with `return await pipeline.dispatch(operation='send', input={'channel': channel, 'body': body, 'headers': headers, 'idempotency_key': idempotency_key}, connection_id=ctx.session_id, metadata={'_connection_credential': _resolve_credential(ctx, lr)})`.",
+        "Repeat for channels__recv (lines 111-193), channels__subscribe (194-228), channels__unsubscribe (229-249), channels__ack (250-277), channels__heartbeat (278-303), channels__list_agents (304-328), channels__replay (329-357), channels__collect (358-384), group__create (385-408), group__invite (409-434), group__join (435-458), group__leave (459-482), group__list_members (483-506), channels__list_channels (507-531).",
+        "Remove all direct `await store.*(...)` calls from this file; the only object that should hold a `store` reference now is `core.middleware.plugins.store_dispatch.StoreDispatchMiddleware`.",
+        "channels__collect (multi-recv loop) requires a per-iteration dispatch — keep the loop, dispatch each recv separately."
+      ],
+      "public_api": ["register_tools(mcp)"]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/adapters/transports/http/server.py",
+      "phase": "03-build-http",
+      "spec_ref": "analysis.md §4.1 HTTP item 1",
+      "purpose": "Plumb a Pipeline through the HTTP factory; remove PassthroughIdentityResolver wiring.",
+      "current_state": "Lines 35-90: `create_app(store, identity=None, ...)` builds FastAPI, defaults identity to `PassthroughIdentityResolver()`, calls `register_operation_routes(ops_router, store, identity)`, includes SSE router with identity. Lines 92-143: HttpTransport class also instantiates PassthroughIdentityResolver as its default.",
+      "target_state": "`create_app(store, pipeline, *, identity=None)` (rename to `build_app` per migration.md §P1 outputs but keep `create_app` as a back-compat alias). Pipeline parameter is required. `register_operation_routes(ops_router, pipeline)` — store no longer passed; routes never reach store directly. HttpTransport accepts a Pipeline, builds one if not supplied via build_default_pipeline. PassthroughIdentityResolver imports DELETED.",
+      "delta": [
+        "Add `pipeline: Pipeline` as required positional parameter to `create_app`; introduce `build_app = create_app` alias.",
+        "Delete imports of `PassthroughIdentityResolver` (line 22) and the default-instantiation lines (54-55, 112).",
+        "Change `register_operation_routes(ops_router, store, identity)` (line 75) to `register_operation_routes(ops_router, pipeline)`.",
+        "SSE router (line 79) currently consumes `identity` for its own bearer extraction — change `build_sse_router(store, identity)` to `build_sse_router(pipeline)` and update sse.py accordingly (uses `extract_bearer_token` directly, no resolver).",
+        "HttpTransport.__init__ (line 104-115): drop `identity` parameter; accept `pipeline: Pipeline | None = None`; if None, build via `build_default_pipeline`.",
+        "Update `app.state.identity` (line 84) to `app.state.pipeline = pipeline`."
+      ],
+      "public_api": ["create_app(store, pipeline, *, identity=None)", "build_app (alias)", "HttpTransport(store, pipeline=None, ...)"]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/adapters/transports/http/routes.py",
+      "phase": "03-build-http",
+      "spec_ref": "analysis.md §4.1 HTTP item 2",
+      "purpose": "Convert all 22 route handlers from store.<op>() to pipeline.dispatch().",
+      "current_state": "Lines 166-666: `register_operation_routes(router, store, identity)` defines 16 POST routes (op_send, op_recv, op_subscribe, op_unsubscribe, op_list_channels, op_channels_ack, op_channels_heartbeat, op_channels_collect, op_replay, op_list_agents, op_group_create, op_group_invite, op_group_join, op_group_leave, op_group_list_members) plus auxiliary helpers. Each calls `agent_id, body, err = await _auth_and_body(request)` (helper at line 183) then `await store.<op>(agent_id, ...)`.",
+      "target_state": "`register_operation_routes(router, pipeline)`. Each route extracts the bearer token via `extract_bearer_token(request)` (which is what _auth_and_body partly does), runs `_validate_body(op_name, body)` (kept inline for v1 — moves to schema-strict plugin in P5 per analysis §4.4), then calls `result = await pipeline.dispatch(operation='<op>', input=body, connection_id=None, metadata={'_connection_credential': {'bearer_token': token}})`. The pipeline.dispatch result IS the response body (post-AuthMiddleware verification, post-StoreDispatchMiddleware execution).",
+      "delta": [
+        "Drop the `identity: IdentityResolver` parameter from `register_operation_routes` (line 166); replace with `pipeline: Pipeline`.",
+        "Rewrite `_auth_and_body` (lines 183-196) to return `(token, body, err)` instead of `(agent_id, body, err)` — token extraction only, no resolver call. Better: inline its three lines into each route since the resolver is gone.",
+        "For each of the 16 op_* routes: replace the `await store.<op>(agent_id, ...)` block with a `pipeline.dispatch` call. Keep `_validate_body` invocation for v1.",
+        "Map error_codes from pipeline-emitted dispatch errors (AuthMiddleware raises IdentityFailure → must surface as a `sox-error` envelope JSONResponse with the appropriate HTTP status). Add a small `_dispatch_to_response(pipeline, op, body, token)` adapter near top of file that runs dispatch, catches the typed error hierarchy, and converts to JSONResponse.",
+        "op_channels_collect (line 440-491): the multi-recv loop becomes multiple `pipeline.dispatch(operation='recv', ...)` calls inside the loop; the rest of the collect logic (max_messages, total_size guard) stays.",
+        "Delete leftover `from sox_protocol.adapters.transports.http.auth import IdentityResolver, resolve_agent_id` imports."
+      ],
+      "public_api": ["register_operation_routes(router, pipeline)"]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/adapters/transports/http/auth.py",
+      "phase": "03-build-http",
+      "spec_ref": "analysis.md §4.1 HTTP item 3 (DELETE PassthroughIdentityResolver)",
+      "purpose": "Reduce module to bearer-token extraction only; verification belongs in AuthMiddleware.",
+      "current_state": "125 LOC. Defines `IdentityResolver` Protocol (lines 25-44), `PassthroughIdentityResolver` (47-68), `extract_bearer_token` (71-87), `resolve_agent_id` helper (90-125).",
+      "target_state": "~5-10 LOC. Only `extract_bearer_token(request: Request) -> str | None` remains. All verification, identity resolution, and Protocol shapes deleted.",
+      "delta": [
+        "DELETE class IdentityResolver (lines 25-44).",
+        "DELETE class PassthroughIdentityResolver (lines 47-68).",
+        "DELETE function resolve_agent_id (lines 90-125).",
+        "Keep extract_bearer_token verbatim.",
+        "Update module docstring to reflect the narrowed scope."
+      ],
+      "public_api": ["extract_bearer_token(request) -> str | None"]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/adapters/transports/http/sse.py",
+      "phase": "03-build-http",
+      "spec_ref": "analysis.md §4.1 HTTP item 1 (transitive)",
+      "purpose": "SSE router was the only other consumer of IdentityResolver; convert to pipeline-aware shape.",
+      "current_state": "Imports `IdentityResolver` and `extract_bearer_token` (line 31); `build_sse_router(store, identity)` accepts a resolver and uses it during SSE handshake.",
+      "target_state": "`build_sse_router(pipeline)` — SSE handshake uses `extract_bearer_token` only; once a connection is established, every SSE-pushed message that originates from a client request flows through `pipeline.dispatch`. (For v1 the SSE router is mostly read-side; this engagement preserves current SSE semantics but plumbs `pipeline` for any write-side operations.)",
+      "delta": [
+        "Drop `IdentityResolver` import (line 31).",
+        "Change signature `build_sse_router(store, identity)` to `build_sse_router(pipeline)`.",
+        "Replace the `identity.resolve(token)` call site (likely line ~140) with the bearer token used as a credential metadata slot when SSE write operations call into the pipeline.",
+        "If SSE is purely read-side in current code, store reference may need to remain — defer that decision to phase 03 implementer; flag as ambiguity."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/middleware/pipeline.py",
+      "phase": "04-observability",
+      "spec_ref": "analysis.md §7.5 risk #7; suggestions-v2.md §Q3 risk #7 (correlation_id)",
+      "purpose": "Generalise per-plugin trace emission into Pipeline base; ensure every plugin invocation produces a structured pipeline_trace record.",
+      "current_state": "165 LOC. `Pipeline.dispatch(...)` builds a MiddlewareContext, runs the chain, returns. Per-plugin timing is emitted by AuthMiddleware via its bespoke `_record_timing` (auth.py:164-180) which appends to `ctx._meta['middleware_timings']`. Other plugins (logging.py, store_dispatch.py) do not emit timing entries.",
+      "target_state": "Pipeline.dispatch wraps each plugin invocation in a timing window. Before invoking each plugin, capture `started_at`; after invocation completes (or raises), capture `finished_at`, derive `verdict` (continue | short_circuit | error), capture `error_code` (from raised typed error), and append `{plugin_id, kind, started_at, finished_at, verdict, error_code, correlation_id}` to `ctx._meta['pipeline_trace']`. `correlation_id` MUST be `ctx.correlation_id` (which is frozen by line 85 just before the chain runs). The legacy `ctx._meta['middleware_timings']` array is preserved as a back-compat shim emitted alongside (mirror entries minus correlation_id) for one release.",
+      "delta": [
+        "In `Pipeline.dispatch`, after `ctx.freeze_correlation_id()` (line 85), initialise `ctx._meta.setdefault('pipeline_trace', [])`.",
+        "Modify the chain runner (the loop or async `call_next` closure) to wrap each plugin call: capture `started_at = time.monotonic()`; try plugin; capture `finished_at`; compute verdict from the plugin's return (a Decision-bearing response from AuthMiddleware = `short_circuit`; an exception = `error`; pass-through to next = `continue`); append the structured record.",
+        "Add `kind` to the record by reading `plugin.kind` (existing attribute on AuthMiddleware/StoreDispatchMiddleware/LoggingHook per registry.py).",
+        "On exception: catch, append record with `verdict='error'` and `error_code=getattr(exc, 'error_code', 'internal_error')`, then re-raise.",
+        "Echo `correlation_id=ctx.correlation_id` into every record."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/middleware/plugins/auth.py",
+      "phase": "04-observability",
+      "spec_ref": "analysis.md §7.5 risk #7",
+      "purpose": "Reduce duplicate timing emission now that Pipeline base emits pipeline_trace.",
+      "current_state": "Lines 164-180: `_record_timing` appends to `ctx._meta['middleware_timings']` on every invocation. Lines 216, 244, 248: three call sites for reject/reject/ok verdicts.",
+      "target_state": "`_record_timing` becomes optional / no-op. Pipeline base emits the canonical `pipeline_trace` entry with the same data plus correlation_id. AuthMiddleware retains its own emission only as a back-compat shim feeding the legacy `middleware_timings` array.",
+      "delta": [
+        "Keep `_record_timing` for one release writing to `middleware_timings` (back-compat).",
+        "Add a module docstring note (lines 25-30) that `pipeline_trace` is the authoritative source as of this phase; `middleware_timings` is deprecated and removed in v1.1."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/middleware/context.py",
+      "phase": "04-observability",
+      "spec_ref": "suggestions-v2.md §Q3 risk #7",
+      "purpose": "Reserve the pipeline_trace slot in metadata default initialisation.",
+      "current_state": "Line 81: `self._meta: dict[str, object] = {'middleware_timings': []}`. correlation_id machinery already in place (lines 67, 81-115).",
+      "target_state": "Default _meta also contains `'pipeline_trace': []`. correlation_id remains frozen-on-pipeline-entry as already coded.",
+      "delta": [
+        "Change line 81 to `self._meta: dict[str, object] = {'middleware_timings': [], 'pipeline_trace': []}`."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/packages/python/src/sox_protocol/core/identity/verifier.py",
+      "phase": "05-concurrency-fix",
+      "spec_ref": "STATE.md termination targets; hooks-middleware:04-review finding",
+      "purpose": "Eliminate replay-cache TOCTOU race that becomes reachable when AuthMiddleware runs per-request.",
+      "current_state": "Lines 198-223: `self._prune_replay_cache(now)` then `if request.nonce in self._seen_nonces: raise ReplayDetectedError` then signature verification then `self._seen_nonces[request.nonce] = now`. Three steps with no lock — concurrent verifies of the same nonce can both pass the membership check and both insert.",
+      "target_state": "`asyncio.Lock` initialised in `__init__` (`self._lock = asyncio.Lock()`). The prune+check+insert sequence (lines 198-225) is enclosed in `async with self._lock:`. Signature verification stays inside the lock for simplicity (CPU-bound ed25519 verify ~50µs is acceptable; can be hoisted later if profiling demands).",
+      "delta": [
+        "In `IdentityVerifier.__init__`, add `self._lock: asyncio.Lock = asyncio.Lock()`.",
+        "Wrap the block from `self._prune_replay_cache(now)` (line ~199) through `self._seen_nonces[request.nonce] = now` (line ~225) inside `async with self._lock:`.",
+        "Add a unit test in tests/identity/test_verifier.py asserting concurrent verify() of the same nonce yields exactly one success and one ReplayDetectedError (uses `asyncio.gather` with `return_exceptions=True`)."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/tools/conformance_runner.py",
+      "phase": "06-delete-harness-substitution",
+      "spec_ref": "STATE.md §Symbolic significance; suggestions-v2.md §Q3 risk #5",
+      "purpose": "Delete the harness's client-side identity-rejection substitution so the production server's AuthMiddleware is the only enforcement path.",
+      "current_state": "Lines 805-813: `if self._registered_agents is not None and agent_id not in self._registered_agents: return {'_rpc_error': {'error_code': 'unknown_agent', ...}}` plus the comment block above starting 'This mirrors the middleware layer...'. The `_registered_agents` field is set in SharedMemoryTarget's start/init from fixture YAML.",
+      "target_state": "Substitution block deleted. `_registered_agents` field deleted from SharedMemoryTarget. Comment 'This mirrors the middleware layer...' deleted. Fixtures requiring identity rejection now hit the real AuthMiddleware via build_default_pipeline (which SharedMemoryTarget already constructs in v1.1 if so wired — Phase 02 makes this so for stdio).",
+      "delta": [
+        "Delete lines 805-813 (the if-block that returns the synthesised _rpc_error).",
+        "Delete the surrounding comment lines mentioning 'This mirrors the middleware layer that will sit in front of the backing store'.",
+        "Delete the `_registered_agents` field declaration from SharedMemoryTarget.__init__ and any code that populates it from fixture data.",
+        "Adjust SharedMemoryTarget setup to register declared `agents[]` (from fixture preconditions) into the verifier's `CredentialRegistry` so server-side rejection works for fixtures that previously relied on the substitution.",
+        "Verify by grep: `grep -n 'This mirrors the middleware layer' tools/conformance_runner.py` returns nothing.",
+        "Verify by grep: `grep -n '_registered_agents' tools/conformance_runner.py` returns nothing."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/.github/workflows/conformance.yml",
+      "phase": "06-delete-harness-substitution",
+      "spec_ref": "suggestions-v2.md §Q3 risk #5 (one commit, one revert button)",
+      "purpose": "Activate HTTP conformance leg in same commit as harness deletion; do NOT add a conformance-legacy parallel mode.",
+      "current_state": "Lines 22-28: `matrix.leg` contains `python-reference-stdio` and a commented-out `# - python-reference-http`. No `conformance-substitution-removed` mode exists. No `conformance-legacy` mode exists.",
+      "target_state": "Two matrix legs active: `python-reference-stdio` and `python-reference-http`. The job name MAY be renamed to `conformance-substitution-removed` per migration.md §P1 outputs, OR left as the unnamed default — both interpretations satisfy the spec which says 'no `conformance-legacy` entry exists'.",
+      "delta": [
+        "Uncomment the `# - python-reference-http` line (line 27).",
+        "Do NOT add a `conformance-legacy` matrix entry. Do NOT add any conditional fallback that re-enables substitution.",
+        "Both deletions in this file MUST land in the SAME git commit as the conformance_runner.py:805-813 deletion (single revert button per v2 §Q3 risk #5)."
+      ]
+    },
+    {
+      "path": "/Users/nix/dev/ai/sox-protocol/spec/conformance/identity-verification/04-unknown-credential-rejected-server-side.yaml",
+      "phase": "07-server-side-rejection-fixture",
+      "spec_ref": "STATE.md termination targets; analysis.md §3.4 (new conformance fixtures)",
+      "purpose": "Assert that an unregistered-agent send is rejected by a sox-error envelope EMITTED BY THE SERVER, not synthesised by the harness.",
+      "current_state": "Does not exist.",
+      "target_state": "New fixture YAML conforming to the conformance suite schema. Preconditions: register agent `alice` in the credential registry. Steps: agent `mallory` (not registered) attempts `send`. Assertion: response is a sox-error envelope with `error_code: 'unknown_agent'` AND the response originated from the pipeline.dispatch path (asserted via presence of `metadata.pipeline_trace` containing an entry for the auth plugin with `verdict: 'short_circuit'` and `error_code: 'unknown_agent'`). The pipeline_trace presence is the proof-of-server-side-rejection — the deleted harness substitution did not produce pipeline_trace, so its presence binarily distinguishes server enforcement from synthesised rejection.",
+      "delta": [
+        "Author new YAML fixture under spec/conformance/identity-verification/ following the existing schema (cf. 01/02/03 fixtures in the same directory).",
+        "Use a fixture-level assertion that includes both `error_code: unknown_agent` AND a check on `metadata.pipeline_trace[*].plugin_id == 'auth' AND verdict == 'short_circuit'`.",
+        "Run against both stdio and HTTP transports; both must pass."
+      ]
+    }
+  ],
+  "test_plan": [
+    {
+      "scope": "Phase 02 — stdio integration",
+      "test_files": [
+        "packages/python/tests/mcp_server/test_tools_pipeline_dispatch.py (NEW)",
+        "packages/python/tests/mcp_server/test_server_lifespan.py (UPDATE)"
+      ],
+      "assertions": [
+        "Lifespan_result contains keys 'pipeline', 'verifier', 'registry' in addition to 'store', 'listener', 'agent_id'.",
+        "Each of the 15 tool handlers, when invoked, produces exactly one pipeline.dispatch invocation (asserted via mock-pipeline fixture).",
+        "No tool handler imports BackingStore or calls store.<op>() directly (grep-based static check in test).",
+        "channels__send return value preserves the existing public schema (regression guard for tool consumers)."
+      ]
+    },
+    {
+      "scope": "Phase 03 — HTTP integration",
+      "test_files": [
+        "packages/python/tests/transports/http/test_routes_pipeline.py (NEW)",
+        "packages/python/tests/transports/http/conftest.py (UPDATE — drop PassthroughIdentityResolver fixture, add pipeline fixture)",
+        "packages/python/tests/transports/http/test_coverage2.py (UPDATE)",
+        "packages/python/tests/transports/http/test_routes_auth_gaps.py (UPDATE)",
+        "packages/python/tests/transports/http/test_routes_gaps.py (UPDATE)",
+        "packages/python/tests/transports/http/test_final_coverage.py (UPDATE)"
+      ],
+      "assertions": [
+        "All 22 routes invoke pipeline.dispatch exactly once per request (mock-pipeline fixture asserts call count and operation arg).",
+        "create_app/build_app raises TypeError when pipeline is missing (required parameter).",
+        "PassthroughIdentityResolver import path no longer exists (`pytest.raises(ImportError)`).",
+        "Bearer token reaches AuthMiddleware via metadata['_connection_credential']['bearer_token'] (assert via custom-middleware test plugin).",
+        "Existing 22-passing HTTP conformance tests now reach 32-passing (parity with stdio)."
+      ]
+    },
+    {
+      "scope": "Phase 04 — observability",
+      "test_files": [
+        "packages/python/tests/middleware/test_pipeline_trace.py (NEW)",
+        "packages/python/tests/middleware/test_pipeline.py (UPDATE)"
+      ],
+      "assertions": [
+        "Every dispatch produces ctx._meta['pipeline_trace'] with exactly one entry per registered plugin in the chain.",
+        "Each entry contains keys {plugin_id, kind, started_at, finished_at, verdict, correlation_id}; error_code key present iff verdict == 'error' or 'short_circuit' with a typed error.",
+        "correlation_id in every entry equals ctx.correlation_id (proves echo from frozen field, not per-record invention).",
+        "When AuthMiddleware short-circuits, its entry has verdict='short_circuit' and StoreDispatchMiddleware has NO entry (proves wrapping happens around the call, not after).",
+        "When a plugin raises, its entry has verdict='error' and the exception still propagates.",
+        "Legacy middleware_timings still emitted (back-compat shim assertion)."
+      ]
+    },
+    {
+      "scope": "Phase 05 — concurrency",
+      "test_files": ["packages/python/tests/identity/test_verifier_concurrency.py (NEW)"],
+      "assertions": [
+        "asyncio.gather of N concurrent verify() with same nonce: exactly 1 success, N-1 ReplayDetectedError.",
+        "asyncio.gather of N concurrent verify() with N distinct nonces: all N succeed.",
+        "Lock is released on exception path (verify after raising still works)."
+      ]
+    },
+    {
+      "scope": "Phase 06 — harness deletion",
+      "test_files": [
+        "tools/conformance_runner_tests/test_no_substitution.py (NEW)",
+        "Conformance suite full run — both transports"
+      ],
+      "assertions": [
+        "Static: `grep -n 'This mirrors the middleware layer' tools/conformance_runner.py` returns 0 lines.",
+        "Static: `grep -n '_registered_agents' tools/conformance_runner.py` returns 0 lines.",
+        "Static: `.github/workflows/conformance.yml` contains the literal string `python-reference-http` outside of comments.",
+        "Static: workflow YAML does NOT contain `conformance-legacy`.",
+        "Stdio conformance: 32 passed, 0 failed, 27 skipped.",
+        "HTTP conformance: 32 passed, 0 failed, 27 skipped."
+      ]
+    },
+    {
+      "scope": "Phase 07 — server-side rejection fixture",
+      "test_files": ["spec/conformance/identity-verification/04-unknown-credential-rejected-server-side.yaml (NEW)"],
+      "assertions": [
+        "Fixture passes against python-reference-stdio target.",
+        "Fixture passes against python-reference-http target.",
+        "Response contains pipeline_trace with auth plugin entry having verdict='short_circuit' and error_code='unknown_agent'.",
+        "Harness logs do NOT contain rejection-synthesis text (proves rejection came from server)."
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "R1",
+      "risk": "Credential format on the connection seam: HTTP currently has no SignedRequest envelope; legacy callers send `Authorization: Bearer <agent_id>`. Phase 03 must accept both this legacy form AND a forward-compatible `X-Sox-Signed-Request` header without forcing a breaking change.",
+      "mitigation": "Phase 03 _resolve_credential() accepts either. AuthMiddleware tolerates `{'launch_param_trusted': True, 'agent_id': X}` for v1 and verifies the agent_id is in the registry (no signature check on this path). Document this as a v1 transitional path in auth.py and verifier.py docstrings; v1.1 hardens to signed-only.",
+      "owner_decision_needed": true
+    },
+    {
+      "id": "R2",
+      "risk": "SharedMemoryTarget in tools/conformance_runner.py does NOT currently construct a Pipeline; once Phase 06 deletes the substitution, fixtures that previously relied on synthesised rejection will fail unless SharedMemoryTarget is updated to wire build_default_pipeline + register declared `agents[]` into the verifier's registry.",
+      "mitigation": "Phase 06 implementation includes the SharedMemoryTarget pipeline-wiring change as a prerequisite to deleting the substitution. The build phase agent should land both edits in the same commit. If Phase 02 hasn't yet exposed a clean way for the harness to import build_default_pipeline (e.g. due to circular import risk), defer Phase 06 until Phase 02 is verified clean."
+    },
+    {
+      "id": "R3",
+      "risk": "Six existing HTTP test files import PassthroughIdentityResolver directly (conftest.py + 5 test modules). Phase 03 deletion will break them all simultaneously.",
+      "mitigation": "Phase 03 implementer must update all 6 files in the same PR. Listed explicitly in test_plan above. Provide a stub `MockPipeline` test fixture that replaces the resolver fixture; update the 6 imports."
+    },
+    {
+      "id": "R4",
+      "risk": "channels__collect (multi-recv loop) was a single-call optimisation in the old direct-store path; converting to per-iteration pipeline.dispatch may change observable timing or semantics around the max-messages/total-size guard.",
+      "mitigation": "Phase 02 implementer must preserve the loop structure and guards. Add a regression test asserting that a multi-message collect produces one dispatch per recv attempt, and that early termination on size limit still works."
+    },
+    {
+      "id": "R5",
+      "risk": "Phase 04 wraps every plugin invocation. If a plugin raises a non-typed exception (no error_code attribute), record emission could itself fail and mask the original exception.",
+      "mitigation": "Phase 04 record-emission code uses `getattr(exc, 'error_code', 'internal_error')` and wraps record append in try/except that swallows record-emission failures only (NOT the original exception). Add a unit test for plugin-raises-bare-Exception."
+    },
+    {
+      "id": "R6",
+      "risk": "verifier.py:198-223 lock placement. Putting the signature verification (CPU-bound) inside the lock serialises all verifies under contention. For a server with high concurrent auth load, this could become a bottleneck.",
+      "mitigation": "v1 accepts the simplicity. ed25519 verify is ~50µs; even at 1000 RPS the serial lock holds <50ms cumulative — well within budget. Document the trade-off in verifier.py module docstring; flag a v1.1 follow-up to hoist the verify outside the lock if profiling demands."
+    },
+    {
+      "id": "R7",
+      "risk": "Phase 03 must drop the `IdentityResolver` Protocol from auth.py, but external test code may still type-hint against it. mypy --strict will fail across all 6 importers simultaneously.",
+      "mitigation": "Same fix as R3 — atomic PR updating all importers. Run `mypy --strict` against the entire packages/python/ tree before merging Phase 03."
+    },
+    {
+      "id": "R8",
+      "risk": "build_default_pipeline currently constructs AuthMiddleware with a verifier; the verifier reads from a CredentialRegistry which Phase 02 populates with a single synthetic record matching the lifespan's resolved agent_id. Tests that spin up the stdio server with a different agent_id will fail at first send.",
+      "mitigation": "Document this in mcp_server/server.py module docstring as a v1 transitional contract: the resolved agent_id is auto-registered. v1.1 will require explicit registration via a CLI tool or manifest. Update test fixtures that exercise multi-agent stdio scenarios to register agents post-lifespan."
+    }
+  ],
+  "rollout_order": {
+    "strict_sequence": ["01-plan", "02-build-stdio", "03-build-http", "08-review"],
+    "parallel_groups": [
+      {
+        "after": "03-build-http",
+        "may_run_in_parallel": ["04-observability", "05-concurrency-fix", "06-delete-harness-substitution", "07-server-side-rejection-fixture"],
+        "rationale": "Per suggestions-v2.md §Q6 NR-1: phases 06 and 07 MAY land before 04 and 05 once 01/02/03 are complete. Phase 06's edits (conformance_runner.py + conformance.yml + new fixture) do not depend on phase 04's pipeline.py edits because conformance fixtures consume metadata opaquely — the new fixture's pipeline_trace assertion will work whether or not the trace shape has been canonicalised by phase 04 (the fixture asserts on plugin_id/verdict/error_code which exist in the legacy middleware_timings shape too)."
+      }
+    ],
+    "graph": {
+      "01-plan": {"depends_on": []},
+      "02-build-stdio": {"depends_on": ["01-plan"]},
+      "03-build-http": {"depends_on": ["01-plan"], "note": "MAY start in parallel with 02 if engineer capacity allows; both touch disjoint files (mcp_server/* vs adapters/transports/http/*)"},
+      "04-observability": {"depends_on": ["02-build-stdio", "03-build-http"]},
+      "05-concurrency-fix": {"depends_on": ["02-build-stdio", "03-build-http"], "note": "Replay-cache race becomes reachable for the first time once auth runs per-request via Pipeline; landing 02+03 without 05 ships a known race window — minimum-acceptable: ship 05 before any production deploy of 02+03"},
+      "06-delete-harness-substitution": {"depends_on": ["02-build-stdio", "03-build-http"], "may_precede": ["04-observability", "05-concurrency-fix"]},
+      "07-server-side-rejection-fixture": {"depends_on": ["02-build-stdio", "03-build-http"], "may_precede": ["04-observability", "05-concurrency-fix"], "note": "Landing 06+07 first nails the symbolic milestone (substitution deletion + green CI) on schedule even if 04/05 hit unexpected complexity"},
+      "08-review": {"depends_on": ["04-observability", "05-concurrency-fix", "06-delete-harness-substitution", "07-server-side-rejection-fixture"]}
+    }
+  },
+  "exit_signals": [
+    "All 8 phases reported DONE in pipeline-integration/STATE.md.",
+    "grep -rn 'BackingStore\\.' packages/python/src/sox_protocol/ --include='*.py' | grep -v 'middleware/plugins/store_dispatch.py\\|backing_store/' returns zero hits.",
+    "grep -rn 'PassthroughIdentityResolver\\|_registered_agents' packages/python/src/sox_protocol/ tools/ returns zero hits.",
+    "grep -n 'This mirrors the middleware layer' tools/conformance_runner.py returns zero hits.",
+    ".github/workflows/conformance.yml contains 'python-reference-http' uncommented; no 'conformance-legacy' string present.",
+    "Stdio conformance: 32 passed, 0 failed, 27 skipped.",
+    "HTTP conformance: 32 passed, 0 failed, 27 skipped.",
+    "Full pytest suite >= 1113 baseline, all green.",
+    "mypy --strict clean across all 78 source files.",
+    "Every dispatch response carries metadata['pipeline_trace'] with at least one entry containing keys {plugin_id, kind, started_at, finished_at, verdict, correlation_id}.",
+    "verifier.py contains 'async with self._lock:' enclosing the prune+check+insert block.",
+    "New fixture spec/conformance/identity-verification/04-unknown-credential-rejected-server-side.yaml passes on both transports."
+  ],
+  "deferred_decisions": [
+    {
+      "decision": "HTTP credential format: bearer-token-as-agent-id (legacy) vs SignedRequest header (forward-compat).",
+      "owner_position": "analysis §5 deferred; v1 accepts both; v1.1 hardens to signed-only.",
+      "build_phase_action": "Phase 03 implements both code paths and documents the v1.1 deprecation in auth.py + AuthMiddleware docstrings."
+    },
+    {
+      "decision": "Per-request vs per-connection identity verification on HTTP.",
+      "owner_position": "analysis §4.1 HTTP item 5 — recommended per-request, stateless for v1.",
+      "build_phase_action": "Phase 03 implements per-request only; X-Sox-Connection-Id session caching deferred to v1.1."
+    },
+    {
+      "decision": "Whether phase 04 also removes the legacy middleware_timings array.",
+      "owner_position": "Keep as back-compat shim for one release.",
+      "build_phase_action": "Phase 04 retains middleware_timings emission; v1.1 deletes it. Add deprecation warning to AuthMiddleware._record_timing docstring."
+    },
+    {
+      "decision": "SSE router pipeline integration depth.",
+      "owner_position": "Unclear — sse.py was not enumerated in STATE.md termination targets.",
+      "build_phase_action": "Phase 03 implementer must inspect sse.py write paths. If SSE is read-only, the conversion is a signature-only edit (drop identity, accept pipeline). If SSE has any client-write path, route it through pipeline.dispatch like the rest of routes.py. Flag any SSE write-path discovery to the orchestrator."
+    }
+  ]
+}

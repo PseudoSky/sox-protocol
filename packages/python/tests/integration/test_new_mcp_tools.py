@@ -14,10 +14,16 @@ from typing import Any
 import pytest
 from fastmcp import Client, FastMCP
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry
+from sox_protocol.core.identity.keys import generate_keypair
+from sox_protocol.core.identity.verifier import IdentityVerifier
 from sox_protocol.core.mcp_server.listener import Listener
 from sox_protocol.core.mcp_server.server import _load_and_validate_schemas
 from sox_protocol.core.mcp_server.tools import register_tools
+from sox_protocol.core.middleware import build_default_pipeline
 
 # ---------------------------------------------------------------------------
 # Helper: build in-process server wired to a given store + agent_id
@@ -25,7 +31,7 @@ from sox_protocol.core.mcp_server.tools import register_tools
 
 
 async def _make_server(store: Any, agent_id: str) -> FastMCP[dict[str, object]]:
-    """Build a FastMCP server wired to *store* as *agent_id*."""
+    """Build a FastMCP server wired to *store* as *agent_id* with pipeline."""
 
     @contextlib.asynccontextmanager
     async def _lifespan(
@@ -33,10 +39,25 @@ async def _make_server(store: Any, agent_id: str) -> FastMCP[dict[str, object]]:
     ) -> AsyncIterator[dict[str, object]]:
         _load_and_validate_schemas()
         await store.initialize()
+        registry = InMemoryCredentialRegistry()
+        audit = AuditLogWriter()
+        verifier = IdentityVerifier(registry=registry, audit=audit)
+        private_seed, public_key_bytes = generate_keypair()
+        private_key: Ed25519PrivateKey = Ed25519PrivateKey.from_private_bytes(private_seed)
+        await registry.register(agent_id, public_key_bytes)
+        pipeline = build_default_pipeline(verifier=verifier, store=store)
         listener = Listener(store=store, agent_id=agent_id)
         listener.start()
         try:
-            yield {"store": store, "listener": listener, "agent_id": agent_id}
+            yield {
+                "store": store,
+                "listener": listener,
+                "agent_id": agent_id,
+                "pipeline": pipeline,
+                "verifier": verifier,
+                "registry": registry,
+                "_private_key": private_key,
+            }
         finally:
             await listener.stop()
             if hasattr(store, "close"):

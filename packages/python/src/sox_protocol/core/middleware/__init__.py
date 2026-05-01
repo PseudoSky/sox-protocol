@@ -90,6 +90,7 @@ __all__ = [
     # Default chain
     "DEFAULT_ORDER",
     "default_chain",
+    "build_default_pipeline",
     # Errors
     "MiddlewareError",
     "ChainConfigurationError",

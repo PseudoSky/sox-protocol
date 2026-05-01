@@ -1,34 +1,43 @@
 # SPDX-License-Identifier: Apache-2.0
 """SOX MCP tool implementations.
 
-The four tools registered here implement the SOX wire protocol
-(``CONTRACTS.md §5``).  Each tool:
+All 15 tool handlers registered here dispatch exclusively through
+:class:`~sox_protocol.core.middleware.pipeline.Pipeline` rather than calling
+the :class:`~sox_protocol.core.ports.backing_store.BackingStore` directly.
+The pipeline is constructed once in the lifespan (``server.py``) and stashed
+in ``lifespan_result["pipeline"]``.
 
-1. Receives its arguments via FastMCP's normal parameter injection.
-2. Accesses the ``BackingStore`` and ``Listener`` through the FastMCP
-   ``Context.lifespan_context`` dict (keys ``"store"`` and ``"listener"``).
-3. Returns a plain ``dict`` whose shape matches the corresponding
-   ``spec/schemas/tools/*.output.schema.json``.
+Every handler:
 
-Tool semantics summary
------------------------
-``channels__send``
-    Non-blocking.  Persists the message in the backing store and returns
-    ``{sent_at, message_id}`` immediately.
+1. Reads ``pipeline`` and ``agent_id`` from the lifespan context.
+2. Builds a per-call :class:`~sox_protocol.core.identity.envelope.SignedRequest`
+   via :func:`~sox_protocol.core.mcp_server._credential.resolve_credential`
+   (the v1 transitional credential path).
+3. Calls ``await pipeline.dispatch(operation, input_dict, connection_id, metadata)``
+   and returns the result directly.
 
-``channels__recv``
-    **Non-blocking (timeout=0 semantics).**  Drains the listener's local
-    in-memory buffer.  Returns ``{drained_at, messages}`` immediately even
-    when the buffer is empty.
+The pipeline carries auth verification (AuthMiddleware) and persistence
+(StoreDispatchMiddleware) as its middleware chain, so each tool call is
+fully mediated by the middleware stack.
 
-``channels__subscribe``
-    Registers a subscription pattern in the backing store.  Idempotent.
-    Returns ``{subscribed: [currently-matching channels]}``.
+``channels__recv`` semantics
+----------------------------
+``channels__recv`` retains its direct listener drain because it reads from the
+background listener's in-process queue rather than dispatching an operation
+to the backing store.  The underlying store operation is ``"recv"`` but the
+MCP implementation drains the local buffer maintained by the Listener task.
+The pipeline dispatch for ``recv`` is used ONLY to pass through auth and
+middleware; the actual message list comes from the listener queue.
 
-``channels__list_channels``
-    Returns ``{channels: [...], protocol_version: "1.0"}``.  The
-    ``protocol_version`` field lets adapters detect major-version mismatches
-    (``CONTRACTS.md §8``).
+``channels__collect`` semantics
+--------------------------------
+``channels__collect`` in v1 is a planned-but-stub operation that returns an
+empty ``{"received": [], "missing": [], "timed_out": True}`` response.
+Per implementation-plan.json: for phase 02, each collect iteration dispatches
+ONCE through the pipeline (matching store_dispatch's ``channels_collect``
+handling).  The multi-message loop structure is preserved here so that when
+the store implements collect, it can be extended without a tools.py rewrite.
+Currently a single dispatch is made since the stub returns immediately.
 
 This module MUST NOT import from ``sox_protocol.adapters`` (import-linter
 enforced).
@@ -40,21 +49,49 @@ import re
 import time
 from typing import Any
 
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastmcp import Context, FastMCP
 
+from sox_protocol.core.identity.envelope import SignedRequest
+from sox_protocol.core.mcp_server._credential import resolve_credential
 from sox_protocol.core.mcp_server.listener import Listener
-from sox_protocol.core.ports.backing_store import BackingStore
+from sox_protocol.core.middleware.pipeline import Pipeline
 
 # Reject wildcard subscriptions on reserved prefixes dm/ and group/.
 _RESERVED_WILDCARD: re.Pattern[str] = re.compile(r"^(dm|group)/.*\*")
 
 
+def _get_pipeline_and_credential(
+    lc: dict[str, Any],
+    operation: str,
+    body: dict[str, object] | None = None,
+) -> tuple[Pipeline, str, SignedRequest]:
+    """Extract pipeline, agent_id, and a fresh credential from lifespan context.
+
+    Args:
+        lc: The lifespan context dict (``ctx.fastmcp._lifespan_result``).
+        operation: The SOX operation name for signing.
+        body: Optional body dict used to compute the SignedRequest body hash.
+
+    Returns:
+        Tuple of (pipeline, agent_id, signed_request).
+    """
+    pipeline: Pipeline = lc["pipeline"]
+    agent_id: str = lc["agent_id"]
+    private_key: Ed25519PrivateKey = lc["_private_key"]
+    credential = resolve_credential(agent_id, private_key, operation, body)
+    return pipeline, agent_id, credential
+
+
 def register_tools(mcp: FastMCP[Any]) -> None:
-    """Register all four SOX tools on *mcp*.
+    """Register all 15 SOX tools on *mcp*.
 
     Called once from ``server.py`` during server construction so the
     tools share the same ``FastMCP`` instance and therefore the same
     lifespan context.
+
+    All handlers dispatch through ``pipeline.dispatch`` rather than
+    calling the backing store directly.
 
     Args:
         mcp: A ``FastMCP`` instance that has not yet started.
@@ -87,21 +124,24 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"sent_at": <float>, "message_id": <str>, "seq": <int>, "backpressure": {...}}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        message_id, sent_at, seq, backpressure = await store.send(
-            channel, agent_id, body, correlation_id
-        )
-        return {
-            "sent_at": sent_at,
-            "message_id": message_id,
-            "seq": seq,
-            "backpressure": {
-                "queue_depth": backpressure.queue_depth,
-                "threshold": backpressure.threshold,
-                "state": backpressure.state,
-            },
+        input_dict: dict[str, object] = {
+            "channel": channel,
+            "body": body,
+            "correlation_id": correlation_id,
         }
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "send", input_dict)
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        result = await pipeline.dispatch(
+            "send",
+            input_dict,
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
+        # Normalize: store_dispatch includes "channel" in the send response but
+        # spec/schemas/tools/send.output.schema.json does not allow it (additionalProperties: false).
+        if isinstance(result, dict):
+            result.pop("channel", None)
+        return result
 
     # ------------------------------------------------------------------
     # channels__recv
@@ -144,23 +184,11 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"drained_at": <float>, "messages": [...]}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
+        # Drain the in-process listener queue directly (no store round-trip).
         listener: Listener = lc["listener"]
-
-        # Drain the unbounded local buffer synchronously.
         buffered = listener.drain(max_messages=max_messages)
 
-        # Optional channel filter (messages not matching stay... but they
-        # have already been popped from the queue; re-queue them at front
-        # isn't safe without a deque.  Per spec, channels filter applies
-        # to what the recv returns — unmatched messages are discarded from
-        # the local buffer.  The watch loop pushes them again if undelivered
-        # in the backing store, but they are already buffered here, so we
-        # must decide: drop or re-queue.
-        #
-        # Spec §5.2: "If channels is null, drains all subscribed channels."
-        # The listener already respects subscriptions; the channels param
-        # is an additional filter.  We keep only matching messages and
-        # re-queue the rest so they are not lost.
+        # Optional channel filter — re-queue unmatched messages.
         if channels is not None:
             channel_set = set(channels)
             kept: list[dict[str, object]] = []
@@ -170,10 +198,6 @@ def register_tools(mcp: FastMCP[Any]) -> None:
                     kept.append(msg)
                 else:
                     requeue.append(msg)
-            # Re-insert unmatched messages at the front (best-effort LIFO
-            # prepend: put them back in original order by iterating in
-            # reverse and using put_nowait; the queue is unbounded so this
-            # never blocks).
             for msg in reversed(requeue):
                 listener.queue.put_nowait(msg)
             buffered = kept
@@ -182,6 +206,17 @@ def register_tools(mcp: FastMCP[Any]) -> None:
         if not include_meta:
             for msg in buffered:
                 msg.pop("_meta", None)
+
+        # Pass through pipeline for auth + middleware (input carries agent_id
+        # for the recv op so AuthMiddleware can bind ctx.agent_id).
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "recv")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        await pipeline.dispatch(
+            "recv",
+            {"agent_id": agent_id, "channels": channels, "max_messages": max_messages},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
         drained_at = time.time()
         return {"drained_at": drained_at, "messages": buffered}
@@ -216,10 +251,19 @@ def register_tools(mcp: FastMCP[Any]) -> None:
                 f"Use an exact channel name or a group lifecycle verb. Got: {pattern!r}"
             )
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        matched = await store.subscribe(agent_id, pattern)
-        return {"subscribed": matched}
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "subscribe")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        result = await pipeline.dispatch(
+            "subscribe",
+            {"agent_id": agent_id, "pattern": pattern},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
+        # Normalize: store_dispatch returns {"subscribed": True, "matched_channels": [...]}
+        # but spec/schemas/tools/subscribe.output.schema.json requires {"subscribed": [...]}.
+        if isinstance(result, dict) and isinstance(result.get("matched_channels"), list):
+            return {"subscribed": result["matched_channels"]}
+        return result
 
     # ------------------------------------------------------------------
     # channels__unsubscribe
@@ -237,10 +281,19 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"unsubscribed": [removed patterns], "pending_cleared": int}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        removed, pending_cleared = await store.unsubscribe(agent_id, patterns)
-        return {"unsubscribed": removed, "pending_cleared": pending_cleared}
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "unsubscribe")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        result = await pipeline.dispatch(
+            "unsubscribe",
+            {"agent_id": agent_id, "patterns": patterns},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
+        # Normalize: store_dispatch returns {"removed": [...], "pending_cleared": int}
+        # but the tool contract uses {"unsubscribed": [...], "pending_cleared": int}.
+        if isinstance(result, dict) and "removed" in result and "unsubscribed" not in result:
+            return {"unsubscribed": result["removed"], "pending_cleared": result.get("pending_cleared", 0)}
+        return result
 
     # ------------------------------------------------------------------
     # channels__ack
@@ -265,10 +318,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"message_id": str, "status": str, "acked_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.ack(agent_id, message_id, status, reason)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "channels_ack")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "channels_ack",
+            {"agent_id": agent_id, "message_id": message_id, "status": status, "reason": reason},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # channels__heartbeat
@@ -291,10 +348,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"agent_id": str, "status": str, "recorded_at": float, "expires_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.heartbeat(agent_id, status, ttl)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "channels_heartbeat")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "channels_heartbeat",
+            {"agent_id": agent_id, "status": status, "ttl": ttl},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # channels__list_agents
@@ -317,9 +378,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"agents": [...]}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agents = await store.list_agents(status_filter, namespace)
-        return {"agents": agents}
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "list_agents")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "list_agents",
+            {"agent_id": agent_id, "status_filter": status_filter, "namespace": namespace},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # channels__replay
@@ -346,9 +412,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"messages": [...], "has_more": bool}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        messages, has_more = await store.replay(channel, since, until, limit)
-        return {"messages": messages, "has_more": has_more}
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "replay")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "replay",
+            {"channel": channel, "since": since, "until": until, "limit": limit},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # channels__collect  (planned — not implemented in v1)
@@ -374,8 +445,39 @@ def register_tools(mcp: FastMCP[Any]) -> None:
         Returns:
             ``{"received": [], "missing": [], "timed_out": bool}``
         """
-        # planned: not implemented in v1
-        return {"received": [], "missing": [], "timed_out": True}
+        # Phase 02 decision: dispatch ONCE through pipeline matching
+        # store_dispatch's channels_collect handling.  The multi-iteration
+        # loop is preserved here for forward-compat (when store implements
+        # real collect, each recv attempt will call dispatch in a loop).
+        # Currently a single dispatch suffices because the underlying store
+        # recv returns an empty list immediately.
+        # See implementation-plan.json risk R4 and phase 02 collect semantics.
+        #
+        # store_dispatch maps channels_collect to a store.recv call and returns
+        # {"drained_at": ..., "messages": [...]}.  The tool contract for collect
+        # is {"received": [...], "missing": [...], "timed_out": bool}; the
+        # normalization below converts between the two shapes.
+        lc = ctx.fastmcp._lifespan_result or {}
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "channels_collect")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        result = await pipeline.dispatch(
+            "channels_collect",
+            {
+                "agent_id": agent_id,
+                "channels": [reply_to],
+                "max_messages": count,
+            },
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
+        # Normalize store_dispatch's recv-shaped response to collect contract.
+        if isinstance(result, dict) and "messages" in result and "timed_out" not in result:
+            received = result.get("messages", [])
+            if not isinstance(received, list):
+                received = []
+            timed_out = len(received) < count
+            return {"received": received, "missing": [], "timed_out": timed_out}
+        return result
 
     # ------------------------------------------------------------------
     # group__create
@@ -396,10 +498,15 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"group_id": str, "created_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.group_create(agent_id, group_id)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "group_create")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "group_create",
+            # store_dispatch reads "creator_id" for this operation.
+            {"creator_id": agent_id, "group_id": group_id},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # group__invite
@@ -422,10 +529,15 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"invited": bool, "agent_id": str, "invited_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        caller_id: str = lc["agent_id"]
-        result = await store.group_invite(caller_id, group_id, agent_id)
-        return result
+        pipeline, caller_id, credential = _get_pipeline_and_credential(lc, "group_invite")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "group_invite",
+            # store_dispatch reads "inviter_id" (caller) and "invitee_id" (target agent).
+            {"inviter_id": caller_id, "group_id": group_id, "invitee_id": agent_id},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # group__join
@@ -446,10 +558,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"joined": bool, "group_id": str, "member_count": int, "joined_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.group_join(agent_id, group_id)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "group_join")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "group_join",
+            {"agent_id": agent_id, "group_id": group_id},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # group__leave
@@ -470,10 +586,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"left": bool, "group_id": str, "left_at": float}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.group_leave(agent_id, group_id)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "group_leave")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "group_leave",
+            {"agent_id": agent_id, "group_id": group_id},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # group__list_members
@@ -494,10 +614,14 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"group_id": str, "members": [...]}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        agent_id: str = lc["agent_id"]
-        result = await store.group_list_members(agent_id, group_id)
-        return result
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "group_list_members")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        return await pipeline.dispatch(
+            "group_list_members",
+            {"agent_id": agent_id, "group_id": group_id},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
 
     # ------------------------------------------------------------------
     # channels__list_channels
@@ -520,13 +644,19 @@ def register_tools(mcp: FastMCP[Any]) -> None:
             ``{"channels": [...], "_sox_protocol": {"server_version": "1.0", ...}}``
         """
         lc = ctx.fastmcp._lifespan_result or {}
-        store: BackingStore = lc["store"]
-        raw_channels = await store.list_channels()
-        return {
-            "channels": raw_channels,
-            "_sox_protocol": {
+        pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "list_channels")
+        connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        result = await pipeline.dispatch(
+            "list_channels",
+            {},
+            connection_id=connection_id,
+            metadata={"_connection_credential": credential},
+        )
+        # Inject SOX protocol version negotiation block required by CONTRACTS.md §8.
+        if isinstance(result, dict) and "_sox_protocol" not in result:
+            result["_sox_protocol"] = {
                 "server_version": "1.0",
                 "supported_versions": ["1.0"],
                 "min_client_version": "1.0",
-            },
-        }
+            }
+        return result

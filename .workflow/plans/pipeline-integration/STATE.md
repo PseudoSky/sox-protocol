@@ -14,8 +14,8 @@ absorbs: harness-cleanup (per analysis §7.6 — F merged into A as terminal acc
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Concrete migration plan: route-by-route + tool-by-tool, observability shape, harness deletion sequencing | `READY` | sox-cto-system:planner | 0 | 2026-05-01T15:00:00Z |
-| 02-build-stdio | Wire `build_default_pipeline` into mcp_server lifespan; convert all 15 tool handlers from direct-store to `Pipeline.dispatch` | `BLOCKED` | python-pro | 0 | 2026-05-01T15:00:00Z |
+| 01-plan | Concrete migration plan: route-by-route + tool-by-tool, observability shape, harness deletion sequencing | `DONE` | sox-cto-system:planner | 1 | 2026-05-01T17:30:00Z |
+| 02-build-stdio | Wire `build_default_pipeline` into mcp_server lifespan; convert all 15 tool handlers from direct-store to `Pipeline.dispatch` | `DONE` | python-pro | 1 | 2026-05-01T18:00:00Z |
 | 03-build-http | Plumb pipeline through `build_app`; convert all 22 routes; delete `PassthroughIdentityResolver`; reduce `adapters/transports/http/auth.py` to `extract_bearer_token` only | `BLOCKED` | python-pro | 0 | 2026-05-01T15:00:00Z |
 | 04-observability | Extend `metadata["middleware_timings"]` to a structured `metadata["pipeline_trace"]` array (per-plugin {plugin_id, kind, started_at, finished_at, verdict, error_code?}). All plugins emit via Pipeline base, not per-plugin opt-in. (Risk #7) | `BLOCKED` | python-pro | 0 | 2026-05-01T15:00:00Z |
 | 05-concurrency-fix | Bundle the verifier replay-cache `asyncio.Lock` fix flagged in hooks-middleware:04-review (becomes reachable when auth runs per-request) | `BLOCKED` | python-pro | 0 | 2026-05-01T15:00:00Z |
@@ -47,6 +47,11 @@ absorbs: harness-cleanup (per analysis §7.6 — F merged into A as terminal acc
 ## Symbolic significance
 
 Per analysis §7.6 / §6 (preserved): *"The single highest-value commit in the whole program is the deletion of `tools/conformance_runner.py:805-813`. When that block goes away and conformance still passes against both transports, we'll know the architecture is real, not aspirational."* Phases 06+07 land that commit as terminal acceptance for this engagement.
+
+## Transitions
+
+- 2026-05-01T17:30:00Z 01-plan — DONE (sox-cto-system:planner): implementation-plan.json with 13 files, 8 risks, rollout_order graph honoring NR-1 phase-ordering relaxation
+- 2026-05-01T18:00:00Z 02-build-stdio — DONE (python-pro + inline cleanup): server.py builds pipeline + identity stack (registry, audit, verifier, synthetic Ed25519 keypair); _credential.py helper; tools.py 15 handlers convert to pipeline.dispatch (17 dispatch calls; collect runs in loop). Inline fixes after agent truncation: added `build_default_pipeline` to `core/middleware/__init__.py:__all__` (mypy attr-defined error); updated `tests/reference_agent/helpers.py` lifespan to mirror production lifespan keys (pipeline, verifier, registry, _private_key — 41 ref-agent failures resolved). Verified: 1113 tests pass (baseline preserved), mypy --strict clean, stdio conformance 32/0/27 (no regression).
 
 ## Reference
 
