@@ -127,12 +127,22 @@ class MiddlewareContext:
     def agent_id(self, value: str) -> None:
         """Set ``agent_id`` exactly once.
 
+        The empty string is rejected: ``agent_id`` is either ``None`` (unset)
+        or a non-empty registered identifier. Empty / whitespace values would
+        lock the context into an "authenticated as nobody" state and silently
+        defeat downstream identity checks.
+
         Raises:
             AttributeError: If ``agent_id`` has already been set.
+            ValueError: If *value* is empty or all-whitespace.
         """
         if self._agent_id is not None:
             raise AttributeError(
                 "agent_id is already set; only the auth middleware may set it"
+            )
+        if not value or not value.strip():
+            raise ValueError(
+                "agent_id must be a non-empty, non-whitespace string"
             )
         self._agent_id = value
 
