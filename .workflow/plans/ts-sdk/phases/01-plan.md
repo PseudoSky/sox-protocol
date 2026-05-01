@@ -26,6 +26,7 @@ context_size: medium
 JSON plan for the SOX Protocol TypeScript client SDK.
 
 READ:
+- spec/protocol.md (authoritative v1 operation table — 14 ops; every op needs a TS binding)
 - spec/operations/*.json, spec/envelopes/*.json (codegen sources)
 - spec/transports/http/openapi.yaml (HTTP wire format)
 - packages/python/src/sox_protocol/ (Python SDK to mirror in shape)
@@ -47,9 +48,15 @@ SHAPE:
     "output": "packages/typescript/src/generated/"
   },
   "files": [
-    {"path": "packages/typescript/src/client.ts", "spec_ref": "spec/protocol.md", "purpose": "low-level client", "public_api": [...]},
+    {"path": "tools/ts_codegen.ts", "spec_ref": "spec/operations/", "purpose": "codegen script: spec JSON schemas → TS types"},
+    {"path": "packages/typescript/package.json", "purpose": "npm package manifest"},
+    {"path": "packages/typescript/tsconfig.json", "purpose": "tsc --strict config"},
+    {"path": "packages/typescript/vitest.config.ts", "purpose": "vitest config"},
+    {"path": "packages/typescript/.eslintrc.json", "purpose": "eslint config"},
+    {"path": "packages/typescript/src/client.ts", "spec_ref": "spec/protocol.md", "purpose": "low-level client — one method per v1 MUST operation", "public_api": [...]},
     {"path": "packages/typescript/src/helpers.ts", "purpose": "askAndWait, reply, drain, bootstrap", "public_api": [...]},
-    {"path": "packages/typescript/src/generated/", "purpose": "schemas → TS types"},
+    {"path": "packages/typescript/src/generated/", "purpose": "schemas → TS types (directory entry covers all generated files)"},
+    {"path": "packages/typescript/src/index.ts", "purpose": "barrel re-export"},
     ...
   ],
   "test_plan": [
@@ -81,7 +88,7 @@ END_RESERVATIONS
 Rules:
 - One path per line, prefixed with `- `
 - Plain string paths, no globs, no quotes
-- The list MUST equal plan.files[].path. Include codegen tool path if separate.
+- The list MUST equal plan.files[].path exactly (the codegen tool and all config files are already in the files[] shape above).
 
 REPORT: file count, codegen approach, key public-API differences from Python SDK. Then the RESERVATIONS block.
 ```

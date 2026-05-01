@@ -40,19 +40,20 @@ SHAPE:
 {
   "summary": "...",
   "lifecycle": [
-    {"step": "bootstrap", "spec_ref": "spec/protocol.md §bootstrap-sequence", "operations": ["subscribe","list_agents","list_pending","drain_unreplied"], "annotation": "<what the agent author should learn here>"},
+    {"step": "bootstrap", "spec_ref": "spec/protocol.md §bootstrap-sequence", "operations": ["subscribe","list_channels","list_agents","recv"], "annotation": "<what the agent author should learn here>"},
     {"step": "main_loop", "spec_ref": "...", "operations": ["recv","process","reply","ack"], "annotation": "..."},
     {"step": "thread_handling", ...},
     {"step": "ack_nack", ...},
     {"step": "presence_heartbeat", ...},
     {"step": "graceful_stop", ...},
-    {"step": "recovery", "spec_ref": "spec/replay.md", "operations": ["list_pending","replay"], "annotation": "how the agent reconstructs after a context reset"}
+    {"step": "recovery", "spec_ref": "spec/protocol.md §replay", "operations": ["replay"], "annotation": "how the agent reconstructs missed messages after a context reset using the per-channel seq cursor"}
   ],
   "files": [
     {"path": "examples/reference-agent/agent.py", "spec_ref": "...", "purpose": "fully-annotated reference impl", "public_api": [...]},
     {"path": "examples/reference-agent/README.md", "purpose": "prose walkthrough"},
     {"path": "examples/reference-agent/run_standalone.sh", "purpose": "quick-start"},
-    {"path": "examples/reference-agent/.claude-agent.md", "purpose": "Claude Code agent definition"}
+    {"path": "examples/reference-agent/.claude-agent.md", "purpose": "Claude Code agent definition"},
+    {"path": "examples/reference-agent/tests/test_agent.py", "purpose": "pytest integration tests for each lifecycle step"}
   ],
   "test_plan": [
     {"spec_section": "...", "test_cases": ["agent recovers after kill -9", "agent refuses stop with unreplied", "agent threads correctly"]}
@@ -97,7 +98,8 @@ Universal (`planning`):
 - [ ] `test -f .workflow/plans/reference-agent/implementation-plan.json`
 - [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/reference-agent/implementation-plan.json')); assert all(k in p for k in ['summary','lifecycle','files','test_plan','exit_signals'])"`
 - [ ] `test -f .workflow/plans/reference-agent/reservations/02-build.json`
-- [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/reference-agent/implementation-plan.json')); r=json.load(open('.workflow/plans/reference-agent/reservations/02-build.json')); assert set(f['path'] for f in p['files']) == set(r['files'])"`
+- [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/reference-agent/implementation-plan.json')); r=json.load(open('.workflow/plans/reference-agent/reservations/02-build.json')); assert set(f['path'] for f in p['files']) == set(r['files']), 'reservations do not match files'"`
+- [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/reference-agent/implementation-plan.json')); ops=set(op for step in p['lifecycle'] for op in step.get('operations',[])); required={'send','recv','subscribe','unsubscribe','list_channels','channels__ack','channels__heartbeat','replay','group_create','group_invite','group_join','group_leave','group_list_members','list_agents'}; missing=required-ops; assert not missing, f'lifecycle missing v1 operations: {missing}'"`
 
 ## Outputs
 

@@ -32,6 +32,8 @@ Produce a JSON plan for the SOX Protocol `sox chat` TUI — a textual-based term
 READ:
 - spec/protocol.md, spec/primitives/ (what to demo)
 - packages/python/src/sox_protocol/ (the client API)
+- TODO.md §"SOX chat UI (TUI + web app)" (scope constraints from the roadmap)
+- docs/decisions/tui-connection-model.md (AUTHORITATIVE — connection model is already decided: stdio subprocess; TUI speaks MCP over stdio pipes to a spawned sox server process; do not re-open this choice)
 - .workflow/plans/chat-tui-demo/phases/02-build.md (downstream build phase — read it so your component file paths, demo-script choreography, and recording-asset paths match what the builder will produce)
 
 OUTPUT: /Users/nix/dev/ai/sox-protocol/.workflow/plans/chat-tui-demo/implementation-plan.json
@@ -73,6 +75,8 @@ SHAPE:
   "dependencies": ["textual>=0.40", ...],
   "build_order": [...],
   "exit_signals": [
+    "mypy --strict clean on all TUI modules",
+    "lint-imports clean",
     "100% coverage on TUI logic (excluding pure-rendering glue)",
     "Demo script runs end-to-end without manual input",
     "Recording asset committed and embedded in README"
@@ -109,6 +113,7 @@ Universal (`planning`):
 - [ ] `test -f .workflow/plans/chat-tui-demo/implementation-plan.json`
 - [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/chat-tui-demo/implementation-plan.json')); assert all(k in p for k in ['summary','ui_layout','files','demo_script','recording_strategy','test_plan','exit_signals'])"`
 - [ ] `test -f .workflow/plans/chat-tui-demo/reservations/02-build.json`
+- [ ] `python3 -c "import json; p=json.load(open('.workflow/plans/chat-tui-demo/implementation-plan.json')); r=json.load(open('.workflow/plans/chat-tui-demo/reservations/02-build.json')); expected=set(f['path'] for f in p['files']) | {p['demo_script']['path'], p['recording_strategy']['output']}; assert expected == set(r['files']), f'reservations mismatch: {expected.symmetric_difference(set(r[\"files\"]))}'"` 
 
 ## Outputs
 
