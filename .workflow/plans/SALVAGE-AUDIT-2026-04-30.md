@@ -58,17 +58,15 @@
 
 Add a precondition to `.workflow/templates/ORCHESTRATOR-CONTRACT.md`: 01-plan refuses to run if any later phase for that engagement is `DONE` without explicit `--force-replan` plus a written `decisions/replan-<slug>-<date>.md` rationale. Would have prevented the conformance-suite stomp.
 
-## Deferrals discovered during execution
+## Deferrals discovered during execution (all resolved 2026-05-01)
 
-Three issues surfaced while running the salvage that are **out of scope for spec realignment** but worth tracking:
+1. ✅ **`http-transport:05-list-agents-port-migration`** — RESOLVED. New phase shipped; `LivenessStore` removed from `routes.py`; `BackingStore.list_agents()` is canonical across all three adapters.
 
-1. **`http-transport:05-list-agents-port-migration`** (NEW phase, READY) — `04-spec-realignment` shipped 4 of 5 fixes; the `LivenessStore` → `BackingStore` port migration was deferred to a small follow-up phase. Current path works; this is a refactor for canonical port placement.
+2. ✅ **Installer credential plumbing gap** — RESOLVED. Installer now sets `SOX_AGENT_ID_SOURCE: "claude_code_agent_name"` in both `.mcp.json` and `.claude/settings.json` env blocks. `core/mcp_server/server.py` reads the source declaration and resolves agent_id accordingly: when source is `claude_code_agent_name`, `CLAUDE_AGENT_NAME` takes precedence over the legacy `SOX_AGENT_ID` fallback. Test `test_settings_json_mcp_server_env` un-skipped and passing.
 
-2. **Installer credential plumbing gap** — `identity-primitive:05-spec-realignment` moved credential off the tool-call surface (per spec §6) but did not update the Claude Code runtime adapter installer to set `SOX_AGENT_ID_SOURCE` (or equivalent) in MCP server launch params. Test `test_settings_json_mcp_server_env` skipped with TODO. Needs a small follow-up to wire the installer ↔ server.py credential read path.
+3. ✅ **Installer hook schema drift** — RESOLVED. Tests updated to traverse Claude Code's actual nested hook schema `{matcher, hooks: [{type, command}]}` instead of asserting a flat `{command}` shape. Installer was always writing the correct shape; only the tests were stale. Both `test_settings_json_hooks_point_to_scripts` and `test_idempotent_settings_no_duplicate_hooks` un-skipped and passing.
 
-3. **Installer hook schema drift** — `test_settings_json_hooks_point_to_scripts` and `test_idempotent_settings_no_duplicate_hooks` skipped: hook entries written by the installer no longer carry a top-level `command` key (likely nested under a sub-list per Claude Code's evolving hook schema). Pre-existing drift, unrelated to spec churn.
-
-4. **`conformance-suite:03-harness-and-fixture-fixes`** (NEW phase, READY) — strict-mode result after 02-build was 30/2/27 (pass/fail/skip). 2 fails are pre-existing capture-substitution bugs in original threading fixtures; 27 skips are gated on harness features and the now-landed sibling phases. Filed as follow-up.
+4. ✅ **`conformance-suite:03-harness-and-fixture-fixes`** — RESOLVED. Strict-mode runner exits 0 with 32 pass / 0 fail / 27 skip / 59 total. The 27 skips are intentional `pending: true` fixtures gated on post-v1 features; they self-document their gating feature and will un-skip automatically as features land. Tracked under `Implementation — post-v1` in `TODO.md`.
 
 ## Architecture gap discovered (filed post-v1)
 

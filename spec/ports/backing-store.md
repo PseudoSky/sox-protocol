@@ -107,6 +107,28 @@ An asynchronous generator (or equivalent in the target language) that yields new
 
 ---
 
+## 2.6 Schema versioning and migrations
+
+Adapters MUST expose a `schema_version` class attribute declaring the persisted-data shape they target. The version is a dotted string (e.g. `"1.1"`); a strictly increasing tuple comparison defines ordering.
+
+**Required behaviour on `initialize()`:**
+
+1. Adapters with a non-trivial on-disk schema (e.g. SQL stores) MUST detect the persisted version of an existing datastore and migrate it forward to the adapter's `schema_version` before serving any other operation.
+2. The persisted version MUST be recorded inside the datastore itself (e.g. in a metadata table for SQL stores). An untracked existing datastore — one written by a release predating the metadata mechanism — MUST be detected via a structural marker (e.g. presence of a known column) and treated as the earliest known migration source rather than as a fresh database.
+3. A datastore whose persisted version is **strictly greater** than the adapter's `schema_version` MUST cause `initialize()` to fail with a clear error. Adapters MUST NOT attempt to silently downgrade a datastore.
+4. Migrations MUST be idempotent: re-running `initialize()` on an already-migrated datastore is a no-op.
+5. Migrations within a major version MUST be additive only (new tables, new columns with defaults, new indices). Destructive migrations (column removal, table renaming, semantic changes) require a major-version bump and an explicit operator-run upgrade tool — they MUST NOT be performed automatically by `initialize()`.
+6. Each migration step MUST run in a single transaction; the persisted version is updated only on commit. A mid-migration crash MUST leave the datastore in its pre-migration state.
+
+**Adapter latitude:**
+
+- Stores with shape-tolerant persistence (filesystem JSON files, in-memory dicts) MAY hold the default `schema_version` and treat `initialize()` as schema-only — *provided* their read paths handle missing fields gracefully (returning defaults rather than raising).
+- Adapters with non-SQL backends (e.g. Postgres, KV stores) MAY use any backend-native migration mechanism, but the contract above is binding regardless of mechanism.
+
+**Reference implementation:** `packages/python/src/sox_protocol/adapters/backing_stores/sqlite/migration_runner.py` — versioned `.sql` migration files, `_sox_meta` tracking table, structural-marker detection, fail-fast on downgrade.
+
+---
+
 ## 3. Atomicity Requirements
 
 These requirements are normative and apply to all backing-store implementations regardless of backend technology.

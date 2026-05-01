@@ -82,7 +82,7 @@ class SqliteStore(BackingStore):
         msg_id, sent_at, seq = await store.send("ticket:X", "agent-a", {"text": "hi"})
     """
 
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
     def __init__(
         self,
@@ -107,11 +107,25 @@ class SqliteStore(BackingStore):
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Open the database connection and apply the schema.
+        """Open the database connection, apply the schema, and migrate forward.
 
-        Must be called before any other method.  Idempotent — safe to call
-        multiple times (schema uses ``CREATE TABLE IF NOT EXISTS``).
+        Idempotent — safe to call multiple times.  Lifecycle:
+
+        1. Open the connection (creating parent dirs as needed).
+        2. Apply ``schema.sql`` with ``CREATE TABLE IF NOT EXISTS`` so a
+           fresh database is initialized to the *current* shape.
+        3. Run the migration runner to bring an *existing* database
+           forward to ``schema_version``.  See
+           :mod:`.migration_runner` for the migration discipline.
+
+        The migration runner is the only safe way to upgrade an existing
+        deployment's database in-place; ``schema.sql`` alone cannot
+        retrofit columns onto pre-existing rows.
         """
+        from sox_protocol.adapters.backing_stores.sqlite.migration_runner import (
+            migrate,
+        )
+
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)
         self._conn.row_factory = aiosqlite.Row
@@ -120,10 +134,14 @@ class SqliteStore(BackingStore):
         # Enforce foreign-key constraints (not strictly required here but
         # good practice for future schema additions).
         await self._conn.execute("PRAGMA foreign_keys=ON")
-        # Apply the schema (idempotent via IF NOT EXISTS).
+        # Apply the schema (idempotent via IF NOT EXISTS) — produces the
+        # current shape for fresh databases.
         schema_sql = _load_schema()
         await self._conn.executescript(schema_sql)
         await self._conn.commit()
+        # Migrate any pre-existing database forward.  No-op if already at
+        # ``schema_version`` or if the database is fresh.
+        await migrate(self._conn, self.schema_version)
 
     async def close(self) -> None:
         """Close the database connection cleanly."""

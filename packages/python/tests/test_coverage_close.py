@@ -166,6 +166,27 @@ async def test_store_terminal_noop_branch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_server_resolves_agent_id_from_claude_code_agent_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """server.py:230 — when SOX_AGENT_ID_SOURCE=claude_code_agent_name,
+    the server prefers CLAUDE_AGENT_NAME over SOX_AGENT_ID.
+
+    Spec ref: spec/ports/identity.md §6 (credential lives on connection seam).
+    """
+    monkeypatch.setenv("SOX_AGENT_ID_SOURCE", "claude_code_agent_name")
+    monkeypatch.setenv("CLAUDE_AGENT_NAME", "agent-from-claude")
+    monkeypatch.setenv("SOX_AGENT_ID", "agent-from-sox-fallback")
+    monkeypatch.setenv("SOX_BACKING_STORE", f"sqlite:///{tmp_path}/lifespan.db")
+
+    from sox_protocol.core.mcp_server.server import create_server
+
+    mcp = create_server()
+    async with mcp._lifespan(mcp) as lc:  # type: ignore[attr-defined]
+        assert lc["agent_id"] == "agent-from-claude"
+
+
+@pytest.mark.asyncio
 async def test_store_dispatch_channels_collect_path() -> None:
     """store_dispatch.py lines 182-183: channels_collect drains and seq-stamps messages."""
     store = MemoryStore()

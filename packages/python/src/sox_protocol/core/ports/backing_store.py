@@ -50,12 +50,21 @@ class BackingStore(ABC):
     (``spec/ports/backing-store.md §2``).
 
     Class attribute:
-        schema_version: The protocol version this binding targets.  Adapters
-            that target a different version MUST override this attribute and
-            document the deviation.
+        schema_version: The persisted-data shape version this adapter targets.
+            Adapters with a non-trivial on-disk schema (e.g. SQLite) MUST run
+            forward migrations on ``initialize()`` to bring an existing
+            datastore up to this version.  Adapters whose state is ephemeral
+            (memory) or shape-tolerant (filesystem JSON files) MAY hold the
+            default and treat ``initialize()`` as schema-only.
+
+            Bumping ``schema_version`` is REQUIRED whenever the adapter's
+            persisted shape changes in a way that an older deployment's
+            datastore could not satisfy.  Bumps are additive within a major
+            version (1.x); destructive changes require a major-version bump
+            and an operator-run upgrade tool (no auto-downgrade ever).
     """
 
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
 
     # ------------------------------------------------------------------
     # Required methods — spec/ports/backing-store.md §2
