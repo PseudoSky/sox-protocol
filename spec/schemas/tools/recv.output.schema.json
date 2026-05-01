@@ -2,21 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/recv.output.schema.json",
   "title": "channels__recv — output",
-  "description": "Output schema for the channels__recv MCP tool. Returns messages accumulated since the last drain, marked as delivered to this agent atomically. Defined in CONTRACTS.md §5.2.",
+  "description": "Output schema for the channels__recv MCP tool. Returns messages accumulated since the last drain, marked as delivered to this agent atomically. Messages are returned in per-channel seq order (ascending seq within each channel). Cross-channel order within a single response is unspecified. Each element conforms to spec/schemas/message.schema.json (inlined here for standalone schema compilation). Normative reference: spec/protocol.md and spec/ports/backing-store.md §2.2 and §3.2.",
   "type": "object",
   "required": ["drained_at", "messages"],
   "additionalProperties": false,
   "properties": {
     "drained_at": {
       "type": "number",
-      "description": "Unix epoch seconds (floating point) at which this drain operation completed in the backing store."
+      "description": "Unix epoch seconds (floating-point) at which this drain operation completed in the backing store."
     },
     "messages": {
       "type": "array",
-      "description": "Ordered list of messages drained. Within each channel, messages are in send-time order (ascending sent_at). Across channels, order is unspecified. Each element conforms to spec/schemas/message.schema.json (inlined here for standalone schema compilation).",
+      "description": "Ordered list of messages drained. Empty array is valid when the mailbox is empty. Within each channel, messages are in ascending seq order. Across channels, order is unspecified. Each element conforms to the full wire envelope defined in spec/schemas/message.schema.json.",
       "items": {
         "type": "object",
-        "required": ["channel", "sender", "body", "sent_at", "message_id"],
+        "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
         "additionalProperties": false,
         "properties": {
           "channel": {
@@ -27,26 +27,61 @@
           "sender": {
             "type": "string",
             "minLength": 1,
-            "description": "agent_id of the agent that sent the message."
+            "description": "agent_id of the agent that sent the message. Server-certified: bound from the verified connection identity, not self-reported by the client."
           },
           "body": {
             "type": "object",
-            "description": "Opaque message payload. See CONTRACTS.md §9 for recommended field conventions.",
+            "description": "Opaque message payload. See send.input.schema.json for advisory field conventions and spec/envelopes/ for reserved body types.",
             "additionalProperties": true
           },
           "correlation_id": {
             "type": ["string", "null"],
             "maxLength": 128,
-            "description": "Optional correlation token. Null if not supplied by the sender."
+            "description": "Caller-supplied correlation token echoed verbatim from the send call. Null if the sender did not supply one."
           },
           "sent_at": {
             "type": "number",
-            "description": "Unix epoch seconds at which the backing store accepted the message."
+            "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. Retained for backward compatibility; seq is the authoritative ordering key."
           },
           "message_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Backing-store-assigned unique identifier for this message."
+            "description": "Backing-store-assigned unique identifier for this message. Use as reply_to when replying, or as the reference in channels__ack calls."
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Per-channel monotone sequence number. Authoritative ordering key within a channel. Use as the 'since' cursor in subsequent replay queries. See docs/decisions/seq-ordering-scope.md."
+          },
+          "ts": {
+            "type": ["integer", "null"],
+            "description": "Server-assigned monotonic nanosecond timestamp. Advisory tiebreaker for cross-channel display ordering. Not globally total-ordered in multi-node or federated deployments. May be null if the server does not support nanosecond timestamps. See docs/decisions/seq-ordering-scope.md."
+          },
+          "reply_to": {
+            "type": ["string", "null"],
+            "description": "message_id of the parent message in a thread, or null if this message is not a reply. When thread_depth > 0 was requested on recv, ancestor envelopes are inlined in the 'ancestors' field. See docs/decisions/threading-depth.md."
+          },
+          "delivered_to": {
+            "type": ["array", "null"],
+            "items": { "type": "string", "minLength": 1 },
+            "description": "List of agent_ids that have recv'd this message. Server-populated. Used for deadlock detection wait-graph computation (SHOULD-implement). May be null if the server does not track delivery sets. See docs/decisions/deadlock-detection-approach.md."
+          },
+          "origin_server": {
+            "type": ["string", "null"],
+            "description": "server_id in federated deployments. Always null in v1.0 single-server deployments. Reserved for federated v2. See docs/decisions/federation-scope.md."
+          },
+          "ancestors": {
+            "type": ["array", "null"],
+            "description": "Inline ancestor envelopes when thread_depth > 0 was requested. Ordered from immediate parent (index 0) to furthest ancestor. Null when thread_depth=0 (the default). Each element is a message object with the same shape as items in this array (minus 'ancestors' to avoid infinite nesting).",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "_meta": {
+            "type": ["object", "null"],
+            "description": "Observability metadata. Present when include_meta=true (default); absent when include_meta=false. Shape: {trace_id: string, middleware_timings: string[], server_node_id: string}. See docs/decisions/observability-meta-mode.md.",
+            "additionalProperties": true
           }
         }
       }
@@ -66,11 +101,23 @@
           "body": {
             "type": "clarification_request",
             "subject": "Which schema version?",
-            "question": "v2 or v3?"
+            "question": "Target v2 or v3?",
+            "urgency": "normal"
           },
           "correlation_id": "req-001",
           "sent_at": 1714300000.0,
-          "message_id": "msg-0000001"
+          "message_id": "msg-0000001",
+          "seq": 1,
+          "ts": 1714300000000000000,
+          "reply_to": null,
+          "delivered_to": ["agent-beta"],
+          "origin_server": null,
+          "ancestors": null,
+          "_meta": {
+            "trace_id": "trace-abc123",
+            "middleware_timings": ["auth:2ms", "schema_validator:1ms"],
+            "server_node_id": "node-1"
+          }
         }
       ]
     }

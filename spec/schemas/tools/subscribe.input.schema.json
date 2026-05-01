@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/subscribe.input.schema.json",
   "title": "channels__subscribe — input",
-  "description": "Input schema for the channels__subscribe MCP tool. Registers the calling agent's interest in channels matching a pattern. Subscription persists for the agent's lifetime in the backing store. Defined in CONTRACTS.md §5.3.",
+  "description": "Input schema for the channels__subscribe MCP tool. Registers the calling agent's interest in channels matching a pattern. Subscription persists for the agent's lifetime in the backing store. Normative reference: spec/protocol.md and spec/ports/backing-store.md §2.3.",
   "type": "object",
   "required": ["pattern"],
   "additionalProperties": false,
@@ -11,7 +11,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
-      "description": "Channel name pattern. Supports '*' glob wildcard (e.g. 'ticket:ENGI-*' matches 'ticket:ENGI-0001', 'ticket:ENGI-0042', etc.) and exact match (e.g. 'agent:agent-beta'). Pattern matching semantics follow Unix glob rules applied to the full channel name string."
+      "description": "Channel name pattern. Supports '*' glob wildcard (e.g. 'ticket:ENGI-*' matches 'ticket:ENGI-0001', 'ticket:ENGI-0042', etc.) and exact match (e.g. 'ticket:ENGI-0042'). Pattern matching semantics follow Unix glob rules applied to the full channel name string. Glob patterns matching reserved prefixes 'dm/' and 'group/' are rejected by the server — these namespaces require explicit channel names or group lifecycle verbs. Exact-match subscriptions to a specific 'dm/<pair>' or 'group/<id>' channel are permitted for members. See docs/decisions/dm-semantics.md and docs/decisions/groups-model.md."
     }
   },
   "examples": [
@@ -23,6 +23,9 @@
     },
     {
       "pattern": "broadcast:*"
+    },
+    {
+      "pattern": "dm/agent-alpha~agent-beta"
     }
   ]
 }

@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/list-channels.output.schema.json",
   "title": "channels__list_channels — output",
-  "description": "Output schema for the channels__list_channels MCP tool. Returns all channels with at least one subscriber or at least one message stored in the last 24 hours, plus the protocol version of the serving MCP node. This is also the mechanism by which adapters detect protocol version mismatches. Defined in CONTRACTS.md §5.4.",
+  "description": "Output schema for the channels__list_channels MCP tool. Returns all channels with at least one subscriber or at least one message in the backing store's retention window (default: last 24 hours). The mandatory '_sox_protocol' block carries version negotiation metadata — clients MUST read it on first call and fail-fast if their supported version range does not intersect with the server's. Normative reference: spec/protocol.md and docs/decisions/version-negotiation-mechanism.md.",
   "type": "object",
-  "required": ["channels", "protocol_version"],
+  "required": ["channels", "_sox_protocol"],
   "additionalProperties": false,
   "properties": {
     "channels": {
       "type": "array",
-      "description": "List of discoverable channels.",
+      "description": "List of discoverable channels. An empty array means no channels are currently active.",
       "items": {
         "type": "object",
         "required": ["name", "subscriber_count"],
@@ -28,15 +28,37 @@
         }
       }
     },
-    "protocol_version": {
-      "type": "string",
-      "description": "Protocol version advertised by this MCP server node (e.g. '1.0'). Runtime adapters MUST compare the MAJOR component against their own and refuse to operate on a MAJOR mismatch per CONTRACTS.md §8."
+    "_sox_protocol": {
+      "type": "object",
+      "required": ["server_version", "supported_versions", "min_client_version"],
+      "additionalProperties": false,
+      "description": "Mandatory version negotiation block. MUST be present on every list_channels response. Clients MUST read this on first call and fail-fast if their supported version range does not intersect with the server's. If a client skips list_channels, it assumes the latest server version at its own risk. See docs/decisions/version-negotiation-mechanism.md.",
+      "properties": {
+        "server_version": {
+          "type": "string",
+          "description": "The protocol version this server implements (semver-like, e.g. '1.0'). Semver-formatted: MAJOR.MINOR."
+        },
+        "supported_versions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "All protocol versions this server can speak. Clients check for intersection with their own supported range. An empty intersection MUST cause the client to refuse to operate."
+        },
+        "min_client_version": {
+          "type": "string",
+          "description": "The minimum client protocol version this server will accept. Clients below this version MUST NOT proceed."
+        }
+      }
     }
   },
   "examples": [
     {
       "channels": [],
-      "protocol_version": "1.0"
+      "_sox_protocol": {
+        "server_version": "1.0",
+        "supported_versions": ["1.0"],
+        "min_client_version": "1.0"
+      }
     },
     {
       "channels": [
@@ -47,9 +69,21 @@
         {
           "name": "broadcast:status",
           "subscriber_count": 5
+        },
+        {
+          "name": "group/security-team",
+          "subscriber_count": 3
+        },
+        {
+          "name": "dm/agent-alpha~agent-beta",
+          "subscriber_count": 2
         }
       ],
-      "protocol_version": "1.0"
+      "_sox_protocol": {
+        "server_version": "1.0",
+        "supported_versions": ["1.0"],
+        "min_client_version": "1.0"
+      }
     }
   ]
 }

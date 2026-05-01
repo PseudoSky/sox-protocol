@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/send.input.schema.json",
   "title": "channels__send — input",
-  "description": "Input schema for the channels__send MCP tool. The tool is non-blocking: it returns as soon as the message is durably accepted by the backing store. Defined in CONTRACTS.md §5.1.",
+  "description": "Input schema for the channels__send MCP tool. The tool is non-blocking: it returns as soon as the message is durably accepted by the backing store. Normative reference: spec/protocol.md and spec/ports/backing-store.md §2.1.",
   "type": "object",
   "required": ["channel", "body"],
   "additionalProperties": false,
@@ -11,17 +11,28 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 256,
-      "description": "Name of the channel to send the message to. Examples: 'ticket:ENGI-0042', 'agent:agent-beta', 'broadcast:status'."
+      "description": "Name of the target channel. Reserved prefixes enforce server-side access control: 'dm/<sorted-pair>' for direct messages (server-enforced two-party channels; only the two named agents may subscribe or send; wildcard subscription on this prefix is rejected); 'group/<group-id>' for managed group channels (server-enforced membership; only current members may subscribe or send; wildcard subscription on this prefix is rejected); 'sox/' for server-emitted derived channels (agents cannot write to sox/ channels). See docs/decisions/dm-semantics.md and docs/decisions/groups-model.md. Recommended conventions for open channels: 'ticket:<id>', 'broadcast:<topic>', 'thread:<parent-message-id>'."
     },
     "body": {
       "type": "object",
-      "description": "Opaque message payload. MUST be a JSON object. See CONTRACTS.md §9 for recommended field conventions.",
+      "description": "Opaque message payload. MUST be a JSON object. SOX does not inspect or validate the body beyond requiring it to be an object. Recommended advisory fields: 'type' (string), 'subject' (string), 'context' (string), 'question' (string), 'answer' (string), 'urgency' (one of low/normal/high). Reserved body types with normative schemas: 'sox-error' (spec/envelopes/sox-error.schema.json), 'sox-invite' (spec/envelopes/sox-invite.schema.json).",
       "additionalProperties": true
     },
     "correlation_id": {
       "type": ["string", "null"],
       "maxLength": 128,
-      "description": "Optional correlation token supplied by the caller for request-reply matching or at-least-once deduplication. Stored verbatim and echoed back in recv output."
+      "description": "Optional caller-supplied correlation token. Stored verbatim and echoed back in recv output. Use for: request-reply pairing, thread anchoring. The protocol does not enforce uniqueness. Null when not needed."
+    },
+    "reply_to": {
+      "type": ["string", "null"],
+      "description": "Optional message_id of the message this message is replying to. Used for threading (combined with thread_depth on recv) and deadlock wait-graph computation. Null if this message is not a reply. See docs/decisions/threading-depth.md and docs/decisions/deadlock-detection-approach.md.",
+      "default": null
+    },
+    "idempotency_key": {
+      "type": ["string", "null"],
+      "maxLength": 256,
+      "description": "Optional caller-supplied idempotency key. The server deduplicates sends with the same key within the configured TTL window (default 24 hours). A duplicate send returns the original message_id and sent_at without re-persisting. Callers MUST NOT rely on dedup beyond the TTL. Null disables idempotency for this send. See docs/decisions/idempotency-ttl.md.",
+      "default": null
     }
   },
   "examples": [
@@ -29,18 +40,35 @@
       "channel": "ticket:ENGI-0042",
       "body": {
         "type": "clarification_request",
-        "subject": "Which schema version?",
-        "question": "The task mentions v2 but production is v3. Which do I target?"
+        "subject": "Which schema version to target?",
+        "context": "Implementing the auth migration. The task spec mentions v2 but production shows v3.",
+        "question": "Should I target schema v2 or v3?",
+        "urgency": "normal"
       },
-      "correlation_id": "req-001"
+      "correlation_id": "req-001",
+      "reply_to": null,
+      "idempotency_key": "agent-alpha:req-001:2026-04-30"
     },
     {
       "channel": "broadcast:status",
       "body": {
         "type": "status_update",
-        "subject": "PR #42 open for review"
+        "subject": "Auth rewrite complete",
+        "context": "PR #42 is open for review."
       },
-      "correlation_id": null
+      "correlation_id": null,
+      "reply_to": null,
+      "idempotency_key": null
+    },
+    {
+      "channel": "dm/agent-alpha~agent-beta",
+      "body": {
+        "type": "clarification_reply",
+        "answer": "Target schema v3."
+      },
+      "correlation_id": "req-001",
+      "reply_to": "msg-0000001",
+      "idempotency_key": null
     }
   ]
 }

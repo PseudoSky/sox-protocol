@@ -24,9 +24,10 @@ The language implementation maintained in this repo as the canonical worked exam
 
 The canonical, language-neutral artefact in `spec/`. Contains:
 
-- `spec/schemas/` — JSON Schema files for `Event`, `Decision`, `Policy`, `State`, `Message`, and the four MCP tool inputs/outputs.
+- `spec/schemas/` — JSON Schema files for the enforcer internals (`Event`, `Decision`, `Policy`, `State`) and the canonical wire envelope (`Message`), plus MCP tool I/O schemas under `spec/schemas/tools/` for the stdio MCP binding. For the full 15-operation schema surface, see `spec/operations/`. Both directories are kept in sync and are each authoritative for their respective binding.
+- `spec/operations/` — adapter-neutral JSON Schema files for all 15 v1 operations. Used by the HTTP transport and conformance suite.
 - `spec/discipline/` — the markdown discipline document with stable section anchors and `{{placeholder}}` tool-name tokens, plus worked examples.
-- `spec/ports/` — port behaviour contracts in prose (`backing-store.md`, `runtime-discipline-renderer.md`, `runtime-enforcer-binding.md`).
+- `spec/ports/` — port behaviour contracts in prose (`backing-store.md`, `transport.md`, `identity.md`, `middleware.md`, `runtime-discipline-renderer.md`, `runtime-enforcer-binding.md`).
 - `spec/conformance/` — language-neutral test harness with JSON scenario files.
 
 The spec is the protocol. Implementations consume from `spec/` and conform to it.
@@ -132,7 +133,7 @@ Anthropic-originated, industry-standard protocol for exposing tools to LLM agent
 
 ## Message
 
-A unit of communication in SOX. Has fields: `channel`, `sender`, `body` (opaque JSON object), optional `correlation_id`, `sent_at` (timestamp), `message_id` (unique). Defined in [CONTRACTS §5.2](./CONTRACTS.md#52-channels__recv).
+A unit of communication in SOX. Wire envelope fields: `channel`, `sender`, `body` (opaque JSON object), `sent_at` (timestamp), `message_id` (unique), `seq` (per-channel monotone counter, authoritative ordering key), plus optional `correlation_id`, `ts` (advisory nanosecond timestamp), `reply_to` (thread parent), `delivered_to` (delivery tracking for deadlock detection), `origin_server` (null in v1.0, reserved for federation), `_meta` (observability metadata). Normative definition: `spec/schemas/message.schema.json` and `spec/protocol.md §Message envelope shape`.
 
 ## Non-blocking
 

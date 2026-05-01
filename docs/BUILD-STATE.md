@@ -79,7 +79,7 @@ Repeat until a termination condition is met:
      - "100% line coverage on decide.py" → `cd packages/python && pytest tests/unit/test_decide.py --cov=src/sox_protocol/core/enforcer/decide --cov-fail-under=100`
      - "mypy --strict passes" → `cd packages/python && mypy --strict src/sox_protocol/core/`
      - "Import-linter green" → `cd packages/python && lint-imports`
-     - "<file> exists" → `test -f <file>`
+     - "`<file>` exists" → `test -f <file>`
    - Run each via Bash. Capture pass/fail.
 6. **Branch on verification result:**
    - **All pass:** mark the phase `DONE` in the status table; promote phases listed in the phase's `M<N> next state` from `BLOCKED` to `READY`; stage all new/changed files (`git add -A`); commit with `feat(M<N>): <one-line summary of deliverables>`. Loop back to step 1.
@@ -371,11 +371,11 @@ Concrete tasks:
 
 1. packages/python/src/sox_protocol/core/mcp_server/server.py — FastMCP-based server. Reads SOX_BACKING_STORE env var (sqlite://path / file://path / memory://). Reads SOX_AGENT_ID. Validates tool input/output against spec/schemas/tools/*.schema.json at startup (fail-fast on schema drift between code and spec).
 2. packages/python/src/sox_protocol/core/mcp_server/listener.py — asyncio.create_task at startup. Subscribes to BackingStore.watch() for the agent's mailbox. Buffers messages in an asyncio.Queue. The listener is the push-receive layer; it must not block tool calls.
-3. packages/python/src/sox_protocol/core/mcp_server/tools.py — the four MCP tools registered with FastMCP:
+3. packages/python/src/sox_protocol/core/mcp_server/tools.py — the core MCP tools registered with FastMCP (see spec/protocol.md for the full 15-operation surface):
    - channels__send: per CONTRACTS.md §5.1
    - channels__recv: per §5.2 (drains the local buffer, returns immediately even if empty; non-blocking)
    - channels__subscribe: per §5.3
-   - channels__list_channels: per §5.4 (must include protocol_version: "1.0")
+   - channels__list_channels: per §5.4 (must include _sox_protocol block with server_version, supported_versions, min_client_version — NOT a flat protocol_version string; see spec/schemas/tools/list-channels.output.schema.json)
 4. Both stdio and HTTP transports supported (FastMCP gives both); default to stdio. HTTP transport selection via SOX_MCP_TRANSPORT=http.
 5. packages/python/tests/integration/test_mcp_server_e2e.py — spawns the server in a subprocess, connects with an MCP client (FastMCP's test client or mcp-python-sdk). Scenarios:
    - Single agent: send → recv round-trip with the same MCP server.
@@ -399,7 +399,7 @@ Report: pytest output for integration; tree of files added.
 
 ### M3 exit criteria
 
-- [ ] All four MCP tools registered and functional.
+- [ ] Core MCP tools registered and functional (channels__send, channels__recv, channels__subscribe, channels__list_channels). Full 15-operation surface defined in spec/protocol.md.
 - [ ] Listener push-receive working; bench-test buffers ≥100 messages.
 - [ ] Two-server-one-store fan-out works.
 - [ ] Tool outputs validate against `spec/schemas/tools/`.
@@ -507,7 +507,7 @@ Concrete tasks:
 
 4. packages/python/src/sox_protocol/adapters/runtimes/claude_code/skill/SKILL.md.template — frontmatter + body placeholder. The body is filled at install time with the rendered discipline.
 
-5. packages/python/src/sox_protocol/cli.py — `python -m sox_protocol verify` command that reports config health: backing store reachable, MCP server registered in .claude/settings.json, hooks installed, skill present, all four MCP tools surfaced.
+5. packages/python/src/sox_protocol/cli.py — `python -m sox_protocol verify` command that reports config health: backing store reachable, MCP server registered in .claude/settings.json, hooks installed, skill present, core MCP tools surfaced (channels__send, channels__recv, channels__subscribe, channels__list_channels).
 
 6. packages/python/tests/adapters/runtimes/test_claude_code_install.py — uses a tmp_path fixture to simulate a fresh Claude Code project. Run install. Assert: SKILL.md exists with proper frontmatter and substituted placeholders; hooks exist and are executable; settings.json updated correctly; running install again is idempotent.
 

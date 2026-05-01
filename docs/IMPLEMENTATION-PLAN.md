@@ -133,7 +133,7 @@ These rules give a clean three-tier topology: spec → package core → package 
 
 Each language package consumes the spec in three ways:
 
-1. **Build-time codegen** from `spec/schemas/*.schema.json` to language-native types (Python dataclasses via `datamodel-code-generator`; TypeScript types via `json-schema-to-typescript`; Rust types via `schemars` or hand-written + tested for equivalence).
+1. **Build-time codegen** from `spec/schemas/*.schema.json` to language-native types (Python dataclasses via `datamodel-code-generator`; TypeScript types via `json-schema-to-typescript`; Rust types via `schemars` or hand-written + tested for equivalence). Note: `spec/schemas/tools/` contains the MCP stdio binding schemas; `spec/operations/` contains adapter-neutral schemas for all 15 v1 operations used by the HTTP transport and conformance suite. Both directories are authoritative for their respective binding and are kept in sync.
 2. **Install-time templating** from `spec/discipline/discipline.md` — the runtime adapter's installer reads the canonical discipline and substitutes `{{placeholder}}` tokens with concrete tool names.
 3. **Runtime conformance** — at CI time, the package's conformance runner spins up its MCP server and runs `spec/conformance/scenarios/*.json` against it.
 
@@ -168,7 +168,7 @@ Each milestone has clear acceptance criteria. Milestones are sequential where de
 **Deliverables:**
 
 - `spec/VERSION` = `1.0`.
-- `spec/schemas/` — JSON Schema files for `Event`, `Decision`, `Policy`, `State`, `Message`, and the four MCP tool inputs/outputs.
+- `spec/schemas/` — JSON Schema files for `Event`, `Decision`, `Policy`, `State`, `Message` (canonical wire envelope), and the MCP stdio tool I/O schemas under `spec/schemas/tools/`. `spec/operations/` contains adapter-neutral schemas for all 15 v1 operations (HTTP transport and conformance suite binding).
 - `spec/discipline/discipline.md` with the stable section anchors per [CONTRACTS §2](./CONTRACTS.md#2-discipline-document-structure) and `{{placeholder}}` tool-name tokens. (Worked examples in `spec/discipline/examples/` land at Milestone 4.)
 - `spec/ports/backing-store.md` — port behaviour contract in prose (atomicity, ordering, delivery semantics — no language binding).
 - `spec/ports/runtime-discipline-renderer.md`, `spec/ports/runtime-enforcer-binding.md` — same shape for the runtime-side ports.
@@ -261,9 +261,9 @@ CREATE TABLE subscriptions (
 
 **Deliverables:**
 
-- `packages/python/src/sox_protocol/core/mcp_server/server.py` — FastMCP server registering the four tools. Tool input/output schemas validated against `spec/schemas/tools/*.schema.json` at startup (fail-fast on schema drift).
+- `packages/python/src/sox_protocol/core/mcp_server/server.py` — FastMCP server registering the core MCP tools. Tool input/output schemas validated against `spec/schemas/tools/*.schema.json` at startup (fail-fast on schema drift). The full v1 operation surface (15 operations) is defined in `spec/protocol.md`.
 - `packages/python/src/sox_protocol/core/mcp_server/listener.py` — `asyncio.create_task` at startup; subscribes to backing store via `BackingStore.watch`; buffers messages locally per subscribed channel.
-- `packages/python/src/sox_protocol/core/mcp_server/tools.py` — the four tools. Behaviour matches `spec/schemas/tools/*.schema.json` and the contracts in [CONTRACTS.md §5](./CONTRACTS.md#5-mcp-tool-surface).
+- `packages/python/src/sox_protocol/core/mcp_server/tools.py` — the core MCP tools. Behaviour matches `spec/schemas/tools/*.schema.json` (MCP stdio binding) and the contracts in [CONTRACTS.md §5](./CONTRACTS.md#5-mcp-tool-surface). Send output includes `seq` and `backpressure`; recv output messages include `seq`, `ts`, `reply_to`, `delivered_to`, `origin_server`, `_meta`; list_channels output includes `_sox_protocol` block (not flat `protocol_version` string).
 - Configuration via env vars: `SOX_BACKING_STORE` (`sqlite://...` / `file://...` / `memory://`), `SOX_AGENT_ID`.
 - Both stdio and HTTP transports supported (FastMCP gives both; default to stdio).
 
@@ -458,7 +458,7 @@ The `claude-agents` SOX system in this repository will exercise the protocol end
   - **Minor** (1.0 → 1.1): backward-compatible additions (new optional fields, new tools).
   - **Major** (1.0 → 2.0): breaking change to wire / behaviour.
 - Adapters declare which protocol version they target.
-- The MCP server announces its protocol version in `channels__list_channels()` response metadata so adapters can detect mismatches.
+- The MCP server announces its protocol version in the `_sox_protocol` block of `channels__list_channels()` responses (`server_version`, `supported_versions`, `min_client_version`). Adapters MUST read this on first call and fail-fast on version mismatch.
 
 ---
 

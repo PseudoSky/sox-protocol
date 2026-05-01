@@ -2,39 +2,71 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/message.schema.json",
   "title": "Message",
-  "description": "A single message element as returned in the 'messages' array of the channels__recv tool output (CONTRACTS.md §5.2). This is the wire representation of a stored message delivered to a receiving agent.",
+  "description": "Canonical wire envelope for a single SOX message. This is the authoritative schema for the stored and delivered message shape. See spec/protocol.md §Message envelope shape for normative field semantics. Implementations that inline this schema (e.g. recv.output.schema.json) MUST match this definition exactly.",
   "type": "object",
-  "required": ["channel", "sender", "body", "sent_at", "message_id"],
+  "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
   "additionalProperties": false,
   "properties": {
     "channel": {
       "type": "string",
       "minLength": 1,
-      "description": "Name of the channel this message was sent to."
+      "description": "Name of the channel this message was sent to. Reserved prefixes: 'dm/<sorted-pair>' (server-enforced two-party), 'group/<group-id>' (server-enforced membership), 'sox/' (server-emitted derived channels, agents cannot write)."
     },
     "sender": {
       "type": "string",
       "minLength": 1,
-      "description": "agent_id of the agent that sent the message."
+      "description": "agent_id of the agent that sent the message. Server-certified: bound from the verified connection identity, not self-reported by the client. In federated v2 deployments, takes the form '<server-id>/<agent-id>'; in v1.0 single-server deployments, a bare agent-id string."
     },
     "body": {
       "type": "object",
-      "description": "Opaque message payload. SOX places no constraints on the body shape beyond it being a JSON object. See CONTRACTS.md §9 for recommended reserved field names (type, subject, context, question, answer, urgency).",
+      "description": "Opaque message payload. MUST be a JSON object. SOX does not inspect or validate the body beyond requiring it to be an object. Recommended advisory fields: 'type' (string), 'subject' (string), 'context' (string), 'question' (string), 'answer' (string), 'urgency' (one of low/normal/high). Reserved body types with normative schemas: 'sox-error' (spec/envelopes/sox-error.schema.json), 'sox-invite' (spec/envelopes/sox-invite.schema.json).",
       "additionalProperties": true
     },
     "correlation_id": {
       "type": ["string", "null"],
       "maxLength": 128,
-      "description": "Optional caller-supplied correlation token for request-reply matching or at-least-once deduplication. Null if the sender did not supply one."
+      "description": "Optional caller-supplied correlation token. Stored verbatim and echoed back in recv output. Use for: request-reply pairing, thread anchoring. The protocol does not enforce uniqueness. Null when not needed."
     },
     "sent_at": {
       "type": "number",
-      "description": "Unix epoch seconds (floating point) at which the message was accepted by the backing store."
+      "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. Retained for backward compatibility; seq is the authoritative ordering key within a channel."
     },
     "message_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Backing-store-assigned unique identifier for this message."
+      "description": "Backing-store-assigned unique identifier for this message. Use as reply_to when replying, or as the reference in channels__ack calls."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Per-channel monotone counter starting at 1. Authoritative ordering key within a channel. Used as the cursor for replay (since parameter). Assigned by the server; never set by the sender. See docs/decisions/seq-ordering-scope.md."
+    },
+    "ts": {
+      "type": ["integer", "null"],
+      "description": "Server-assigned monotonic nanosecond timestamp. Advisory tiebreaker for cross-channel display ordering. NOT globally total-ordered in multi-node or federated deployments. Null if the server does not support nanosecond timestamps. See docs/decisions/seq-ordering-scope.md."
+    },
+    "reply_to": {
+      "type": ["string", "null"],
+      "description": "message_id of the parent message in a thread. Null if this message is not a reply. Set by the sender via send input. Used for thread expansion (thread_depth on recv) and wait-graph computation for deadlock detection. See docs/decisions/threading-depth.md."
+    },
+    "delivered_to": {
+      "type": ["array", "null"],
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Agent IDs that have recv'd this message. Populated by the server as agents drain their mailbox. Used for deadlock detection wait-graph computation at query time. Null if the server has not yet delivered this message to any agent, or if the server does not implement delivered_to tracking (SHOULD-implement feature). See docs/decisions/deadlock-detection-approach.md."
+    },
+    "origin_server": {
+      "type": ["string", "null"],
+      "description": "Server ID in federated deployments. Always null in single-server v1.0 deployments. Reserved for federated v2 where agent identities take the form '<server-id>/<agent-id>'. See docs/decisions/federation-scope.md."
+    },
+    "_meta": {
+      "type": ["object", "null"],
+      "description": "Optional observability metadata. Present when include_meta is true (default) on the recv call. Absent when include_meta is false. See docs/decisions/observability-meta-mode.md.",
+      "additionalProperties": true,
+      "properties": {
+        "trace_id": { "type": "string" },
+        "middleware_timings": { "type": "array", "items": { "type": "string" } },
+        "server_node_id": { "type": "string" }
+      }
     }
   },
   "examples": [
@@ -49,7 +81,13 @@
       },
       "correlation_id": "req-001",
       "sent_at": 1714300000.0,
-      "message_id": "msg-0000001"
+      "message_id": "msg-0000001",
+      "seq": 1,
+      "ts": 1714300000000000000,
+      "reply_to": null,
+      "delivered_to": null,
+      "origin_server": null,
+      "_meta": null
     },
     {
       "channel": "broadcast:status",
@@ -61,7 +99,34 @@
       },
       "correlation_id": null,
       "sent_at": 1714300200.0,
-      "message_id": "msg-0000002"
+      "message_id": "msg-0000002",
+      "seq": 2,
+      "ts": 1714300200000000000,
+      "reply_to": null,
+      "delivered_to": ["agent-alpha"],
+      "origin_server": null,
+      "_meta": {
+        "trace_id": "trace-abc123",
+        "middleware_timings": ["auth:2ms", "schema_validator:1ms"],
+        "server_node_id": "node-1"
+      }
+    },
+    {
+      "channel": "dm/agent-alpha~agent-beta",
+      "sender": "agent-beta",
+      "body": {
+        "type": "clarification_reply",
+        "answer": "Target schema v3."
+      },
+      "correlation_id": "req-001",
+      "sent_at": 1714300300.0,
+      "message_id": "msg-0000003",
+      "seq": 1,
+      "ts": 1714300300000000000,
+      "reply_to": "msg-0000001",
+      "delivered_to": null,
+      "origin_server": null,
+      "_meta": null
     }
   ]
 }

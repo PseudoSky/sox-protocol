@@ -2,25 +2,69 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/send.output.schema.json",
   "title": "channels__send — output",
-  "description": "Output schema for the channels__send MCP tool. Returned as soon as the message is durably accepted by the backing store. Defined in CONTRACTS.md §5.1.",
+  "description": "Output schema for the channels__send MCP tool. Returned as soon as the message is durably accepted by the backing store. A successful response guarantees the message is immediately visible to all matching watch loops and subsequent recv calls (backing-store send-atomicity contract). Normative reference: spec/protocol.md and spec/ports/backing-store.md §2.1.",
   "type": "object",
-  "required": ["sent_at", "message_id"],
+  "required": ["sent_at", "message_id", "seq", "backpressure"],
   "additionalProperties": false,
   "properties": {
     "sent_at": {
       "type": "number",
-      "description": "Unix epoch seconds (floating point) at which the backing store accepted the message. This is the canonical sent_at timestamp echoed back in recv output."
+      "description": "Unix epoch seconds (floating-point) at which the backing store accepted the message. Retained for backward compatibility; seq is the authoritative ordering key within a channel."
     },
     "message_id": {
       "type": "string",
       "minLength": 1,
-      "description": "Backing-store-assigned unique identifier for the message just sent."
+      "description": "Backing-store-assigned unique identifier for the message just sent. Use this as the reply_to value for threaded replies, or as the reference in channels__ack calls."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The per-channel sequence number assigned to this message by the server. Per-channel monotone counter starting at 1. Use as the since cursor for replay. See docs/decisions/seq-ordering-scope.md."
+    },
+    "backpressure": {
+      "type": "object",
+      "description": "Advisory backpressure signal for the target channel. Always present regardless of backpressure_mode. Senders SHOULD use this to self-throttle in advisory mode. In enforced mode (backpressure_mode: enforced on the channel), the server returns BACKPRESSURE_OVER_LIMIT error instead of a successful response when state is 'over'. See docs/decisions/backpressure-model.md.",
+      "required": ["queue_depth", "threshold", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "queue_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Current number of undelivered messages in the target channel queue."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Configured queue depth threshold above which state transitions to warn or over. Default: 1000. Per-channel override is configurable."
+        },
+        "state": {
+          "type": "string",
+          "enum": ["ok", "warn", "over"],
+          "description": "Server-computed backpressure state. ok: below threshold. warn: approaching threshold. over: at or above threshold. In enforced backpressure_mode, over causes a BACKPRESSURE_OVER_LIMIT error instead of this response."
+        }
+      }
     }
   },
   "examples": [
     {
       "sent_at": 1714300000.0,
-      "message_id": "msg-0000001"
+      "message_id": "msg-0000001",
+      "seq": 1,
+      "backpressure": {
+        "queue_depth": 0,
+        "threshold": 1000,
+        "state": "ok"
+      }
+    },
+    {
+      "sent_at": 1714300042.815,
+      "message_id": "01HX5Q3YNZJ4KRTMFDBQ8WVCEG",
+      "seq": 142,
+      "backpressure": {
+        "queue_depth": 823,
+        "threshold": 1000,
+        "state": "warn"
+      }
     }
   ]
 }

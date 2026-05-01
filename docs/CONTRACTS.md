@@ -2,12 +2,15 @@
 
 This document is the human-readable narrative of the contracts. The **canonical, machine-readable artefacts live in `spec/`** in the repo root:
 
-- JSON Schema files in `spec/schemas/` are the authoritative wire definitions.
+- JSON Schema files in `spec/schemas/` are the authoritative wire definitions for the enforcer internals (`Event`, `Decision`, `Policy`, `State`) and for the MCP stdio tool I/O (`spec/schemas/tools/`).
+- JSON Schema files in `spec/operations/` are the authoritative wire definitions for the HTTP transport binding and conformance suite. Both `spec/schemas/tools/` and `spec/operations/` are kept in sync and are each authoritative for their respective binding.
 - Port behaviour contracts in `spec/ports/*.md` are authoritative for atomicity, ordering, and delivery semantics.
 - The discipline document at `spec/discipline/discipline.md` is the canonical content rendered by every runtime adapter.
 - The conformance test harness in `spec/conformance/` is the verification authority for compliance.
 
 This document mirrors those artefacts in narrative form. **If this document and `spec/` disagree, `spec/` wins.**
+
+> **Note:** The inline schemas in §5 of this document are simplified illustrative excerpts. For normative schemas including all v1 fields (`seq`, `ts`, `reply_to`, `delivered_to`, `origin_server`, `_meta`, `backpressure`, `thread_depth`, `include_meta`, `idempotency_key`, `_sox_protocol` block), see `spec/schemas/tools/` and `spec/operations/`.
 
 **Protocol version:** `1.0` (v0 — pre-implementation; subject to revision before first release).
 
@@ -226,33 +229,48 @@ Policies are loaded from `${SOX_CONFIG_DIR}/policy.toml` if present, falling bac
 
 ## 5. MCP tool surface
 
-The SOX MCP server exposes exactly four tools at protocol version 1.0. Tool names and JSON schemas are normative.
+The SOX MCP server exposes 15 operations at protocol version 1.0 (see `spec/protocol.md` for the full operation table). The four core messaging tools (`channels__send`, `channels__recv`, `channels__subscribe`, `channels__list_channels`) plus `channels__ack`, `channels__heartbeat`, `replay`, `channels__collect` (planned), and the group lifecycle and agent discovery tools. Tool names and JSON schemas are normative; see `spec/schemas/tools/` (MCP stdio binding) and `spec/operations/` (HTTP transport and conformance suite).
 
 ### 5.1 `channels__send`
 
-**Input schema:**
+**Input schema (illustrative — normative schema: `spec/schemas/tools/send.input.schema.json`):**
 
 ```json
 {
   "type": "object",
   "required": ["channel", "body"],
   "properties": {
-    "channel": {"type": "string", "minLength": 1, "maxLength": 256},
+    "channel": {"type": "string", "minLength": 1, "maxLength": 256,
+      "description": "Reserved prefixes: dm/<sorted-pair>, group/<group-id>, sox/ (read-only)"},
     "body": {"type": "object"},
-    "correlation_id": {"type": ["string", "null"], "maxLength": 128}
+    "correlation_id": {"type": ["string", "null"], "maxLength": 128},
+    "reply_to": {"type": ["string", "null"],
+      "description": "message_id of parent message for threading and deadlock wait-graph"},
+    "idempotency_key": {"type": ["string", "null"], "maxLength": 256,
+      "description": "Deduplication key; server dedupes within configured TTL (default 24h)"}
   }
 }
 ```
 
-**Output schema:**
+**Output schema (illustrative — normative schema: `spec/schemas/tools/send.output.schema.json`):**
 
 ```json
 {
   "type": "object",
-  "required": ["sent_at", "message_id"],
+  "required": ["sent_at", "message_id", "seq", "backpressure"],
   "properties": {
     "sent_at": {"type": "number"},
-    "message_id": {"type": "string"}
+    "message_id": {"type": "string"},
+    "seq": {"type": "integer", "minimum": 1,
+      "description": "Per-channel monotone sequence number. Use as since cursor for replay."},
+    "backpressure": {"type": "object",
+      "required": ["queue_depth", "threshold", "state"],
+      "properties": {
+        "queue_depth": {"type": "integer", "minimum": 0},
+        "threshold": {"type": "integer", "minimum": 1},
+        "state": {"type": "string", "enum": ["ok", "warn", "over"]}
+      }
+    }
   }
 }
 ```
@@ -261,19 +279,23 @@ The SOX MCP server exposes exactly four tools at protocol version 1.0. Tool name
 
 ### 5.2 `channels__recv`
 
-**Input schema:**
+**Input schema (illustrative — normative schema: `spec/schemas/tools/recv.input.schema.json`):**
 
 ```json
 {
   "type": "object",
   "properties": {
     "channels": {"type": ["array", "null"], "items": {"type": "string"}},
-    "max_messages": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50}
+    "max_messages": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50},
+    "thread_depth": {"type": "integer", "minimum": -1, "default": 0,
+      "description": "0: reply_to IDs only. n>0: inline n ancestor envelopes. -1: full chain (server cap: 50)."},
+    "include_meta": {"type": "boolean", "default": true,
+      "description": "When true, each message includes a _meta observability object."}
   }
 }
 ```
 
-**Output schema:**
+**Output schema (illustrative — normative schema: `spec/schemas/tools/recv.output.schema.json`):**
 
 ```json
 {
@@ -285,14 +307,24 @@ The SOX MCP server exposes exactly four tools at protocol version 1.0. Tool name
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["channel", "sender", "body", "sent_at", "message_id"],
+        "required": ["channel", "sender", "body", "sent_at", "message_id", "seq"],
         "properties": {
           "channel": {"type": "string"},
           "sender": {"type": "string"},
           "body": {"type": "object"},
           "correlation_id": {"type": ["string", "null"]},
           "sent_at": {"type": "number"},
-          "message_id": {"type": "string"}
+          "message_id": {"type": "string"},
+          "seq": {"type": "integer", "minimum": 1,
+            "description": "Per-channel monotone counter. Authoritative ordering key."},
+          "ts": {"type": ["integer", "null"],
+            "description": "Advisory nanosecond timestamp. Not globally total-ordered."},
+          "reply_to": {"type": ["string", "null"]},
+          "delivered_to": {"type": ["array", "null"], "items": {"type": "string"}},
+          "origin_server": {"type": ["string", "null"],
+            "description": "Always null in v1.0 single-server deployments."},
+          "_meta": {"type": ["object", "null"],
+            "description": "Observability metadata. Present when include_meta=true."}
         }
       }
     }
@@ -334,12 +366,12 @@ The SOX MCP server exposes exactly four tools at protocol version 1.0. Tool name
 
 **Input schema:** `{}`
 
-**Output schema:**
+**Output schema (illustrative — normative schema: `spec/schemas/tools/list-channels.output.schema.json`):**
 
 ```json
 {
   "type": "object",
-  "required": ["channels", "protocol_version"],
+  "required": ["channels", "_sox_protocol"],
   "properties": {
     "channels": {
       "type": "array",
@@ -352,12 +384,21 @@ The SOX MCP server exposes exactly four tools at protocol version 1.0. Tool name
         }
       }
     },
-    "protocol_version": {"type": "string"}
+    "_sox_protocol": {
+      "type": "object",
+      "required": ["server_version", "supported_versions", "min_client_version"],
+      "description": "Version negotiation block. Clients MUST read this on first call and fail-fast if their supported version range does not intersect.",
+      "properties": {
+        "server_version": {"type": "string"},
+        "supported_versions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "min_client_version": {"type": "string"}
+      }
+    }
   }
 }
 ```
 
-**Semantics:** discovery. Returns all channels with at least one subscriber or one stored message in the last 24 hours.
+**Semantics:** discovery and version negotiation. Returns all channels with at least one subscriber or one stored message in the last 24 hours, plus the mandatory `_sox_protocol` version block. Clients MUST call this first and verify version compatibility before proceeding.
 
 ---
 
@@ -532,12 +573,17 @@ A SOX-conformant backing-store adapter for backend `B` MUST:
 - Schemas declare `schema_version` as a string `MAJOR.MINOR`.
 - A `MINOR` bump is backward-compatible: implementations of vN.M MUST accept inputs from vN.(≤M).
 - A `MAJOR` bump is a breaking change: implementations MUST refuse cross-major interaction and return a clear error.
-- The MCP server reports its protocol version in `channels__list_channels()`.
+- The MCP server reports its protocol version in the `_sox_protocol` block of `channels__list_channels()` responses (fields: `server_version`, `supported_versions`, `min_client_version`). The old flat `protocol_version` string is replaced by this structured block.
 - Adapters MUST refuse to install against an MCP server with a different `MAJOR` version.
+- Clients MUST call `channels__list_channels` on first connection and fail-fast if their supported version range does not intersect with `supported_versions`.
 
 ---
 
-## 9. Reserved field-name conventions for `body`
+## 9. Wire envelope
+
+The canonical wire envelope for a stored/delivered SOX message is defined in `spec/schemas/message.schema.json` and `spec/protocol.md §Message envelope shape`. Required fields: `channel`, `sender`, `body`, `sent_at`, `message_id`, `seq`. Optional fields: `correlation_id`, `ts`, `reply_to`, `delivered_to`, `origin_server`, `_meta`. See those normative sources for full field semantics.
+
+## 9a. Reserved field-name conventions for `body`
 
 The `body` of a message is opaque to SOX, but the discipline document recommends a small set of reserved top-level field names so receivers can dispatch on them:
 

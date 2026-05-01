@@ -34,6 +34,23 @@ The transport MUST:
 
 All messages sent over the transport MUST be serialised as JSON. The JSON representation of a message envelope MUST conform to `spec/schemas/message.schema.json`.
 
+The full wire envelope field set (see `spec/schemas/message.schema.json` and `spec/protocol.md §Message envelope shape`):
+
+| Field | Type | Assigned by | Notes |
+|---|---|---|---|
+| `channel` | string | Sender | Target channel name. Reserved prefixes: `dm/`, `group/`, `sox/`. |
+| `sender` | string | Server | Server-certified agent_id. |
+| `body` | object | Sender | Opaque JSON payload. |
+| `correlation_id` | string\|null | Sender | Optional request-reply token. |
+| `sent_at` | number | Server | Unix epoch seconds (float). |
+| `message_id` | string | Server | Backing-store-assigned unique ID. |
+| `seq` | integer ≥ 1 | Server | Per-channel monotone counter. Authoritative ordering key. Replay cursor (`since`). |
+| `ts` | integer\|null | Server | Monotonic nanosecond timestamp. Advisory cross-channel display tiebreaker. Not globally total-ordered. |
+| `reply_to` | string\|null | Sender | `message_id` of parent in thread. Null if not a reply. Used with `thread_depth` on recv and for deadlock wait-graph. |
+| `delivered_to` | string[]\|null | Server | Agent IDs that have recv'd this message. Used for deadlock detection. SHOULD-implement. |
+| `origin_server` | string\|null | Server | Server ID in federated deployments. Always null in v1.0 single-server. |
+| `_meta` | object\|null | Server | Observability metadata. Present when `include_meta=true` (default). Contains `trace_id`, `middleware_timings`, `server_node_id`. |
+
 Implementations MAY use a more efficient wire encoding (e.g. MessagePack) for performance, provided:
 
 - The backing store endpoint supports that encoding.
@@ -116,7 +133,8 @@ A transport implementation is conformant when:
 - [ ] The `watch` stream resumes (or re-subscribes) after reconnection.
 - [ ] Outbound buffer overflow is surfaced as an error.
 - [ ] Shutdown is clean; no resource leaks.
-- [ ] All messages serialise and deserialise conformantly against `spec/schemas/message.schema.json`.
+- [ ] All messages serialise and deserialise conformantly against `spec/schemas/message.schema.json` (including all fields: `seq`, `ts`, `reply_to`, `delivered_to`, `origin_server`, `_meta`).
+- [ ] `list_channels` responses include the `_sox_protocol` block (not a flat `protocol_version` string). See `spec/schemas/tools/list-channels.output.schema.json`.
 - [ ] HTTP binding: CORS preflight is handled; origin allow-list is configurable; localhost is in the default allow-list.
 - [ ] HTTP binding: `channels__collect` is served via SSE or long-poll (or documented degraded mode).
 - [ ] Stdio binding: `channels__collect` blocks via asyncio (no extra transport needed).

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/tools/recv.input.schema.json",
   "title": "channels__recv — input",
-  "description": "Input schema for the channels__recv MCP tool. The tool is non-blocking: it returns immediately with whatever messages have accumulated since the last drain. Defined in CONTRACTS.md §5.2.",
+  "description": "Input schema for the channels__recv MCP tool. The tool is non-blocking: it returns immediately with whatever messages have accumulated since the last drain. An empty result is always valid. Calling with no arguments drains all subscribed channels. Normative reference: spec/protocol.md and spec/ports/backing-store.md §2.2.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -12,25 +12,46 @@
         "type": "string",
         "minLength": 1
       },
-      "description": "Optional list of channel names to drain. When null (or omitted), all channels the calling agent is subscribed to are drained."
+      "description": "Optional list of channel names to drain. When null (or omitted), all channels the calling agent is subscribed to are drained. When provided, only messages from the listed channels are returned; messages from other channels remain in the mailbox."
     },
     "max_messages": {
       "type": "integer",
       "minimum": 1,
       "maximum": 1000,
       "default": 50,
-      "description": "Maximum number of messages to return in a single call. Oldest messages (by sent_at, per-channel) are returned first up to this limit."
+      "description": "Maximum number of messages to return in a single call. Within each channel, the oldest messages (lowest seq) are returned first up to this limit. Default: 50."
+    },
+    "thread_depth": {
+      "type": "integer",
+      "minimum": -1,
+      "default": 0,
+      "description": "Controls inline ancestor expansion for threaded messages. 0 (default): return only reply_to message IDs, no inline expansion. n (positive integer): inline up to n ancestor envelopes per message. -1: inline the full ancestor chain. Server applies a max-depth cap (default 50 levels). Agents choose the depth per-call to balance context token cost vs. thread visibility. See docs/decisions/threading-depth.md."
+    },
+    "include_meta": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true (default), each returned message carries a '_meta' object with trace_id, middleware_timings, and server_node_id. When false, '_meta' is omitted from all returned messages. Per-request value overrides the server-level deployment default. See docs/decisions/observability-meta-mode.md."
     }
   },
   "examples": [
     {},
     {
       "channels": null,
-      "max_messages": 50
+      "max_messages": 50,
+      "thread_depth": 0,
+      "include_meta": true
     },
     {
       "channels": ["ticket:ENGI-0042"],
-      "max_messages": 10
+      "max_messages": 10,
+      "thread_depth": 3,
+      "include_meta": false
+    },
+    {
+      "channels": ["dm/agent-alpha~agent-beta"],
+      "max_messages": 100,
+      "thread_depth": -1,
+      "include_meta": true
     }
   ]
 }
