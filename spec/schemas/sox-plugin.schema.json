@@ -62,7 +62,7 @@
           "type": "string",
           "description": "SOX plugin-protocol version range this plugin is compatible with. The host evaluates this at startup and refuses to load the plugin if its own protocol version falls outside the declared range (boot-time hard-reject; lazy refusal is forbidden per ADR 0004 decision 3). Two wire forms are accepted: (1) PEP 440 specifier form (primary, canonical): '>=1.0,<2.0', '~=1.0', '>=1.0.0', '==1.0.0'; (2) npm semver range form (informative-but-supported): '^1.0.0', '~1.0.0', '>=1.0.0', '1.0.x', '1.x'. A plain version pin ('1.0.0') is accepted as an exact match. Empty string is rejected. Pre-release markers: PEP 440 form '1.0.0a1', equivalent npm form '1.0.0-alpha.1'. Refusal envelope shape: {error_code: 'plugin_protocol_version_mismatch', plugin_id, plugin_declares, host_supports, remediation}.",
           "minLength": 1,
-          "oneOf": [
+          "anyOf": [
             {
               "description": "PEP 440 specifier form: one or more comma-separated version clauses. Each clause is an operator (==, !=, <=, >=, <, >, ~=) followed by a version. Also accepts a bare version pin (e.g. '1.0.0') as an implicit == clause.",
               "pattern": "^(~=|==|!=|<=|>=|<|>)?\\s*[0-9]+(\\.[0-9A-Za-z*]+)*(\\.[*])?(\\s*,\\s*(~=|==|!=|<=|>=|<|>)\\s*[0-9]+(\\.[0-9A-Za-z*]+)*)*$"

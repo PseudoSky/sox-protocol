@@ -17,8 +17,8 @@ supersedes: plugin-manifest-spec (split into B1 contract-freeze + B2 spec-polish
 | 01-adr | Draft ADR 0004 — plugin architecture (4-kind 2-axis taxonomy; manifest envelope; versioning; supply-chain stance; v1 limitations including no-hot-reload) | `DONE` | architect-reviewer | 1 | 2026-05-01T15:00:00Z |
 | 02-manifest-schema | Author `spec/schemas/sox-plugin.schema.json` (Backstage-style apiVersion/kind/metadata/spec envelope) + ADR cross-reference | `DONE` | api-designer | 1 | 2026-05-01T15:00:00Z |
 | 03-plugin-contract | Author `spec/ports/middleware/03-plugin-contract.md` — kind taxonomy normative semantics, failure-semantics-per-kind, must_run_before/after topological-sort algorithm with cycle detection, allowlist requirement | `DONE` | api-designer | 1 | 2026-05-01T16:30:00Z |
-| 04-versioning | Author `spec/ports/middleware/06-versioning.md` — PEP 440 wire form, semver range semantics, boot-time refusal envelope shape | `BLOCKED` | api-designer | 0 | 2026-05-01T15:00:00Z |
-| 05-review | Architectural review for cross-language portability (Python + TS without language-specific magic) | `BLOCKED` | architect-reviewer | 0 | 2026-05-01T15:00:00Z |
+| 04-versioning | Author `spec/ports/middleware/06-versioning.md` — PEP 440 wire form, semver range semantics, boot-time refusal envelope shape | `DONE` | api-designer | 1 | 2026-05-01T15:00:00Z |
+| 05-review | Architectural review for cross-language portability (Python + TS without language-specific magic) | `DONE` | architect-reviewer | 1 | 2026-05-01T17:30:00Z |
 
 ## Currently next action
 
@@ -60,6 +60,8 @@ supersedes: plugin-manifest-spec (split into B1 contract-freeze + B2 spec-polish
 - 2026-05-01T15:30:00Z 01-adr — DONE (architect-reviewer)
 - 2026-05-01T16:00:00Z 02-manifest-schema — DONE (api-designer)
 - 2026-05-01T16:30:00Z 03-plugin-contract — DONE (api-designer)
+- 2026-05-01T17:00:00Z 04-versioning — DONE (api-designer)
+- 2026-05-01T17:30:00Z 05-review — DONE (architect-reviewer)
 
 ## Reference
 
