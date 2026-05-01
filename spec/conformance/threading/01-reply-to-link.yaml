@@ -35,8 +35,13 @@ sequence:
       message_id: "{{any_string}}"
       seq: 1
 
-  - id: recv-parent
+  - id: recv-parent-b
     as_agent: agent-thread-b
+    operation: recv
+    input: {}
+
+  - id: recv-parent-self-drain-a
+    as_agent: agent-thread-a
     operation: recv
     input: {}
 
