@@ -1,0 +1,285 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sox-protocol.dev/spec/schemas/sox-plugin.schema.json",
+  "title": "SOX Plugin Manifest",
+  "description": "JSON Schema (draft-07) for the sox-plugin.yaml language-neutral plugin manifest. Adopted from the Backstage catalog-info envelope (apiVersion/kind/metadata/spec). Authoritative reference: docs/adr/0004-plugin-architecture.md. Entry-point hints are intentionally absent from this document — they live in language-specific package metadata (Python pyproject.toml [project.entry-points.'sox_protocol.plugins'], Node package.json#sox). These two layers are deliberately decoupled so the manifest remains language-neutral.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "enum": ["sox.dev/v1"],
+      "description": "Manifest schema version. Fixed at 'sox.dev/v1' for the v1 contract. A future incompatible contract revision uses 'sox.dev/v2'. Never use plain version strings here — the apiVersion+kind pair uniquely identifies the schema, following the Backstage/Kubernetes envelope convention."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["SoxPlugin"],
+      "description": "Resource kind discriminator. Always 'SoxPlugin' for plugin manifests. Reserved for future resource types (e.g. 'SoxPipeline', 'SoxPolicy') that share the same envelope but carry different spec shapes."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Stable identifying metadata for this plugin. Fields here are invariant across versions of the plugin's code — they identify the plugin in the registry and in ordering constraints.",
+      "required": ["id", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$",
+          "description": "Globally unique, stable reverse-DNS plugin identifier. ASCII lowercase only. Dots separate DNS-style namespace segments. Hyphens are allowed within a segment (not at start). Examples: 'org.example.sox-jwt-auth', 'com.myco.rate-limit-redis', 'io.sox.schema-strict'. NFC-normalization is implementation-side; the schema enforces ASCII shape. This id is used as the canonical reference in must_run_before/must_run_after, allowlist configuration, and pipeline_trace records.",
+          "examples": [
+            "org.example.sox-jwt-auth",
+            "com.myco.rate-limit-redis",
+            "io.sox.schema-strict"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$",
+          "description": "Plugin content version. Full SemVer 2.0.0 format (MAJOR.MINOR.PATCH with optional pre-release and build metadata). This is the plugin author's release version, not the protocol version. Examples: '1.2.0', '2.0.0-beta.1', '1.0.0+build.42'.",
+          "examples": ["1.0.0", "1.2.0", "2.0.0-beta.1", "1.0.0+build.42"]
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Optional human-readable name for UI and log display. Does not affect identity or ordering. Not used by the host runtime.",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional human-readable description of what this plugin does. Not used by the host runtime.",
+          "maxLength": 512
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "description": "Plugin contract specification. All fields here are read by the host at startup to validate, order, and configure the plugin in the pipeline.",
+      "required": ["protocol_version", "plugin_kind", "signatures"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "type": "string",
+          "description": "SOX plugin-protocol version range this plugin is compatible with. The host evaluates this at startup and refuses to load the plugin if its own protocol version falls outside the declared range (boot-time hard-reject; lazy refusal is forbidden per ADR 0004 decision 3). Two wire forms are accepted: (1) PEP 440 specifier form (primary, canonical): '>=1.0,<2.0', '~=1.0', '>=1.0.0', '==1.0.0'; (2) npm semver range form (informative-but-supported): '^1.0.0', '~1.0.0', '>=1.0.0', '1.0.x', '1.x'. A plain version pin ('1.0.0') is accepted as an exact match. Empty string is rejected. Pre-release markers: PEP 440 form '1.0.0a1', equivalent npm form '1.0.0-alpha.1'. Refusal envelope shape: {error_code: 'plugin_protocol_version_mismatch', plugin_id, plugin_declares, host_supports, remediation}.",
+          "minLength": 1,
+          "oneOf": [
+            {
+              "description": "PEP 440 specifier form: one or more comma-separated version clauses. Each clause is an operator (==, !=, <=, >=, <, >, ~=) followed by a version. Also accepts a bare version pin (e.g. '1.0.0') as an implicit == clause.",
+              "pattern": "^(~=|==|!=|<=|>=|<|>)?\\s*[0-9]+(\\.[0-9A-Za-z*]+)*(\\.[*])?(\\s*,\\s*(~=|==|!=|<=|>=|<|>)\\s*[0-9]+(\\.[0-9A-Za-z*]+)*)*$"
+            },
+            {
+              "description": "npm semver range form: caret (^), tilde (~), or comparison operators, followed by a semver version. Also accepts wildcard ranges like '1.x', '1.0.x', '*'.",
+              "pattern": "^(\\^|~|>=|<=|>|<|=)?\\s*[0-9x*]+(\\.[0-9x*]+(\\.[0-9x*]+(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?)?)?$"
+            }
+          ],
+          "examples": [
+            ">=1.0,<2.0",
+            "~=1.0",
+            "==1.0.0",
+            "^1.0.0",
+            "~1.0.0",
+            "1.x",
+            "1.0.0"
+          ]
+        },
+        "plugin_kind": {
+          "type": "string",
+          "enum": ["interceptor", "transformer", "provider", "hook"],
+          "description": "Taxonomy kind for this plugin. Two axes: wire-axis ('interceptor': async (ctx, next) -> response; 'transformer': async (ctx) -> ctx') and lifecycle-axis ('provider': factory with on_startup/on_shutdown; 'hook': observation-only, async (immutable_ctx) -> None | HookDecision). The former 'guard' concept maps to kind='interceptor' with may_short_circuit=true, observe_only=false. See ADR 0004 decision 1 and §7.8.1."
+        },
+        "plugin_capabilities": {
+          "type": "array",
+          "description": "Declared capability flags and capability strings for this plugin. Each element is an object with exactly one key. Reserved boolean flags (interceptor-only): 'observe_only' and 'may_short_circuit'. Capability strings use dot-namespaced key with a value string: e.g. {\"auth.method\": \"jwt-bearer\"}. ORTHOGONALITY CONSTRAINT (ADR 0004 decision 1, §Q4): observe_only=true and may_short_circuit=true MUST NOT both appear in the same manifest. This combination is a startup plugin_capability_conflict error. JSON Schema's if-then-else below enforces this where expressible; the host MUST also enforce it at runtime. Flag-set cap: 2-4 flags max for v1 to resist monotone growth (NestJS flag-creep lesson).",
+          "items": {
+            "$ref": "#/definitions/capability_item"
+          },
+          "maxItems": 16
+        },
+        "applies_to": {
+          "type": "object",
+          "description": "Optional scope restriction. When absent, the plugin applies to all operations on all transports. When present, the plugin is only invoked for matching operations and/or transports. Irrelevant for lifecycle-axis kinds (provider, hook) whose scope is global startup/shutdown.",
+          "additionalProperties": false,
+          "properties": {
+            "operations": {
+              "type": "array",
+              "description": "Operation names this plugin applies to. Use '*' as the sole element to match all 15 v1 operations. Omit the field (or set to ['*']) to apply to all operations. Named values are the 15 v1 SOX operation names.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "*",
+                  "send",
+                  "recv",
+                  "subscribe",
+                  "unsubscribe",
+                  "list_agents",
+                  "list_channels",
+                  "replay",
+                  "channels_ack",
+                  "channels_collect",
+                  "channels_heartbeat",
+                  "group_create",
+                  "group_invite",
+                  "group_join",
+                  "group_leave",
+                  "group_list_members"
+                ]
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "transports": {
+              "type": "array",
+              "description": "Transport identifiers this plugin applies to. Use '*' as the sole element to match all transports. Named values: 'stdio' (stdin/stdout MCP transport), 'http' (HTTP/SSE MCP transport).",
+              "items": {
+                "type": "string",
+                "enum": ["*", "stdio", "http"]
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            }
+          }
+        },
+        "requires": {
+          "type": "array",
+          "description": "Capability strings or plugin ids that MUST be present in the pipeline before this plugin can be loaded. Prefer capability strings ('auth.method:jwt-bearer') over plugin ids for loose coupling, but plugin ids ('org.example.sox-jwt-auth') are accepted as a fallback. The host raises plugin_not_found at startup if a required capability is missing.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "must_run_before": {
+          "type": "array",
+          "description": "Ordering constraint: this plugin's middleware MUST execute before the listed plugins or capability classes. Values are capability strings or plugin ids. Resolved via stable Kahn topological sort with lexicographic plugin-id tie-break at startup. A cycle among must_run_before/must_run_after constraints is a startup plugin_ordering_cycle error naming all participating ids.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "must_run_after": {
+          "type": "array",
+          "description": "Ordering constraint: this plugin's middleware MUST execute after the listed plugins or capability classes. Values are capability strings or plugin ids. See must_run_before for resolution algorithm and cycle-error semantics.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "config_schema_ref": {
+          "type": "string",
+          "description": "Optional relative path or URL to the JSON Schema file that validates this plugin's runtime configuration (supplied via environment variables SOX_PLUGIN_<ID>_<KEY> in v1; sox.yaml deferred to v1.x). Relative paths are resolved from the directory containing this sox-plugin.yaml file. Example: './config.schema.json'. The host MAY use this schema to validate env-var-derived config at startup.",
+          "minLength": 1,
+          "examples": ["./config.schema.json", "./schemas/plugin-config.schema.json"]
+        },
+        "signatures": {
+          "type": "array",
+          "description": "Reserved field. MUST be present; MAY be an empty array. v1 host enforcement ignores the contents — the allowlist (--allow-plugins ID,...) is the v1 supply-chain gate. v1.x adds optional manifest-hash pinning; v2.0 considers in-band verification. Reserved from v1.0 per OPA bundle precedent: the retrofit cost of adding signing post-launch is high (every plugin must be re-published). An empty array signals 'unsigned, allowlist-gated'.",
+          "items": {
+            "type": "object",
+            "required": ["algorithm", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "algorithm": {
+                "type": "string",
+                "description": "Signature algorithm identifier. Reserved in v1; no normative values defined yet. Example future value: 'sha256-manifest-hash'.",
+                "minLength": 1
+              },
+              "value": {
+                "type": "string",
+                "description": "Signature value, algorithm-specific encoding. Reserved in v1.",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "description": "Orthogonality check: if plugin_kind is 'interceptor' AND plugin_capabilities contains an item with observe_only=true, then may_short_circuit MUST NOT be true in any capability item. This constraint catches the static-inferable conflict at schema-validation time. The host MUST also enforce this at runtime and raise plugin_capability_conflict.",
+        "properties": {
+          "plugin_capabilities": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "required": ["observe_only"],
+              "properties": {
+                "observe_only": { "enum": [true] }
+              }
+            }
+          }
+        },
+        "required": ["plugin_capabilities"]
+      },
+      "then": {
+        "description": "When observe_only=true is present, no capability item may set may_short_circuit=true.",
+        "properties": {
+          "plugin_capabilities": {
+            "type": "array",
+            "items": {
+              "not": {
+                "type": "object",
+                "required": ["may_short_circuit"],
+                "properties": {
+                  "may_short_circuit": { "enum": [true] }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "capability_item": {
+      "type": "object",
+      "description": "A single capability declaration. Each object has exactly one key. Two categories: (1) Reserved boolean flags for interceptor kind: 'observe_only' (boolean) — plugin only observes, never mutates context or short-circuits; 'may_short_circuit' (boolean) — plugin may return a response without calling next(). These flags are only semantically meaningful when plugin_kind='interceptor'; the host SHOULD warn if they appear on other kinds. (2) Capability strings: any other key with a string value, e.g. {\"auth.method\": \"jwt-bearer\"}, {\"rate_limit.backend\": \">=1.0\"}, {\"identity.registry\": \">=1.0\"}. These are the primary mechanism for declaring what a plugin provides or requires. ORTHOGONALITY: observe_only=true and may_short_circuit=true MUST NOT coexist in the same manifest's plugin_capabilities array. Manifests that combine them are invalid and the host MUST raise plugin_capability_conflict at startup. Example of the INVALID combination (do not use): [{\"observe_only\": true}, {\"may_short_circuit\": true}].",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "patternProperties": {
+        "^observe_only$": {
+          "type": "boolean",
+          "description": "Interceptor flag. When true, this plugin promises never to mutate the context or call short-circuit. The host MAY enforce this at runtime. Only meaningful for plugin_kind='interceptor'."
+        },
+        "^may_short_circuit$": {
+          "type": "boolean",
+          "description": "Interceptor flag. When true, this plugin may return a ShortCircuitResponse without calling next(), bypassing the remaining chain. The original 'guard' kind maps to interceptor + may_short_circuit=true + observe_only=false. Only meaningful for plugin_kind='interceptor'."
+        },
+        "^(?!observe_only$|may_short_circuit$).+$": {
+          "type": "string",
+          "description": "Free-form capability string. Key is a dot-namespaced capability name (e.g. 'auth.method', 'rate_limit.backend', 'identity.registry'). Value is a capability descriptor string, often a version range or identifier (e.g. 'jwt-bearer', '>=1.0', 'redis'). Used in 'requires' fields of other plugins to declare dependencies on capabilities rather than specific plugin ids.",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "apiVersion": "sox.dev/v1",
+      "kind": "SoxPlugin",
+      "metadata": {
+        "id": "org.example.sox-jwt-auth",
+        "version": "1.2.0",
+        "display_name": "JWT Auth Interceptor",
+        "description": "Validates Bearer tokens on inbound operations."
+      },
+      "spec": {
+        "protocol_version": ">=1.0,<2.0",
+        "plugin_kind": "interceptor",
+        "plugin_capabilities": [
+          { "auth.method": "jwt-bearer" },
+          { "may_short_circuit": true },
+          { "observe_only": false }
+        ],
+        "applies_to": {
+          "operations": ["send", "recv", "subscribe", "list_agents"],
+          "transports": ["*"]
+        },
+        "requires": ["identity.registry"],
+        "must_run_before": ["persistence.terminal"],
+        "config_schema_ref": "./config.schema.json",
+        "signatures": []
+      }
+    }
+  ]
+}

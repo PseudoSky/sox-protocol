@@ -1,0 +1,53 @@
+# sox-plugin.yaml — sox-plugin-schema-strict
+# Schema-strict transformer. Validates the body of every send operation against
+# the registered body-type schema before the message reaches the backing store.
+# A transformer never calls next() with side-effects — it mutates ctx and returns
+# the modified ctx (or raises, which maps to a validation_failed envelope).
+#
+# Authoritative schema: spec/schemas/sox-plugin.schema.json
+# ADR reference: docs/adr/0004-plugin-architecture.md decision 1 (wire axis: transformer)
+# Planned reference implementation: plugin-spec-polish engagement (P5)
+
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+
+metadata:
+  id: io.sox.schema-strict
+  version: 0.9.0
+  display_name: Schema-Strict Body Validator
+  description: >-
+    Transformer that validates the send operation body against the caller-declared
+    body type schema. If body.type is absent or no schema is registered for it,
+    the message passes through unmodified (permissive-by-default, override via
+    config). If validation fails, raises ValidationError which the host maps to
+    a validation_failed sox-error envelope. References spec/operations/send.input.schema.json
+    for the outer envelope shape; inner body-type schemas are loaded from the
+    plugin's own schema registry at startup.
+
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: transformer
+
+  plugin_capabilities:
+    # Declares the capability so downstream plugins (e.g. audit loggers) can
+    # require that schema validation has already run.
+    - body.validation: strict
+
+  applies_to:
+    # Only intercepts send — that is the only operation with a validatable body.
+    operations:
+      - send
+    transports:
+      - "*"
+
+  # No requires: this transformer has no external capability dependencies.
+  # It loads its own body-type schema registry at startup from config.
+
+  must_run_before:
+    # Must validate before any audit or persistence middleware sees the body.
+    - audit.record
+    - persistence.terminal
+
+  config_schema_ref: ./schema-strict.config.schema.json
+
+  signatures: []

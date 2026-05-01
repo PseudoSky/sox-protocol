@@ -1,0 +1,51 @@
+# sox-plugin.yaml — sox-provider-redis-pool
+# Redis connection-pool provider. Lifecycle-axis plugin: implements on_startup /
+# on_shutdown, no __call__. Provisions a shared Redis connection pool that
+# rate-limiting and persistence middleware consume via the rate_limit.backend
+# capability. Provider startup failure is fail-fast: the host refuses to start
+# if Redis is unreachable (ADR 0004 decision 5).
+#
+# applies_to is intentionally omitted — providers have global lifecycle scope,
+# not per-operation scope. Including applies_to for a provider would be
+# misleading; the host ignores it for lifecycle-axis kinds.
+#
+# Authoritative schema: spec/schemas/sox-plugin.schema.json
+# ADR reference: docs/adr/0004-plugin-architecture.md decision 1 (lifecycle axis: provider)
+
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+
+metadata:
+  id: com.myco.sox-provider-redis-pool
+  version: 2.1.0
+  display_name: Redis Connection Pool Provider
+  description: >-
+    Lifecycle provider that opens a Redis connection pool on startup and
+    registers it under the rate_limit.backend capability. Any plugin declaring
+    requires: [rate_limit.backend] will receive the pool handle via the host
+    dependency-injection mechanism. Pool size and TLS settings are controlled
+    via SOX_PLUGIN_COM_MYCO_SOX_PROVIDER_REDIS_POOL_* environment variables.
+    Graceful shutdown drains in-flight commands before closing connections.
+
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: provider
+
+  plugin_capabilities:
+    # Primary capability advertisement: other plugins requiring a rate-limit
+    # backend reference this capability string, not the plugin id directly.
+    - rate_limit.backend: ">=1.0"
+    # Secondary capability: this pool also satisfies pub/sub backend needs.
+    - pubsub.backend: redis
+
+  # applies_to intentionally absent: providers are global lifecycle scope.
+  # The host ignores applies_to for provider and hook kinds; omitting it here
+  # avoids misleading plugin authors into thinking scope restriction applies.
+
+  # No ordering constraints: providers initialize before wire-axis plugins by
+  # definition (host startup sequence: providers -> interceptors/transformers).
+  # must_run_before / must_run_after are irrelevant for lifecycle-axis kinds.
+
+  config_schema_ref: ./redis-pool.config.schema.json
+
+  signatures: []

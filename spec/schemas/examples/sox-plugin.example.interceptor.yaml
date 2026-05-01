@@ -1,0 +1,72 @@
+# sox-plugin.yaml — sox-plugin-jwt-auth
+# Auth-style interceptor. Validates Bearer JWT tokens on inbound wire operations.
+# Maps to the former "guard" kind: interceptor + may_short_circuit: true + observe_only: false.
+# Runs before any persistence or downstream middleware so unauthenticated requests
+# never reach the store. Requires the identity.registry capability (provided by the
+# sox-provider-identity plugin or equivalent).
+#
+# Authoritative schema: spec/schemas/sox-plugin.schema.json
+# ADR reference: docs/adr/0004-plugin-architecture.md decision 1 + decision 2
+
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+
+metadata:
+  id: org.example.sox-jwt-auth
+  version: 1.2.0
+  display_name: JWT Auth Interceptor
+  description: >-
+    Validates RFC 9068 Bearer JWT tokens on all inbound SOX wire operations.
+    Short-circuits with a 401-equivalent sox-error envelope when the token is
+    absent, expired, or fails signature verification. Emits a pipeline_trace
+    verdict of "denied" on rejection.
+
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: interceptor
+
+  plugin_capabilities:
+    # This plugin declares the auth.method it implements so other plugins can
+    # express a requires: [auth.method:jwt-bearer] dependency without naming
+    # this plugin directly.
+    - auth.method: jwt-bearer
+    # may_short_circuit: true — this plugin may return a ShortCircuitResponse
+    # without calling next(), bypassing the remaining middleware chain.
+    # This is the canonical replacement for the former "guard" kind.
+    - may_short_circuit: true
+    # observe_only: false — explicit declaration; plugin mutates verdicts.
+    # ORTHOGONALITY: may_short_circuit: true + observe_only: true is invalid
+    # (plugin_capability_conflict startup error). These two flags are mutually
+    # exclusive by definition.
+    - observe_only: false
+
+  applies_to:
+    # Auth must gate all inbound message-passing and discovery operations.
+    operations:
+      - send
+      - recv
+      - subscribe
+      - list_agents
+    transports:
+      - "*"
+
+  requires:
+    # Capability string (not plugin id) — loose coupling.
+    # The host must have a plugin providing identity.registry before this
+    # plugin can be loaded.
+    - identity.registry
+
+  must_run_before:
+    # Ensure auth runs before any persistence-terminal middleware.
+    - persistence.terminal
+
+  must_run_after:
+    # Namespace resolution must happen first so the JWT audience claim can
+    # be validated against the resolved agent namespace.
+    - namespace.resolver
+
+  config_schema_ref: ./config.schema.json
+
+  # signatures: reserved per OPA bundle precedent. Empty in v1.
+  # v1.x will add manifest-hash pinning; v2.0 considers in-band verification.
+  signatures: []
