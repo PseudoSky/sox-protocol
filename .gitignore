@@ -5,3 +5,7 @@ __pycache__
 .sox/
 .coverage
 htmlcov/
+
+# Local-only working dirs
+private/
+packages/python/private/

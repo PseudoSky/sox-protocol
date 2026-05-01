@@ -293,6 +293,19 @@
 
 - [ ] Backing store port extended for remote stores — `PostgresStore` adapter as the natural path to multi-process deployments; SQLite remains the single-node default
 
+### adapter framework / runtime composition root
+
+The ports + adapters separation is real (`BackingStore`, `Transport`, `IdentityResolver`, `Middleware` are all defined as protocols/ABCs with multiple concrete implementations) but the *runtime composition layer* that lets a third party drop a new adapter in without forking core is incomplete.
+
+- [ ] **Backing-store registry** — replace the hard-coded `if/elif` URI dispatcher in `core/mcp_server/server.py:_build_store(uri)` with a name → factory registry; register the three built-in schemes (`memory://`, `sqlite://`, `file://`) at module import; expose `register_backing_store(scheme, factory)` for in-process registration; load `sox_protocol.backing_stores` entry points on server boot. Outcome: a third party can `pip install sox-postgres-store` and configure `SOX_BACKING_STORE=postgres://...` without editing core.
+- [ ] **Transport registry** — same pattern for transports. Replace the hard-coded `stdio` / `http` switch in `server.py` with a registry; `sox_protocol.transports` entry-point group; new transports (e.g. WebSocket, gRPC, in-process) shippable as separate packages.
+- [ ] **Middleware autoload** — `MiddlewareRegistry.load_entry_points()` already exists at `core/middleware/registry.py:177` but is never called. Wire it into `default_chain.build_default_chain()` so plugins registered under the `sox_protocol.middleware` entry-point group are discovered automatically.
+- [ ] **Middleware ordering for unlisted plugins** — `registry.assemble(DEFAULT_ORDER)` only includes middlewares whose names are in the hard-coded `DEFAULT_ORDER` tuple. Plugins with fresh names get registered but ignored. Either honor the registry's existing `must_run_before` / `must_run_after` constraints for unlisted names, or expose a way for plugins to extend `DEFAULT_ORDER` at registration time.
+- [ ] **Identity resolver registry** — `create_app(..., identity=...)` accepts an injected resolver but there's no env-var or URI-based selection. Add `SOX_IDENTITY_RESOLVER` plus a registry/entry-point group for parity with backing stores.
+- [ ] **Conformance-test the registries themselves** — add fixtures under `spec/conformance/` that verify (a) registering a new scheme makes it selectable via the env var, (b) entry-point discovery works on a freshly-installed plugin package, (c) collisions on registration raise a clear error.
+
+Cross-reference: identified during the spec-realignment salvage on 2026-04-30; see `.workflow/plans/SALVAGE-AUDIT-2026-04-30.md` for context.
+
 ### rate limiting
 
 - [ ] Per-channel rate limit — channel-level cap to prevent any single channel from being flooded regardless of which agent is sending

@@ -12,13 +12,32 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Port + OpenAPI plan | `READY` | sox-cto-system:planner | 0 | 2026-04-29T00:00:00Z |
-| 02-build | Build adapter + serve subcommand | `BLOCKED` | python-pro | 0 | 2026-04-29T00:00:00Z |
-| 03-conformance | Run conformance against HTTP | `BLOCKED` | test-automator | 0 | 2026-04-29T00:00:00Z |
+| 01-plan | Port + OpenAPI plan | `DONE` | sox-cto-system:planner | 1 | 2026-04-30T17:09:00Z |
+| 02-build | Build adapter + serve subcommand | `DONE` | python-pro | 1 | 2026-04-30T19:00:00Z |
+| 04-spec-realignment | Reconcile shipped HTTP transport with post-2f3d8f3 spec changes (4/5 fixes) | `DONE` | python-pro | 1 | 2026-04-30T22:55:00Z |
+| 05-list-agents-port-migration | Migrate `list_agents` from `LivenessStore` to `BackingStore` port | `DONE` | python-pro | 1 | 2026-04-30T23:25:00Z |
+| 03-conformance | Run conformance against HTTP | `READY` | test-automator | 0 | 2026-04-30T23:25:00Z |
 
 ## Currently next action
 
-`01-plan` is `READY`.
+`03-conformance` is `READY`. Verified at 05 completion: `LivenessStore` removed from `routes.py` (0 refs), `store.list_agents()` wired (1 ref). 882 tests pass; mypy --strict clean (3 sqlite Row-indexing fixes applied post-agent); ruff `--fix` applied 139 auto-fixes (75 line-length warnings remaining are non-blocking).
+
+## Reconciliation note (2026-04-30, 04 partial completion)
+
+`04-spec-realignment` shipped 4 of the 5 audit fixes:
+- ✅ Schema-driven input validation (22 validator references in `routes.py`)
+- ✅ Wildcard subscription rejection (`_wildcard_forbidden` per `spec/operations/subscribe.input.schema.json`)
+- ✅ `backpressure_over_limit` emission in `op_send` (3 references)
+- ✅ `channels_collect` degraded-mode documented (`x-degraded-mode` in `openapi.yaml`, docstring note in `routes.py`)
+- ⏭ `list_agents` → BackingStore migration **deferred to 05** (8 LivenessStore refs + 1 import remain in `routes.py`; this was rated ⚠️ drift in the audit, not a spec violation — current path works)
+
+Side effect: `04-spec-realignment` widened `BackingStore.send()` from 3-tuple to 4-tuple `(message_id, sent_at, seq, BackpressureInfo)` per spec realignment. Two src/ call-site arity mismatches were patched in-flight (`store_dispatch.py`, `mcp_server/tools.py`). Test-side harmonization is in progress (separate fixup agent).
+
+184 HTTP transport tests pass; openapi.yaml validates clean.
+
+## Reconciliation note (2026-04-30, salvage audit)
+
+01-plan and 02-build retroactively marked DONE: code shipped in commit `e4bea36` ("Step 4 — HTTP transport adapter + serve subcommand, 109/109, 90.97% cov") satisfies the original plan, but the spec moved under it (commits `9f3e11e`, `3bdafc2`, `14eb403`, `623ea90`, `ab1c954`). See `.workflow/plans/SALVAGE-AUDIT-2026-04-30.md`.
 
 ## Termination targets
 
