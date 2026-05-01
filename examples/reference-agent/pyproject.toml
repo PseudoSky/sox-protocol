@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+# Isolated example package for the SOX reference agent.
+# Pinned for reproducibility; uses the workspace sox-protocol package.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sox-reference-agent"
+version = "0.0.1"
+description = "SOX Protocol canonical reference agent — teaching-grade copy-paste starting point."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = [
+    # Core SOX SDK — consumed from the workspace path below.
+    "sox-protocol>=0.0.1",
+    # anyio provides cross-runtime async primitives (asyncio back-end used here).
+    "anyio>=4.0.0",
+    # FastMCP is used for in-process client/server wiring in standalone mode.
+    "fastmcp>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "mypy>=1.10.0",
+]
+
+[project.scripts]
+# Installed console script entry point.
+sox-reference-agent = "cli:main"
+
+[tool.hatch.build.targets.wheel]
+# The wheel packages the three source modules directly (no src/ layout).
+packages = ["."]
+
+# ---------------------------------------------------------------------------
+# pytest — asyncio_mode=auto so all async tests run without decorators.
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+# ---------------------------------------------------------------------------
+# mypy — strict mode required by the engagement contract.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
