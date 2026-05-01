@@ -7,23 +7,35 @@ pass/fail with structured diffs.
 
 Targets
 -------
-``packages/python``
-    Runs the Python reference implementation as a subprocess using the stdio
-    MCP transport.  The runner spawns the server, communicates via stdin/stdout
-    using MCP JSON-RPC framing, and polls recv on a 50 ms interval for
-    ``wait_for_stream`` assertions.
+``packages/python`` (default, ``--transport stdio``)
+    Runs the Python reference implementation in-process using a shared
+    MemoryStore.  Each fixture gets a fresh store so state is fully isolated.
+
+``packages/python`` with ``--transport http``
+    Spawns a fresh ``sox serve --transport http`` subprocess per fixture on an
+    ephemeral port, waits for ``/health``, runs the fixture via HTTP POST to
+    ``/v1/ops/<operation>``, then terminates the subprocess.  Each fixture
+    gets an isolated ``memory://`` backing store.
 
 ``http://host:port``
-    Posts to ``/v1/ops/<operation>`` and opens a single SSE connection to
-    ``GET /v1/stream`` per agent at fixture start for ``wait_for_stream``
-    assertions.
+    Posts to ``/v1/ops/<operation>`` with ``X-SOX-Agent-ID`` header.  The
+    caller is responsible for starting and stopping the server.
 
 Usage
 -----
 ::
 
+    # stdio (default, back-compat)
     python3 tools/conformance_runner.py --target packages/python --strict
+
+    # HTTP transport — server spawned automatically per fixture
+    python3 tools/conformance_runner.py --target packages/python \\
+        --transport http --strict
+
+    # HTTP transport — against a pre-started server
     python3 tools/conformance_runner.py --target http://localhost:8765 --strict
+
+    # Filter by category
     python3 tools/conformance_runner.py --target packages/python \\
         --category identity-verification --strict
 
@@ -566,6 +578,123 @@ class HttpTarget:
             return resp.json()
         except Exception as exc:
             return {"_rpc_error": {"message": str(exc)}}
+
+
+class ProcessHttpTarget:
+    """HTTP target that spawns a fresh server subprocess per fixture.
+
+    Each ``start()`` call allocates an ephemeral TCP port, launches
+    ``python -m sox_protocol.cli serve --transport http`` with
+    ``SOX_BACKING_STORE=memory://``, waits up to 10 s for ``/health``, then
+    delegates all ``call_tool`` calls to an inner :class:`HttpTarget`.
+
+    ``stop()`` terminates the subprocess.  State isolation across fixtures is
+    guaranteed by the fresh in-memory store created by each subprocess.
+
+    Args:
+        package_path: Path to ``packages/python`` directory.
+    """
+
+    def __init__(self, package_path: Path) -> None:
+        self._package_path = package_path
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._inner: HttpTarget | None = None
+        self._port: int = 0
+
+    def _find_free_port(self) -> int:
+        """Return an available TCP port on 127.0.0.1."""
+        import socket as _socket
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            return int(s.getsockname()[1])
+
+    def start(self, agent_id: str) -> None:
+        """Spawn the HTTP server and wait for it to be ready.
+
+        Args:
+            agent_id: Unused (identity resolved from per-request header).
+
+        Raises:
+            RuntimeError: If the server does not become ready within 10 s.
+        """
+        self._port = self._find_free_port()
+        env = {
+            **os.environ,
+            "SOX_HTTP_HOST": "127.0.0.1",
+            "SOX_HTTP_PORT": str(self._port),
+            "SOX_BACKING_STORE": "memory://",
+            "PYTHONPATH": str(self._package_path / "src"),
+        }
+        self._proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "sox_protocol.cli",
+                "serve",
+                "--transport",
+                "http",
+                "--port",
+                str(self._port),
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(self._package_path),
+        )
+        # Poll /health until ready (max 10 s)
+        base_url = f"http://127.0.0.1:{self._port}"
+        import urllib.error
+        import urllib.request as _urllib
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self._proc.poll() is not None:
+                stderr_bytes = b""
+                if self._proc.stderr:
+                    stderr_bytes = self._proc.stderr.read(2000)
+                raise RuntimeError(
+                    f"HTTP server exited prematurely (port={self._port}). "
+                    f"stderr: {stderr_bytes.decode(errors='replace')}"
+                )
+            try:
+                _urllib.urlopen(f"{base_url}/health", timeout=1)
+                break
+            except (OSError, urllib.error.URLError):
+                time.sleep(0.1)
+        else:
+            self.stop()
+            raise RuntimeError(
+                f"HTTP server did not become ready on port {self._port} within 10 s"
+            )
+        self._inner = HttpTarget(base_url)
+        self._inner.start(agent_id)
+
+    def stop(self) -> None:
+        """Terminate the HTTP server subprocess and close the HTTP client."""
+        if self._inner is not None:
+            self._inner.stop()
+            self._inner = None
+        if self._proc is not None and self._proc.poll() is None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+
+    def call_tool(self, agent_id: str, operation: str, args: dict[str, Any]) -> Any:
+        """Delegate to the inner :class:`HttpTarget`.
+
+        Args:
+            agent_id: The agent making the call (sent as ``X-SOX-Agent-ID``).
+            operation: SOX operation name.
+            args: Tool input arguments.
+
+        Returns:
+            Parsed JSON response dict.
+        """
+        if self._inner is None:
+            raise RuntimeError("ProcessHttpTarget not started")
+        return self._inner.call_tool(agent_id, operation, args)
 
 
 def _op_to_tool(operation: str) -> str:
@@ -1215,13 +1344,32 @@ def _eval_one_assertion(
 # ---------------------------------------------------------------------------
 
 
-def _make_target(target_str: str) -> StdioTarget | HttpTarget | SharedMemoryTarget:
-    """Construct the appropriate target from the CLI ``--target`` argument."""
+def _make_target(
+    target_str: str,
+    transport: str = "stdio",
+) -> StdioTarget | HttpTarget | SharedMemoryTarget | ProcessHttpTarget:
+    """Construct the appropriate target from the CLI arguments.
+
+    Args:
+        target_str: ``--target`` value — either a filesystem path to
+            ``packages/python`` or an HTTP URL.
+        transport: ``--transport`` value — ``"stdio"`` or ``"http"``.
+            Ignored when *target_str* is already an HTTP URL (the target
+            unambiguously determines the transport in that case).
+
+    Returns:
+        An instantiated target object.
+
+    Raises:
+        ValueError: If *target_str* is a path that does not exist.
+    """
     if target_str.startswith("http://") or target_str.startswith("https://"):
         return HttpTarget(target_str)
     package_path = Path(target_str).resolve()
     if not package_path.exists():
         raise ValueError(f"Target path does not exist: {package_path}")
+    if transport == "http":
+        return ProcessHttpTarget(package_path)
     return SharedMemoryTarget(package_path)
 
 
@@ -1229,6 +1377,7 @@ def run_fixture(
     fixture: Fixture,
     target_str: str,
     strict: bool,
+    transport: str = "stdio",
 ) -> FixtureResult:
     """Run a single fixture against the target.
 
@@ -1236,6 +1385,10 @@ def run_fixture(
         fixture: The fixture to run.
         target_str: Target string (path or URL).
         strict: If True, pending fixtures are skipped.
+        transport: Transport selector — ``"stdio"`` or ``"http"``.  Used when
+            *target_str* is a package path to choose between
+            :class:`SharedMemoryTarget` (stdio) and :class:`ProcessHttpTarget`
+            (http).
 
     Returns:
         A :class:`FixtureResult`.
@@ -1247,7 +1400,7 @@ def run_fixture(
             skipped=True,
         )
 
-    target = _make_target(target_str)
+    target = _make_target(target_str, transport=transport)
     step_results: dict[str, StepResult] = {}
     captures: dict[str, Any] = {}
 
@@ -1413,6 +1566,7 @@ def run(
     target: str,
     fixtures: list[Fixture],
     strict: bool,
+    transport: str = "stdio",
 ) -> RunResult:
     """Run all fixtures and return a :class:`RunResult`.
 
@@ -1420,13 +1574,14 @@ def run(
         target: Target string (path or URL).
         fixtures: List of fixtures to run.
         strict: If True, pending fixtures are skipped.
+        transport: Transport selector — ``"stdio"`` or ``"http"``.
 
     Returns:
         A :class:`RunResult` with per-fixture results.
     """
     result = RunResult()
     for fixture in fixtures:
-        fr = run_fixture(fixture, target, strict)
+        fr = run_fixture(fixture, target, strict, transport=transport)
         result.fixture_results.append(fr)
     return result
 
@@ -1456,6 +1611,18 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Target to test against. Either a path to the Python package "
             "(e.g. packages/python) or an HTTP URL (e.g. http://localhost:8765)."
+        ),
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default="stdio",
+        help=(
+            "Transport to exercise when --target is a package path. "
+            "'stdio' (default) uses the SharedMemoryTarget in-process. "
+            "'http' spawns a fresh 'sox serve --transport http' subprocess "
+            "per fixture on an ephemeral port. "
+            "Ignored when --target is an HTTP URL."
         ),
     )
     parser.add_argument(
@@ -1503,7 +1670,12 @@ def main(argv: list[str] | None = None) -> int:
         print("WARNING: No fixtures found.", file=sys.stderr)
         return 0
 
-    result = run(target=args.target, fixtures=fixtures, strict=args.strict)
+    result = run(
+        target=args.target,
+        fixtures=fixtures,
+        strict=args.strict,
+        transport=args.transport,
+    )
     print(result.report())
     return result.exit_code
 

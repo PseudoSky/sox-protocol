@@ -16,11 +16,36 @@ orchestrator_protocol: v1
 | 02-build | Build adapter + serve subcommand | `DONE` | python-pro | 1 | 2026-04-30T19:00:00Z |
 | 04-spec-realignment | Reconcile shipped HTTP transport with post-2f3d8f3 spec changes (4/5 fixes) | `DONE` | python-pro | 1 | 2026-04-30T22:55:00Z |
 | 05-list-agents-port-migration | Migrate `list_agents` from `LivenessStore` to `BackingStore` port | `DONE` | python-pro | 1 | 2026-04-30T23:25:00Z |
-| 03-conformance | Run conformance against HTTP | `READY` | test-automator | 0 | 2026-04-30T23:25:00Z |
+| 03-conformance | Run conformance against HTTP | `BLOCKED` | test-automator | 1 | 2026-05-01T00:00:00Z |
 
 ## Currently next action
 
-`03-conformance` is `READY`. Verified at 05 completion: `LivenessStore` removed from `routes.py` (0 refs), `store.list_agents()` wired (1 ref). 882 tests pass; mypy --strict clean (3 sqlite Row-indexing fixes applied post-agent); ruff `--fix` applied 139 auto-fixes (75 line-length warnings remaining are non-blocking).
+`03-conformance` is `BLOCKED` on a follow-on engagement (HTTP/middleware bridge). Sub-task progress:
+- ✅ Harness extended: `tools/conformance_runner.py` accepts `--transport stdio|http` (185 added lines, commit-pending). `--transport http` spawns a fresh `sox serve --transport http` subprocess per fixture on an ephemeral port.
+- ✅ stdio regression check: `python3 tools/conformance_runner.py --target packages/python --transport stdio --strict` → 32 passed, 0 failed, 27 skipped (matches baseline).
+- ❌ HTTP target acceptance: `python3 tools/conformance_runner.py --target packages/python --transport http --strict` → 22 passed, **10 failed**, 27 skipped. Divergence is real, not a fixture problem.
+- ❌ CI matrix not enabled: `.github/workflows/conformance.yml` still has `# - python-reference-http` commented; will enable after the bridge engagement closes.
+- ✅ `spec/conformance/README.md` documents the matrix (Method 2 — HTTP target).
+
+### Divergence — root cause (2026-05-01)
+
+The HTTP transport bypasses the core middleware pipeline entirely. `routes.py` calls `_auth_and_body()` (uses `PassthroughIdentityResolver` from `auth.py:47-68` which accepts any non-empty bearer token as agent_id verbatim), then dispatches directly to `BackingStore` methods. This means:
+
+- `AuthMiddleware._IDENTITY_ENFORCED_OPERATIONS` is **never consulted** on the HTTP path
+- No `middleware_timings` in `_meta` for HTTP responses (silently violates `ab1c954` envelope contract)
+- No `IdentityVerifier` cryptographic check on credentials (`PassthroughIdentityResolver` is documented "for development")
+
+10 failing fixtures (8 unique, listed twice for stderr+stdout of conformance harness):
+- `identity-verification/02-unknown-credential-rejected` — HTTP accepts unknown creds (security regression)
+- `groups/01-create-invite-join`, `presence/01-heartbeat-updates-presence-channel`, `replay/01-replay-since-seq`, `replay/02-replay-empty-future-cursor`, `subscription-patterns/02-unsubscribe-discards-queue`, `threading/01-reply-to-link`, `namespace-isolation/02-version-block` — likely cascading from same bridge gap (need per-fixture triage).
+
+### Required follow-on
+
+New engagement (suggested slug: `http-middleware-bridge`) should:
+1. Replace `routes._auth_and_body` direct-store dispatch with a call into `Pipeline.dispatch(operation, input, connection_id, metadata={"_connection_credential": token})` so the same middleware chain (auth, store_dispatch, etc.) runs for both transports.
+2. Wire a real `IdentityVerifier` (not `PassthroughIdentityResolver`) for the HTTP transport.
+3. Re-run conformance — expect 32/0/27 parity with stdio.
+4. Enable the CI matrix entry.
 
 ## Reconciliation note (2026-04-30, 04 partial completion)
 
