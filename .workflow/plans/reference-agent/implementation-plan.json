@@ -4,44 +4,50 @@
     {
       "step": "bootstrap",
       "spec_ref": "spec/protocol.md §bootstrap-sequence, spec/primitives/namespace.md",
-      "operations": ["list_channels", "subscribe", "channels_heartbeat(online)"],
+      "operations": ["list_channels", "subscribe", "channels__heartbeat", "list_agents"],
       "annotation": "PRIMITIVE COVERAGE: namespace. Connect to a named namespace passed via --namespace (default 'reference'); call list_channels first to verify _sox_protocol version compatibility (fail-fast on mismatch); subscribe to ticket:*, dm/<self>~*, sox/presence; emit first heartbeat to register as online. Drain any pre-existing messages from prior sessions before entering main loop."
     },
     {
       "step": "main_loop",
       "spec_ref": "spec/primitives/sequence-numbers.md, spec/primitives/channels.md",
-      "operations": ["recv", "process", "channels_heartbeat(busy)", "channels_ack(processing)"],
+      "operations": ["recv", "send", "channels__heartbeat", "channels__ack"],
       "annotation": "Pull-based drain with cadence; track last seen seq PER CHANNEL in a dict for replay-on-recovery; flip presence to busy while processing a message; on each drained message issue channels_ack(received) immediately, then channels_ack(processing) on entering work."
     },
     {
       "step": "thread_handling",
       "spec_ref": "spec/primitives/threads.md, spec/primitives/sequence-numbers.md",
-      "operations": ["recv with thread_depth=-1", "send with reply_to=parent.message_id"],
+      "operations": ["recv", "send"],
       "annotation": "PRIMITIVE COVERAGE: reply_to threading. Demonstrates the clarification_request → clarification_reply pattern. Use thread_depth=-1 on recv to pull full ancestor chain inline; reply via send with reply_to set to the parent message_id and channel preserved (replies stay on the same channel, not a sub-channel). Showcases the speculative-execute discipline: continue under best-guess assumption, integrate the late-arriving reply non-destructively."
     },
     {
       "step": "ack_nack",
       "spec_ref": "spec/primitives/ack-nack.md",
-      "operations": ["channels_ack(received)", "channels_ack(processing)", "channels_ack(done)", "channels_ack(nack, reason=...)"],
+      "operations": ["channels__ack"],
       "annotation": "PRIMITIVE COVERAGE: channels_ack. Demonstrates ALL four status transitions of the forward-only state machine. CRITICAL: ACK is a TOOL CALL — no body.type=sox-ack message is ever sent to a channel. After ACKing done, a subsequent recv MUST NOT return the ACK as a channel message. NACK path includes a reason string and is exercised by a deliberately rejected message in the integration test."
     },
     {
       "step": "presence_heartbeat",
       "spec_ref": "spec/primitives/presence.md",
-      "operations": ["channels_heartbeat(online|busy|offline)"],
+      "operations": ["channels__heartbeat", "list_agents"],
       "annotation": "Background asyncio task fires channels_heartbeat every 10 seconds (the spec-recommended interval). Status reflects current activity: online when idle, busy when mid-task. Subscription to sox/presence is established in bootstrap; received presence events are logged but rendering is the TUI's job."
     },
     {
       "step": "graceful_stop",
       "spec_ref": "spec/protocol.md §graceful-stop, spec/primitives/presence.md",
-      "operations": ["channels_heartbeat(offline)", "unsubscribe"],
+      "operations": ["channels__heartbeat", "unsubscribe", "channels__ack"],
       "annotation": "Refuse to stop while any pending message has only channels_ack(received) or channels_ack(processing) — must reach done or nack first. On clean stop: emit channels_heartbeat(offline), then unsubscribe, then exit. SIGTERM handler triggers the same path."
     },
     {
       "step": "recovery",
       "spec_ref": "spec/operations/replay.input.schema.json, spec/primitives/sequence-numbers.md",
-      "operations": ["replay(channel, since=last_seq, limit=100)"],
+      "operations": ["replay"],
       "annotation": "On agent restart (or after a context reset that loses in-process queue state): for every previously-subscribed channel, call replay(since=last_seq_persisted_to_disk) until has_more=false; then resume the main loop. State file at $XDG_STATE_HOME/sox-reference-agent/seq.json holds {channel: last_seq}. This is the canonical recovery recipe."
+    },
+    {
+      "step": "group_lifecycle",
+      "spec_ref": "spec/primitives/groups.md §5.1-§5.5",
+      "operations": ["group_create", "group_invite", "group_join", "group_leave", "group_list_members"],
+      "annotation": "PRIMITIVE COVERAGE: groups. Dedicated capability exercised end-to-end by test_integration.py and exposed via cli.py subcommands. Sequence: (1) group_create(name) returns group_id and adds caller as first active member; (2) group_invite(group_id, agent_id) — caller MUST be active member; (3) invitee calls group_join(group_id) to transition invited->active; (4) group_list_members(group_id) returns membership for verification; (5) group_leave(group_id) removes caller. Group channels are addressable like any channel for send/recv after join; messages to a group fan out with one ACK per recipient (per ack-nack.md §8)."
     }
   ],
   "files": [

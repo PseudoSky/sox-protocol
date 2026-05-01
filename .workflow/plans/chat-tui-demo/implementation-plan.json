@@ -1,119 +1,180 @@
 {
-  "summary": "Terminal UI demo for SOX Protocol — the artefact that gets embedded in the README and shown in the launch narrative. Built with Textual on top of the existing Python sox_protocol client. Owns the primitive coverage slots that benefit from live, fast-redrawing visuals: dm/<sorted-pair> channel creation via /dm command, channels_heartbeat liveness shown in the agent_roster pane, and the choreographed two-agent demo recording. Coverage divides cleanly with chat-webapp (which owns replay scrubber + group sidebar) and reference-agent (which owns deeply-annotated single-agent lifecycle).",
+  "summary": "Textual-based `sox chat` TUI that spawns a SOX MCP server as a stdio subprocess (per docs/decisions/tui-connection-model.md) and renders channels, threads, agents, and a compose bar. The TUI is just another MCP client — no privileged paths. Live updates via reactive watchers fed by an asyncio task draining recv() polls (forward-compatible with watch() when it lands). A reproducible two-agent demo script drives a 45s scripted conversation that is captured deterministically with vhs (Charm) into both .cast (asciinema-compatible) and a .gif rendered for the README. Owns primitive-coverage slots that benefit from live visuals: dm/<sorted-pair> channel creation via /dm, channels_heartbeat liveness in agent_roster, and the choreographed two-agent recording. Coverage divides cleanly with chat-webapp (replay scrubber, group sidebar) and reference-agent (annotated single-agent lifecycle).",
   "ui_layout": {
     "panes": [
-      {"name": "channel_list", "position": "left", "purpose": "all subscribed channels grouped by prefix (group/, dm/, sox/, free-form); active channel highlighted; unread badge per channel"},
-      {"name": "message_feed", "position": "center", "purpose": "scrolling list of messages for the active channel; each bubble shows seq:N inline, sender, body.subject, and a thread arrow when reply_to is set"},
-      {"name": "agent_roster", "position": "right", "purpose": "PRIMITIVE COVERAGE: presence/heartbeat. Live presence panel subscribed to sox/presence; coloured dot per agent (green online, yellow busy, grey stale, dim offline); animates the online→busy transition the demo script triggers"},
-      {"name": "compose_bar", "position": "bottom", "purpose": "input field with prompt; supports slash-commands enumerated below"}
+      {"name": "channel_list", "position": "left", "purpose": "All subscribed channels grouped by prefix (group/, dm/, sox/, free-form). Active channel highlighted; unread badge per channel; subscriber count from list_channels."},
+      {"name": "message_feed", "position": "center", "purpose": "Live-tailing message log for the focused channel. Threads collapsed by default; Enter expands inline reply chain. Shows sender, sent_at, body summary, ACK/NACK/pending status icon."},
+      {"name": "agent_roster", "position": "right", "purpose": "Connected agents with presence indicator (live/stale/unknown) sourced from heartbeat, and unread DM count. Enter on an agent issues /dm <agent>."},
+      {"name": "compose_bar", "position": "bottom", "purpose": "Single-line input. Plain text sends to focused channel. Slash commands: /reply <id>, /dm <agent>, /join <channel>, /quit."}
     ],
     "interactions": [
-      "/reply <message_id>  — sets reply_to for the next send (covers reply_to in TUI)",
-      "/dm <agent-id>       — opens dm/<sorted-pair> channel via SDK canonical name helper (PRIMITIVE COVERAGE: dms)",
-      "/join <channel>      — subscribe to a channel pattern",
-      "/leave <channel>     — unsubscribe",
-      "/ack <message_id> [reason]  — calls channels_ack tool with status=done (or nack if reason given) — proves ACK does NOT appear in feed",
-      "/heartbeat <online|busy|offline>  — manual heartbeat trigger for the demo",
-      "/quit                — graceful_stop choreography"
+      "arrow keys to navigate channel_list and agent_roster",
+      "tab to cycle pane focus",
+      "enter to expand thread or open DM",
+      "/reply <message_id> to thread a reply",
+      "/dm <agent_id> to open a direct channel (creates dm/<sorted-pair>)",
+      "/join <channel> to subscribe",
+      "/quit to exit (sends SIGTERM to spawned server)"
     ]
   },
   "files": [
-    {"path": "packages/python/src/sox_protocol/tui/__init__.py", "purpose": "package marker; re-exports App entry", "public_api": ["App"]},
-    {"path": "packages/python/src/sox_protocol/tui/app.py", "spec_ref": "spec/primitives/channels.md", "purpose": "Textual App composing the four panes; wires SDK client into a reactive store", "public_api": ["class TuiApp(App)"]},
-    {"path": "packages/python/src/sox_protocol/tui/state.py", "purpose": "in-memory reactive state: channels, messages by channel, agents, self-presence, last-seq map", "public_api": ["class TuiState"]},
-    {"path": "packages/python/src/sox_protocol/tui/widgets/channel_list.py", "spec_ref": "spec/primitives/channels.md", "purpose": "left pane widget; groups by prefix", "public_api": ["ChannelList"]},
-    {"path": "packages/python/src/sox_protocol/tui/widgets/message_feed.py", "spec_ref": "spec/primitives/sequence-numbers.md", "purpose": "centre pane; renders seq inline; thread arrows", "public_api": ["MessageFeed"]},
-    {"path": "packages/python/src/sox_protocol/tui/widgets/agent_roster.py", "spec_ref": "spec/primitives/presence.md", "purpose": "right pane; subscribes to sox/presence and renders coloured dots", "public_api": ["AgentRoster"]},
-    {"path": "packages/python/src/sox_protocol/tui/widgets/compose_bar.py", "spec_ref": "spec/operations/send.input.schema.json", "purpose": "bottom pane; input + slash-command parser", "public_api": ["ComposeBar"]},
-    {"path": "packages/python/src/sox_protocol/tui/commands.py", "spec_ref": "spec/primitives/dms.md, spec/primitives/ack-nack.md, spec/primitives/presence.md", "purpose": "slash-command handlers: /reply, /dm, /join, /leave, /ack, /heartbeat, /quit; wraps SDK calls", "public_api": ["dispatch(cmd: str, ctx: TuiContext) -> Awaitable[None]"]},
-    {"path": "packages/python/src/sox_protocol/tui/dm.py", "spec_ref": "spec/primitives/dms.md", "purpose": "Python equivalent of the TS dm helper: canonical_dm_name(self, peer); also re-uses sox_protocol.client utilities if present", "public_api": ["canonical_dm_name", "is_dm_channel", "parse_dm_channel"]},
-    {"path": "packages/python/src/sox_protocol/tui/watch_loop.py", "purpose": "asyncio task that drains recv and pushes to TuiState; tracks last seq per channel for replay-on-reconnect", "public_api": ["start_watch(client, state) -> Task"]},
-    {"path": "packages/python/src/sox_protocol/cli/chat.py", "purpose": "`sox chat` CLI subcommand: connects to backing store, launches TuiApp", "public_api": ["chat_command"]},
-    {"path": "packages/python/tests/tui/__init__.py", "purpose": "test package marker", "public_api": []},
-    {"path": "packages/python/tests/tui/test_state.py", "purpose": "TuiState merges by seq, dedups, advances last-seq", "public_api": []},
-    {"path": "packages/python/tests/tui/test_commands.py", "purpose": "every slash command invokes the right SDK call; /dm uses canonical_dm_name; /ack invokes the tool and the resulting message is NOT inserted into message_feed state", "public_api": []},
-    {"path": "packages/python/tests/tui/test_dm.py", "purpose": "lex-sort canonicalisation; identical IDs; unicode IDs; round-trip parse", "public_api": []},
-    {"path": "packages/python/tests/tui/test_watch_loop.py", "purpose": "drain pumps state; reconnect calls replay(since=last_seq)", "public_api": []},
-    {"path": "packages/python/tests/tui/test_widgets.py", "purpose": "snapshot tests on rendered widget output (Textual pilot); excluded from coverage where pure render", "public_api": []},
-    {"path": "examples/two-agents-talking/__init__.py", "purpose": "package marker", "public_api": []},
-    {"path": "examples/two-agents-talking/demo.py", "spec_ref": "spec/primitives/channels.md, spec/primitives/sequence-numbers.md, spec/primitives/ack-nack.md, spec/primitives/dms.md, spec/primitives/presence.md", "purpose": "scripted, deterministic, no-input demo: spawns two agents, drives the choreography below, exits in ≤45s", "public_api": ["main"]},
-    {"path": "examples/two-agents-talking/agent_a.py", "purpose": "scripted partner A behaviour (driven by demo.py orchestrator via asyncio)", "public_api": []},
-    {"path": "examples/two-agents-talking/agent_b.py", "purpose": "scripted partner B behaviour", "public_api": []},
-    {"path": "examples/two-agents-talking/README.md", "purpose": "explains the choreography step-by-step; cross-links to spec/primitives/", "public_api": []},
-    {"path": "examples/two-agents-talking/run_demo.sh", "purpose": "wrapper that runs demo.py under vhs to produce docs/media/demo.gif", "public_api": []},
-    {"path": "docs/media/demo.cast", "purpose": "asciinema recording — source-of-truth artefact, ≤5MB", "public_api": []},
-    {"path": "docs/media/demo.gif", "purpose": "vhs-rendered GIF for README embed", "public_api": []},
-    {"path": "docs/media/demo.tape", "purpose": "vhs script that drives demo.py → produces demo.gif deterministically", "public_api": []}
+    {
+      "path": "packages/python/src/sox_protocol/tui/__init__.py",
+      "spec_ref": "spec/protocol.md",
+      "purpose": "Public package surface. Re-exports SoxChatApp and run().",
+      "public_api": ["SoxChatApp", "run"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/app.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Textual App composing the four panes; owns the McpStdioClient and background RecvPump task; wires reactive ChatStore into widgets via watch().",
+      "public_api": ["SoxChatApp", "SoxChatApp.run"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/state.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Pure dataclasses + reactive store: ChannelState, MessageState, AgentState, ChatStore. No I/O. ChatStore exposes ingest_message(), focus_channel(), update_agents(); emits change events.",
+      "public_api": ["ChannelState", "MessageState", "AgentState", "ChatStore"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/mcp_client.py",
+      "spec_ref": "docs/decisions/tui-connection-model.md",
+      "purpose": "Async wrapper around an MCP stdio session. Speaks JSON-RPC framed MCP over the spawned subprocess pipes. Typed async methods send/recv/subscribe/list_channels/list_agents/heartbeat.",
+      "public_api": ["McpStdioClient", "McpStdioClient.start", "McpStdioClient.stop", "McpStdioClient.send", "McpStdioClient.recv", "McpStdioClient.subscribe", "McpStdioClient.list_channels"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/process_manager.py",
+      "spec_ref": "docs/decisions/tui-connection-model.md",
+      "purpose": "Subprocess lifecycle: spawn `python -m sox_protocol.cli serve --transport stdio`, run initialize handshake, capture stderr, graceful shutdown on TUI exit.",
+      "public_api": ["ServerProcess", "ServerProcess.spawn", "ServerProcess.terminate", "ServerProcess.is_alive"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/commands.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Pure parser for compose-bar slash commands. parse(text) -> Command union (Send|Reply|Dm|Join|Quit). DM command resolves to dm/<sorted-pair> per spec/primitives/dms.md.",
+      "public_api": ["Command", "SendCommand", "ReplyCommand", "DmCommand", "JoinCommand", "QuitCommand", "parse"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/widgets/__init__.py",
+      "spec_ref": "spec/protocol.md",
+      "purpose": "Widget package init.",
+      "public_api": ["ChannelListWidget", "MessageFeedWidget", "AgentRosterWidget", "ComposeBarWidget"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/widgets/channel_list.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Textual ListView bound to ChatStore.channels reactive. Renders name, subscriber count, unread badge. Emits ChannelFocused on selection.",
+      "public_api": ["ChannelListWidget", "ChannelFocused"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/widgets/message_feed.py",
+      "spec_ref": "spec/primitives/threads.md",
+      "purpose": "VerticalScroll widget rendering messages for the focused channel. Collapsible threads via Enter on a parent message.",
+      "public_api": ["MessageFeedWidget", "ThreadExpanded"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/widgets/agent_roster.py",
+      "spec_ref": "spec/primitives/presence.md",
+      "purpose": "ListView of agents with presence dot (heartbeat-driven) and DM badge. Emits AgentSelected for /dm flow.",
+      "public_api": ["AgentRosterWidget", "AgentSelected"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/widgets/compose_bar.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Input widget; on submit, parses via commands.parse and emits ComposeSubmitted(Command).",
+      "public_api": ["ComposeBarWidget", "ComposeSubmitted"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/tui/pump.py",
+      "spec_ref": "spec/primitives/channels.md",
+      "purpose": "Background asyncio task: polls McpStdioClient.recv() at 250ms cadence (forward-compatible with watch()), feeds messages into ChatStore.ingest_message(). Cancellation-safe.",
+      "public_api": ["RecvPump", "RecvPump.start", "RecvPump.stop"]
+    },
+    {
+      "path": "packages/python/src/sox_protocol/cli/chat.py",
+      "spec_ref": "docs/decisions/tui-connection-model.md",
+      "purpose": "`sox chat` CLI subcommand. Argparse: --agent-id (default tui-user), --server-cmd (default local), --no-spawn (attach to existing). Boots SoxChatApp.",
+      "public_api": ["register_subparser", "main"]
+    },
+    {
+      "path": "README.md",
+      "purpose": "embed demo gif asset in project README"
+    },
+    {
+      "path": "examples/two-agents-talking/demo.tape",
+      "purpose": "VHS tape script for deterministic recording"
+    },
+    {
+      "path": "docs/media/demo.gif",
+      "purpose": "rendered GIF from demo.cast for README embed"
+    }
   ],
   "demo_script": {
     "path": "examples/two-agents-talking/demo.py",
     "choreography": [
-      {"t": 0,  "action": "agent A bootstraps, subscribes to #general, channels_heartbeat(online) — roster shows A green"},
-      {"t": 1,  "action": "agent B bootstraps similarly — roster shows A,B green"},
-      {"t": 3,  "action": "agent A sends 'Which schema version?' to #general — feed shows seq:1 from A"},
-      {"t": 5,  "action": "agent B reads the message; channels_ack(received), then channels_ack(processing) — neither appears in feed (proof point)"},
-      {"t": 7,  "action": "agent B replies 'v3' with reply_to=msg-1 — feed shows seq:2 from B with thread arrow pointing to seq:1"},
-      {"t": 9,  "action": "agent A channels_ack(done) on the reply — NOT visible in feed"},
-      {"t": 11, "action": "agent A opens DM: /dm agent-b → channel becomes dm/agent-a~agent-b (lex-sorted) — sidebar gains a DM section entry"},
-      {"t": 13, "action": "agent A sends 'thanks' on the DM — feed shows seq:1 (independent counter on the new DM channel)"},
-      {"t": 15, "action": "agent B channels_heartbeat(busy) — roster transitions B's dot from green→yellow"},
-      {"t": 20, "action": "agent B channels_heartbeat(online) — back to green"},
-      {"t": 25, "action": "agent B graceful_stop: heartbeat(offline) then unsubscribe — roster fades B to dim"},
-      {"t": 28, "action": "agent A graceful_stop"},
-      {"t": 30, "action": "demo.py exits 0"}
+      {"t": 0.0, "action": "spawn sox MCP server (stdio) as subprocess; agents A and B connect"},
+      {"t": 0.5, "action": "agent A subscribes to #general; agent B subscribes to #general"},
+      {"t": 1.0, "action": "spawn TUI viewer (sox chat) attached to same server as observer"},
+      {"t": 2.0, "action": "agent A sends 'hey, can you review the threads spec?' to #general"},
+      {"t": 5.0, "action": "agent B recv()s, ACKs message via channels__ack"},
+      {"t": 8.0, "action": "agent B sends reply with reply_to=msg-A-1 ('on it — checking section 4')"},
+      {"t": 12.0, "action": "agent A recv()s reply, sends thread follow-up: 'thanks, focus on ordering guarantees'"},
+      {"t": 16.0, "action": "agent B opens DM to agent A: 'one question — is ordering per-channel or global?'"},
+      {"t": 20.0, "action": "agent A replies in DM: 'per-channel; see sequence-numbers.md'"},
+      {"t": 25.0, "action": "agent B sends NACK on a synthetic broken request to demo error envelope"},
+      {"t": 30.0, "action": "agent B sends final reply to thread: 'LGTM, approving'"},
+      {"t": 35.0, "action": "agent A acks final reply; list_pending shows zero unreplied"},
+      {"t": 40.0, "action": "TUI viewer pans channel_list -> message_feed -> agent_roster to showcase all panes"},
+      {"t": 45.0, "action": "graceful shutdown: agents disconnect, TUI exits, server SIGTERM"}
     ],
-    "duration_seconds": 45,
-    "primitives_demonstrated": ["channels", "sequence-numbers", "ack-nack", "dms", "presence", "threads (reply_to arrow)"]
+    "duration_seconds": 45
   },
   "recording_strategy": {
-    "tool": "vhs (Charm) — chosen over asciinema-only because vhs renders deterministically from a .tape script (frame-accurate, no human typing variability) and emits both .gif and .cast in one pass; asciinema alone requires manual recording which fails the 'running it twice produces the same recording' constraint",
-    "output": "docs/media/demo.cast (asciinema source) + docs/media/demo.gif (post-rendered)",
-    "post_process": "vhs runs demo.tape → emits demo.gif directly; demo.cast is captured by piping demo.py through asciinema rec inside the tape; both committed",
-    "rationale": "Determinism is the hard constraint. The .tape script encodes wall-clock waits matching demo.py choreography; running `vhs demo.tape` twice produces byte-identical artefacts (subject to vhs version pin). Total artefact size budget: ≤5MB across both files; current estimate ~2MB for a 45s 80x24 GIF at 10fps."
+    "tool": "vhs",
+    "output": "docs/media/demo.cast",
+    "post_process": "vhs renders examples/two-agents-talking/demo.tape into docs/media/demo.gif AND a sibling docs/media/demo.cast (asciinema-compatible). Both committed. README embeds the .gif.",
+    "rationale": "vhs (Charm) takes a declarative .tape script and produces frame-perfect output deterministically — strictly better than asciinema-record which captures wall-clock human input. The .tape lives next to demo.py so the recording is regenerable on any machine with vhs installed; CI can rebuild it. .gif embeds cleanly in GitHub README without a player widget; .cast retained for asciinema embed in launch posts."
   },
   "test_plan": [
-    {"category": "unit", "test_cases": ["TuiState seq-based merge + dedup", "canonical_dm_name lex sort + unicode", "slash-command parser maps to SDK calls", "/ack does not insert into feed state"]},
-    {"category": "watch", "test_cases": ["watch_loop pumps store on each recv message", "reconnect path calls replay(since=last_seq)"]},
-    {"category": "widget", "test_cases": ["MessageFeed renders seq inline", "AgentRoster reflects sox/presence transitions", "ChannelList groups by prefix"]},
-    {"category": "demo", "test_cases": ["demo.py runs to completion in ≤60s without input", "running demo.py twice produces identical message-id sequences (modulo timestamps) — choreography is deterministic"]},
-    {"category": "recording", "test_cases": ["docs/media/demo.gif exists and ≤5MB", "vhs demo.tape exits 0"]}
+    "tests/tui/test_commands.py — unit-test parse() across send/reply/dm/join/quit and malformed inputs (100% branch coverage on commands.py).",
+    "tests/tui/test_state.py — ChatStore ingest, focus, dedup by message_id, unread counter, agent presence transitions; deterministic, no async.",
+    "tests/tui/test_process_manager.py — spawn fake server (stub `python -c` script), assert handshake, terminate, crash-stderr capture; uses tmp_path and asyncio.",
+    "tests/tui/test_mcp_client.py — mock subprocess transport with a JSON-RPC echo; assert send/recv/subscribe round-trips and JSON framing.",
+    "tests/tui/test_pump.py — fake McpStdioClient yielding scripted messages; assert ChatStore receives them and cancellation drains cleanly.",
+    "tests/tui/test_app_pilot.py — textual.pilot smoke test: boot SoxChatApp with in-process fake McpStdioClient, simulate keystrokes (focus pane, type message, submit), assert ChatStore mutations and compose_bar clears. Rendering glue may be omitted from coverage gate via documented conftest pragmas.",
+    "tests/tui/test_demo_script.py — run examples/two-agents-talking/demo.py against an in-process server fixture, assert final list_pending state and message ordering — guarantees reproducibility."
   ],
   "risks": [
-    {"risk": "Textual rendering tests are flaky", "mitigation": "use Textual's Pilot harness for headless snapshot testing; render-only branches excluded from coverage with documented justification in conftest.py"},
-    {"risk": "Demo timing drift if agent processing varies", "mitigation": "demo.py uses asyncio.sleep at wall-clock anchors driven by an OrchestratorClock, not by 'wait for next event' — choreography is time-driven, not state-driven, ensuring reproducibility"},
-    {"risk": "GIF >5MB", "mitigation": "vhs at 80x24 @ 10fps for 45s is ~2MB; budget includes 2x headroom; CI asserts size; fall back to lower fps or shorter shot if exceeded"},
-    {"risk": "Choreography overlaps webapp/reference-agent coverage and creates maintenance duplication", "mitigation": "primitives_demonstrated is explicitly scoped to live-display primitives (presence/dm/seq/thread visualisation/ack-NOT-in-feed proof); replay scrubber and group sidebar are intentionally NOT in the TUI demo — they live in chat-webapp; deeply-annotated lifecycle code lives in reference-agent"},
-    {"risk": "ACK-not-in-feed proof point is invisible to a viewer", "mitigation": "demo.py prints a side-channel banner overlay 'ACK sent (control-plane, not in history)' at t=5/9/13 so viewers see the negative space"}
+    "Textual reactive watchers fire on the UI thread; ChatStore mutations must stay sync and cheap. Mitigation: dataclass-only state, computed views in widgets.",
+    "Subprocess stderr buffering can hide crash causes. Mitigation: ServerProcess captures stderr line-by-line and surfaces last 20 lines on TUI exit.",
+    "vhs is not in CI default toolchain. Mitigation: commit pre-rendered demo.gif and demo.cast; document regeneration in demo.py module docstring (not a separate .md).",
+    "Demo timing skew on slow machines could exceed 60s budget. Mitigation: choreography uses absolute t-anchors with sleep_until(t), not cumulative sleeps.",
+    "Identity primitive not yet shipped — TUI cannot present credentials. Accepted: TUI sends an unauth handshake; will be retrofitted when credential registry lands."
   ],
   "dependencies": [
     "textual>=0.40",
-    "sox-protocol (in-tree)",
-    "anyio",
-    "pytest, pytest-asyncio, pytest-cov, pytest-textual-snapshot",
-    "vhs (build-time tool, not a python dep — invoked from run_demo.sh)",
-    "asciinema (build-time tool)"
+    "mcp>=1.0 (already a transitive dep via sox server)",
+    "anyio>=4 (already used by mcp)",
+    "vhs (dev-only, not a Python dep) for recording regeneration"
   ],
   "build_order": [
-    "1. tui/__init__.py + tui/state.py + tui/dm.py (no UI deps)",
-    "2. tui/widgets/{channel_list, message_feed, agent_roster, compose_bar}.py",
-    "3. tui/commands.py (slash dispatcher)",
-    "4. tui/watch_loop.py",
-    "5. tui/app.py composing widgets + watch_loop",
-    "6. cli/chat.py wiring `sox chat` subcommand",
-    "7. tests/tui/* to 100% on logic dirs",
-    "8. examples/two-agents-talking/{agent_a,agent_b,demo}.py",
-    "9. demo.tape vhs script",
-    "10. record demo.cast + demo.gif into docs/media/",
-    "11. README embed line for the GIF"
+    "1. state.py + commands.py (pure logic, fully unit-tested)",
+    "2. process_manager.py (subprocess lifecycle, no MCP yet)",
+    "3. mcp_client.py (JSON-RPC over the spawned subprocess)",
+    "4. pump.py (glue between client and store)",
+    "5. widgets/* (Textual rendering, watching ChatStore reactives)",
+    "6. app.py (compose widgets, wire pump and client)",
+    "7. cli/chat.py + cli wiring in __main__.py",
+    "8. examples/two-agents-talking/demo.py + demo.tape",
+    "9. Recording: vhs render demo.tape -> docs/media/demo.gif + docs/media/demo.cast",
+    "10. README.md embed of docs/media/demo.gif near top"
   ],
   "exit_signals": [
-    "pytest tests/tui/ --cov=src/sox_protocol/tui --cov-fail-under=100 (with documented render-only omits)",
-    "mypy --strict src/sox_protocol/tui/",
-    "lint-imports clean",
-    "ruff check src/sox_protocol/tui/ clean",
-    "python -m sox_protocol.cli chat --help works",
-    "python examples/two-agents-talking/demo.py completes in ≤60s without input",
-    "docs/media/demo.gif exists, ≤5MB; docs/media/demo.cast committed",
-    "README contains an embed line referencing docs/media/demo.gif (or .cast)"
+    "mypy --strict clean on packages/python/src/sox_protocol/tui/",
+    "lint-imports clean (no TUI import of backing_stores or core.identity internals)",
+    "100% line+branch coverage on tui/state.py, tui/commands.py, tui/pump.py, tui/process_manager.py, tui/mcp_client.py (rendering glue in widgets/* and app.py may be omitted with documented `# pragma: no cover` on Textual lifecycle hooks)",
+    "python examples/two-agents-talking/demo.py runs to completion deterministically in <=60s; rerun produces byte-identical message_id ordering when seeded",
+    "docs/media/demo.gif and docs/media/demo.cast committed; README.md embeds the .gif near the top",
+    "python -m sox_protocol.cli chat --help works"
   ]
 }

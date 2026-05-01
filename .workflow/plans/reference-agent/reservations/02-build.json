@@ -1,7 +1,8 @@
 {
-  "phase_id": "02-build",
-  "engagement": "reference-agent",
-  "source_run": "planner-run3",
+  "phase": "02-build",
+  "produced_by": "01-plan",
+  "produced_at": "2026-04-30T00:00:00Z",
+  "produced_by_agent_id": "a46a71d1a998de6b3",
   "files": [
     "examples/reference-agent/agent.py",
     "examples/reference-agent/cli.py",

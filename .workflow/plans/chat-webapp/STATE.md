@@ -12,13 +12,13 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Component tree + state plan | `IN_PROGRESS` | sox-cto-system:planner | 1 | 2026-04-30T00:00:00Z |
-| 02-build | Build app + integrate SDK | `BLOCKED` | react-specialist | 0 | 2026-04-29T00:00:00Z |
+| 01-plan | Component tree + state plan | `DONE` | sox-cto-system:planner | 1 | 2026-04-30T00:00:00Z |
+| 02-build | Build app + integrate SDK | `READY` | react-specialist | 0 | 2026-04-30T00:00:00Z |
 | 03-polish | Visual polish + a11y review | `BLOCKED` | ui-designer | 0 | 2026-04-29T00:00:00Z |
 
 ## Currently next action
 
-`01-plan` is `IN_PROGRESS` (parallel batch 2026-04-30T00:00:00Z).
+`02-build` is `READY`. Spawn `react-specialist`.
 
 ## Termination targets
 
