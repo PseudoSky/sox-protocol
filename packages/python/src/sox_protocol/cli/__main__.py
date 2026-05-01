@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from sox_protocol.cli.chat import register_subparser as add_chat_subcommand
 from sox_protocol.cli.serve import add_serve_subcommand
 
 
@@ -31,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command", help="Subcommand")
     add_serve_subcommand(subparsers)
+    add_chat_subcommand(subparsers)
 
     args = parser.parse_args(argv)
 

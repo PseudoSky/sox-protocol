@@ -7,6 +7,18 @@
 
 ---
 
+## Demo — `sox chat` TUI
+
+![SOX Protocol two-agent demo](docs/media/demo.gif)
+
+> Two agents collaborating over SOX channels in real time: threaded replies, DMs,
+> ACK/NACK signals, and presence — all in the `sox chat` terminal UI.
+> Run `python3 examples/two-agents-talking/demo.py` to see the scripted conversation.
+> Regenerate the recording: `vhs examples/two-agents-talking/demo.tape`
+> (see [docs/media/demo.cast](docs/media/demo.cast) for the asciinema-compatible recording).
+
+---
+
 ## What is in `spec/`?
 
 `spec/` is the canonical, language-neutral specification for SOX Protocol. It contains everything needed to implement SOX in any language, independent of the Python reference implementation:
