@@ -12,12 +12,12 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Lifecycle plan from spec primitives | `READY` | sox-cto-system:planner | 0 | 2026-04-29T00:00:00Z |
+| 01-plan | Lifecycle plan from spec primitives | `IN_PROGRESS` | sox-cto-system:planner | 1 | 2026-04-30T00:00:00Z |
 | 02-build | Build agent + tests + walkthrough | `BLOCKED` | python-pro | 0 | 2026-04-29T00:00:00Z |
 
 ## Currently next action
 
-`01-plan` is `READY`.
+`01-plan` is `IN_PROGRESS` (parallel batch 2026-04-30T00:00:00Z).
 
 ## Termination targets
 

@@ -12,12 +12,12 @@ orchestrator_protocol: v1
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Test plan from spec | `READY` | sox-cto-system:planner | 0 | 2026-04-29T00:00:00Z |
+| 01-plan | Test plan from spec | `IN_PROGRESS` | sox-cto-system:planner | 1 | 2026-04-30T00:00:00Z |
 | 02-build | Build fixtures + harness + CI | `BLOCKED` | test-automator | 0 | 2026-04-29T00:00:00Z |
 
 ## Currently next action
 
-`01-plan` is `READY`. Spawn `sox-cto-system:planner`.
+`01-plan` is `IN_PROGRESS` (parallel batch 2026-04-30T00:00:00Z).
 
 ## Termination targets
 
