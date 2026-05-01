@@ -17,9 +17,10 @@
         "rate_limited",
         "store_unavailable",
         "version_mismatch",
+        "backpressure_over_limit",
         "internal_error"
       ],
-      "description": "Machine-readable error code. 'identity_failure': caller could not be authenticated or authorised. 'channel_not_found': specified channel does not exist or has no recent activity. 'subscription_not_found': recv called for a channel the agent is not subscribed to. 'validation_error': input does not conform to the operation schema. 'rate_limited': caller has exceeded a rate limit. 'store_unavailable': backing store is unreachable or returned an error. 'version_mismatch': protocol major version of caller and server differ. 'internal_error': unexpected server-side error."
+      "description": "Machine-readable error code. 'identity_failure': caller could not be authenticated or authorised. 'channel_not_found': specified channel does not exist or has no recent activity. 'subscription_not_found': recv called for a channel the agent is not subscribed to. 'validation_error': input does not conform to the operation schema. 'rate_limited': caller has exceeded a rate limit. 'store_unavailable': backing store is unreachable or returned an error. 'version_mismatch': protocol major version of caller and server differ. 'backpressure_over_limit': send rejected because the target channel queue is at or above its configured limit and backpressure_mode is enforced; see docs/decisions/backpressure-model.md. 'internal_error': unexpected server-side error."
     },
     "message": {
       "type": "string",
