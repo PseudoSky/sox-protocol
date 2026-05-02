@@ -777,31 +777,76 @@ class SharedMemoryTarget:
         self._package_path = package_path
         self._store: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        # When set, only agent IDs in this set may call operations.
-        # None means no enforcement (fixtures without an agents[] list).
-        self._registered_agents: set[str] | None = None
+        # Identity stack — built in start(), agents provisioned in register_agents().
+        self._registry: Any = None   # InMemoryCredentialRegistry
+        self._verifier: Any = None   # IdentityVerifier
+        self._pipeline: Any = None   # Pipeline (auth-only; terminal = _dispatch_ctx)
+        # Maps agent_id → Ed25519PrivateKey for per-call credential signing.
+        self._agent_keys: dict[str, Any] = {}
+        # True once register_agents() has been called for the current fixture.
+        # In strict mode, agents NOT provisioned in register_agents() receive
+        # an identity_failure from AuthMiddleware (no auto-provisioning).
+        self._strict_mode: bool = False
         # In-memory liveness table for list_agents support.
         # Maps agent_id → {"last_heartbeat_at_ns": int, "status": str, "namespace": str|None}
         self._liveness: dict[str, dict[str, Any]] = {}
 
     def register_agents(self, agents: list[dict[str, Any]]) -> None:
-        """Register the set of known agents for identity enforcement.
+        """Provision registered agents into the identity stack.
 
         Called by the fixture runner when the fixture declares an ``agents``
         list.  Agents with ``registered: false`` are declared as participants
-        but are NOT provisioned in the identity system — they will receive an
-        ``unknown_agent`` error on any operation call.
+        but are NOT provisioned in the credential registry — they will receive
+        an ``identity_failure`` error from AuthMiddleware on any
+        identity-enforced operation.
 
-        Any agent_id NOT in the provisioned set will receive an error response
-        matching the sox-error envelope shape (``_rpc_error.error_code``).
+        After this call, auto-provisioning of unknown agents is disabled
+        (strict mode).  This is the gate the
+        ``unknown-credential-rejected`` conformance fixture relies on —
+        rejection now comes from AuthMiddleware, not a hand-rolled check.
         """
-        # Only provision agents where registered is not explicitly False.
-        self._registered_agents = {
-            a["id"] for a in agents if "id" in a and a.get("registered", True)
-        }
+        from sox_protocol.core.identity.keys import (  # type: ignore[import]
+            generate_keypair,
+        )
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+        self._strict_mode = True
+        if self._loop is None or self._registry is None:
+            return
+        for agent in agents:
+            aid = agent.get("id")
+            if not aid or not agent.get("registered", True):
+                continue
+            private_seed, public_key_bytes = generate_keypair()
+            private_key: Any = Ed25519PrivateKey.from_private_bytes(private_seed)
+            self._agent_keys[aid] = private_key
+            self._loop.run_until_complete(
+                self._registry.register(aid, public_key_bytes)
+            )
+
+    def _provision_agent(self, agent_id: str) -> Any:
+        """Auto-provision *agent_id* into the registry (non-strict mode only).
+
+        Returns the Ed25519PrivateKey for signing per-call credentials.
+        """
+        from sox_protocol.core.identity.keys import (  # type: ignore[import]
+            generate_keypair,
+        )
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+        private_seed, public_key_bytes = generate_keypair()
+        private_key: Any = Ed25519PrivateKey.from_private_bytes(private_seed)
+        self._agent_keys[agent_id] = private_key
+        if self._loop is not None and self._registry is not None:
+            self._loop.run_until_complete(
+                self._registry.register(agent_id, public_key_bytes)
+            )
+        return private_key
 
     def start(self, agent_id: str) -> None:
-        """Start the shared in-memory store (no subprocess)."""
+        """Start the shared in-memory store and build the auth pipeline."""
         # Validate the package path exists before mutating sys.path
         src_dir = self._package_path / "src"
         if not src_dir.is_dir():
@@ -814,6 +859,22 @@ class SharedMemoryTarget:
             from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
                 MemoryStore,
             )
+            from sox_protocol.core.identity import (  # type: ignore[import]
+                AuditLogWriter,
+                InMemoryCredentialRegistry,
+            )
+            from sox_protocol.core.identity.verifier import (  # type: ignore[import]
+                IdentityVerifier,
+            )
+            from sox_protocol.core.middleware.plugins.auth import (  # type: ignore[import]
+                AuthMiddleware,
+            )
+            from sox_protocol.core.middleware.pipeline import (  # type: ignore[import]
+                Pipeline,
+            )
+            from sox_protocol.core.middleware.context import (  # type: ignore[import]
+                MiddlewareContext,
+            )
             self._store = MemoryStore()
             try:
                 loop = asyncio.get_event_loop()
@@ -822,6 +883,26 @@ class SharedMemoryTarget:
                 asyncio.set_event_loop(loop)
             self._loop = loop
             loop.run_until_complete(self._store.initialize())
+
+            # Build identity stack.
+            self._registry = InMemoryCredentialRegistry()
+            audit = AuditLogWriter()
+            self._verifier = IdentityVerifier(registry=self._registry, audit=audit)
+
+            # Build auth-only pipeline.  The terminal calls _dispatch_ctx so
+            # all existing simulation logic (reply_to plumbing, group_invite
+            # remap, replay timing, etc.) is preserved untouched.
+            auth_mw = AuthMiddleware(self._verifier)
+
+            async def _terminal(ctx: MiddlewareContext) -> dict[str, Any]:
+                return await self._dispatch(
+                    ctx.agent_id or ctx.connection_id,
+                    ctx.operation,
+                    dict(ctx.input),
+                )
+
+            self._pipeline = Pipeline([auth_mw], _terminal)
+
         except ImportError as exc:
             raise RuntimeError(
                 f"Cannot import sox_protocol from {self._package_path}: {exc}"
@@ -831,7 +912,13 @@ class SharedMemoryTarget:
         """No-op for in-process target."""
 
     def call_tool(self, agent_id: str, operation: str, args: dict[str, Any]) -> Any:
-        """Dispatch a tool call directly to the in-process MemoryStore.
+        """Dispatch a tool call through the auth Pipeline to the in-process MemoryStore.
+
+        Identity enforcement is now performed by ``AuthMiddleware`` inside the
+        pipeline.  Agents provisioned via :meth:`register_agents` (or
+        auto-provisioned in non-strict mode) receive a signed credential;
+        unprovisioned agents in strict-mode fixtures receive an
+        ``identity_failure`` envelope from ``AuthMiddleware``.
 
         Args:
             agent_id: The agent making the call.
@@ -841,20 +928,38 @@ class SharedMemoryTarget:
         Returns:
             Result dict conforming to the operation's output schema.
         """
-        if self._store is None or self._loop is None:
+        if self._store is None or self._loop is None or self._pipeline is None:
             raise RuntimeError("SharedMemoryTarget not started")
-        # Enforce identity: reject unknown agents when the fixture declared
-        # an agents[] list.  This mirrors the middleware layer that will sit
-        # in front of the backing store in the full stack.
-        if self._registered_agents is not None and agent_id not in self._registered_agents:
-            return {
-                "_rpc_error": {
-                    "error_code": "unknown_agent",
-                    "message": f"Agent {agent_id!r} is not registered in this fixture",
-                }
-            }
+
+        # Resolve or auto-provision the agent's signing key.
+        private_key = self._agent_keys.get(agent_id)
+        if private_key is None:
+            if self._strict_mode:
+                # Unknown agent in strict mode — no keypair; the pipeline will
+                # receive no credential and AuthMiddleware will short-circuit
+                # with identity_failure for enforced operations.
+                private_key = None
+            else:
+                private_key = self._provision_agent(agent_id)
+
+        # Build a signed credential for identity-enforced operations.
+        # Non-enforced operations (list_channels, etc.) pass through auth
+        # without credential; we still inject one for consistency.
+        metadata: dict[str, Any] = {}
+        if private_key is not None:
+            from sox_protocol.core.mcp_server._credential import (  # type: ignore[import]
+                resolve_credential,
+            )
+            credential = resolve_credential(agent_id, private_key, operation, args)
+            metadata["_connection_credential"] = credential
+
         return self._loop.run_until_complete(
-            self._dispatch(agent_id, operation, args)
+            self._pipeline.dispatch(
+                operation,
+                dict(args),
+                connection_id=agent_id,
+                metadata=metadata,
+            )
         )
 
     async def _dispatch(
