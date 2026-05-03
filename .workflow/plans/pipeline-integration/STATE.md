@@ -21,11 +21,23 @@ absorbs: harness-cleanup (per analysis §7.6 — F merged into A as terminal acc
 | 05-concurrency-fix | Bundle the verifier replay-cache `asyncio.Lock` fix flagged in hooks-middleware:04-review (becomes reachable when auth runs per-request) | `DONE` | python-pro | 1 | 2026-05-01T23:59:00Z |
 | 06-delete-harness-substitution | **Delete `tools/conformance_runner.py:805-813`** + `_registered_agents` field. The symbolic milestone of the program. Risk #5: parallel CI matrix (`conformance-substitution-removed` mandatory; `conformance-legacy` slated for removal in v1.1) | `DONE` | python-pro | 1 | 2026-05-01T22:30:00Z |
 | 07-server-side-rejection-fixture | New conformance fixture asserting unknown-credential rejection arrives via sox-error envelope from the server, not synthesized client-side | `DONE` | test-automator | 1 | 2026-05-01T23:00:00Z |
-| 08-review | Code review of integrated pipeline + observability + concurrency-fix + harness deletion | `READY` | code-reviewer | 0 | 2026-05-01T23:59:00Z |
+| 08-review | Code review of integrated pipeline + observability + concurrency-fix + harness deletion | `DONE` | code-reviewer | 1 | 2026-05-01T23:59:00Z |
 
-## Currently next action
+## Engagement closed
 
-Phases 01–07 are DONE. Next dispatch: **phase 08-review** (code-reviewer) to close the engagement.
+**Closed: 2026-05-01 — APPROVED-WITH-FOLLOWUPS**
+
+All 8 phases DONE. Full review at [REVIEW.md](./REVIEW.md).
+
+Verdict: APPROVED-WITH-FOLLOWUPS. No blockers to P1 closure. 2 pre-existing
+group_invite test failures (ValueError→500 regression from P1-03) tracked as
+follow-on. 9 HTTP conformance failures are documented backing-store/spec gaps
+(fixture-spec-realignment engagement). mypy clean (80 files). stdio 33/0/34.
+HTTP 24/9/34.
+
+## Previously next action
+
+Phases 01–07 are DONE. Phase 08-review (code-reviewer) closed the engagement.
 
 ## Termination targets
 
@@ -56,6 +68,7 @@ Per analysis §7.6 / §6 (preserved): *"The single highest-value commit in the w
 - 2026-05-01T22:30:00Z 06-delete-harness-substitution — DONE (python-pro, Option A): Deleted `_registered_agents` field, `register_agents()` hand-rolled rejection block, and comment "This mirrors the middleware layer..." from SharedMemoryTarget. Wired SharedMemoryTarget.call_tool() through an auth-only Pipeline (AuthMiddleware terminal = existing _dispatch simulation). register_agents() now provisions per-agent Ed25519 keypairs into InMemoryCredentialRegistry; unknown agents in strict-mode fixtures receive identity_failure from AuthMiddleware rather than a client-side synthesized response. No `conformance-legacy` CI entry existed — no-op per spec. Verified: stdio 32/0/34, HTTP 23/9/34 (no regression), mypy --strict clean (80 source files), pytest ≥1113 passed.
 - 2026-05-01T23:00:00Z 07-server-side-rejection-fixture — DONE (test-automator): Added `spec/conformance/identity-verification/04-unknown-credential-rejected-server-side.yaml`. Fixture declares one `registered: false` agent (agent-unregistered-x) and asserts `error_code: "identity_failure"` (the exact string from `AuthMiddleware._make_identity_error()`) on both `send` and `recv` identity-enforced operations. The specific `error_code` value is the distinguishing marker: the legacy client-side substitution (deleted in phase 06) emitted `unknown_agent`; any re-introduction of client-side synthesis would emit a different code and fail this fixture. A `registered: true` agent (agent-registered-a) is co-declared to activate strict mode (disable auto-registration). YAML comment documents the stronger `pipeline_trace.verdict == "reject"` assertion that phase 04 observability will enable. Conformance: stdio 33/0/34 (+1), HTTP 24/9/34 (+1). mypy --strict clean (80 source files).
 - 2026-05-01T23:30:00Z 04-observability — DONE (python-pro): Pipeline.dispatch() now unconditionally injects `metadata["pipeline_trace"]` (array of per-plugin trace entries) and `metadata["correlation_id"]` into every response. pipeline_trace entry shape: {plugin_id, kind, started_at (monotonic float), finished_at (monotonic float), verdict ∈ {passed, rejected, errored, skipped}, error_code (str|None), correlation_id (str)}. correlation_id is frozen from MiddlewareContext.correlation_id (UUID4 hex if not supplied by caller). Emission is unconditional via Pipeline base — no per-plugin opt-in required. Schema fix: added optional `metadata` property to send.output.schema.json, recv.output.schema.json, subscribe.output.schema.json, list-channels.output.schema.json (all had `additionalProperties: false` which rejected the injected key). Test fix: middleware tests updated to use result.get("ok") / result.get("error_code") pattern (strip-metadata approach) rather than exact equality; observability shape assertions live in test_pipeline_trace.py and test_plugin_auth.py. Invariants: 1102 pytest passed (2 pre-existing group_invite failures unchanged), mypy --strict clean (80 source files), stdio conformance 33/0/34 (no regression), HTTP conformance 24/9/34 (no regression).
+- 2026-05-01T23:59:00Z 08-review — DONE (code-reviewer): APPROVED-WITH-FOLLOWUPS. Acceptance gates: stdio 33/0/34, HTTP 24/9/34 (9 documented), mypy clean 80 files, pytest 1103 passed / 2 pre-existing group_invite failures. 0 blockers. Follow-ons: group_invite ValueError→500 fix (store-error-types), 9 HTTP fixture gaps (fixture-spec-realignment), fixture-04 stronger pipeline_trace assertion. Engagement closed. See REVIEW.md.
 - 2026-05-01T23:59:00Z 05-concurrency-fix — DONE (python-pro): Wrapped `IdentityVerifier._seen_nonces` prune+check+insert in `asyncio.Lock`. Lock placement: `_nonces_lock: asyncio.Lock` added to `__init__`; private async method `_check_and_insert_nonce(nonce, now)` holds the lock for the full prune+check+insert sequence; signature verification (CPU-bound) runs OUTSIDE the lock so concurrent dispatches with distinct nonces are not serialised. The lock scope is tight: only the three dict operations are serialised, not crypto. Regression test `test_concurrent_same_nonce_only_one_succeeds` added to `packages/python/tests/identity/test_verifier.py`: fires 32 concurrent `asyncio.gather`-ed `verify()` tasks with the same nonce+agent; asserts exactly 1 succeeds and 31 raise `ReplayDetectedError`; uses `asyncio.wait_for` with 5 s timeout to detect lock hangs. Files touched: `packages/python/src/sox_protocol/core/identity/verifier.py`, `packages/python/tests/identity/test_verifier.py`. Invariants: 19/19 identity verifier tests passed, mypy --strict clean (80 source files), stdio conformance 33/0/34, HTTP conformance 24/9/34 (no regression). Phase 08-review unblocked.
 
 ## Reference
