@@ -17,23 +17,29 @@ priority: HIGH — without this, "v1 works on install" is an assumption
 |---|---|---|---|---|---|
 | 01-plan | Design the test: isolation strategy (tmp venv vs Docker vs --target), Claude invocation pattern (`--dangerously-skip-permissions`?), agent prompt design (deterministic enough for assertions), API key handling, CI gate strategy. Decide stdio vs HTTP transport for the live test (probably stdio — matches default install). | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
 | 02-build-fixture | Construct the test fixture: a fresh-Claude-Code-project skeleton checked into `tests/fixtures/live_install/` with `.claude/` dir, agent .md files for two roles ("alice" + "bob"), prompts that deterministically drive: create_group → invite → join → send → recv → ack. Prompts must be robust to LLM variation (e.g. instruct exact tool calls, not "have a chat"). | `DONE` | test-automator | 1 | 2026-05-03T00:00:00Z |
-| 03-build-test | `tests/integration/test_live_install_e2e.py`: pytest test that (a) creates tmp venv (b) `pip install -e packages/python plugins/sox-plugin-schema-strict` into it (c) runs `python -m sox_protocol.adapters.runtimes.claude_code.install` against a tmp Claude project copy (d) spawns 2 `claude` CLI subprocesses with the agent prompts (e) waits for them to complete (f) asserts the SOX SQLite database contains the expected message rows + ack records. Test marked `@pytest.mark.live` and `@pytest.mark.skipif(not ANTHROPIC_API_KEY)`. | `READY` | test-automator | 0 | 2026-05-03T00:00:00Z |
-| 04-ci-integration | Add the `live` marker to `pyproject.toml` `[tool.pytest.ini_options]` markers. Add a CI job (separate from the main test job) that runs `pytest -m live` if `ANTHROPIC_API_KEY` secret is configured. Document opt-in path in README. | `BLOCKED` | devops-engineer | 0 | 2026-05-04T00:00:00Z |
+| 03-build-test | `tests/integration/test_live_install_e2e.py`: pytest test that (a) creates tmp venv (b) `pip install -e packages/python plugins/sox-plugin-schema-strict` into it (c) runs `python -m sox_protocol.adapters.runtimes.claude_code.install` against a tmp Claude project copy (d) spawns 2 `claude` CLI subprocesses with the agent prompts (e) waits for them to complete (f) asserts the SOX SQLite database contains the expected message rows + ack records. Test marked `@pytest.mark.live` and `@pytest.mark.skipif(not ANTHROPIC_API_KEY)`. | `DONE` | test-automator | 1 | 2026-05-03T00:00:00Z |
+| 04-ci-integration | Add the `live` marker to `pyproject.toml` `[tool.pytest.ini_options]` markers. Add a CI job (separate from the main test job) that runs `pytest -m live` if `ANTHROPIC_API_KEY` secret is configured. Document opt-in path in README. | `READY` | devops-engineer | 0 | 2026-05-04T00:00:00Z |
 | 05-review | Verify the test reliably passes against the current main + that failures genuinely catch broken installs (e.g. break the installer deliberately and confirm the test fails). | `BLOCKED` | code-reviewer | 0 | 2026-05-04T00:00:00Z |
 
 ## Currently next action
 
-Phase 01-plan is **DONE** (2026-05-03). Plan artifacts:
+Phase 03-build-test is **DONE** (2026-05-03). Artifacts:
 
-- `.workflow/plans/live-install-e2e/implementation-plan.json`
-- `.workflow/plans/live-install-e2e/implementation-plan.md`
+- `packages/python/tests/integration/test_live_install_e2e.py` — 3 tests (happy path + 2 negative)
+- `packages/python/pyproject.toml` — `live` marker registered; `addopts` updated to deselect by default
 
-Dispatch **phase 02-build-fixture** next (test-automator). Phase 02 pre-flight MUST resolve four open questions before fixtures are committed (see `implementation-plan.json#open_questions_for_phase_02_pre_flight`):
+Dispatch **phase 04-ci-integration** next (devops-engineer). Phase 04 must:
 
-1. Confirm `claude` CLI flags (`--print`, `--dangerously-skip-permissions`, `--max-turns`, `--model`) on the targeted CLI version.
-2. Confirm registered MCP tool names — specifically whether `group_create` exists or group creation goes through `channels__send` to a control channel. Inspect `core/mcp_server/tools.py:register_tools()`.
-3. Confirm `ANTHROPIC_API_KEY` env-var alone authenticates non-interactive `claude --print`.
-4. Confirm correct Claude state-dir env-var (`CLAUDE_CONFIG_DIR` vs `CLAUDE_HOME`).
+1. Add `.github/workflows/python-live-e2e.yml` triggered on push-to-main + weekly cron + workflow_dispatch.
+2. Gate job on `secrets.ANTHROPIC_API_KEY != ''`.
+3. Install `claude` CLI (npm: `@anthropic-ai/claude-code`) as a CI step.
+4. Run `pytest -m live packages/python/tests/integration/test_live_install_e2e.py`.
+5. Document opt-in path in README.
+
+Architecture note for phase 04: group state in `SqliteStore` is in-memory only (see TODO
+comments in store.py). `group__invite` does not persist across MCP server process boundaries.
+`group__join` still works because it writes to the persisted `subscriptions` table. The live
+test assertions target `messages` and `subscriptions` tables only.
 
 ---
 
