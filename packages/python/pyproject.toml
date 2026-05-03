@@ -56,9 +56,10 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "--strict-markers"
+addopts = "--strict-markers -m 'not live'"
 markers = [
     "conformance: language-neutral conformance suite (spec/conformance/scenarios/)",
+    "live: requires ANTHROPIC_API_KEY and the claude CLI; opts out by default",
 ]
 
 # ---------------------------------------------------------------------------
