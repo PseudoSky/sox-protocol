@@ -1013,56 +1013,24 @@ class SharedMemoryTarget:
 
         if operation == "list_channels":
             channels = await store.list_channels()
-            return {
-                "channels": channels,
-                "protocol_version": "1.0",
-                "_sox_protocol": {
+            result: dict[str, object] = {"channels": channels}
+            if "_sox_protocol" not in result:
+                result["_sox_protocol"] = {
                     "server_version": "1.0",
                     "supported_versions": ["1.0"],
                     "min_client_version": "1.0",
-                },
-            }
+                }
+            return result
 
         if operation == "channels_ack":
             return {"acked_at": time.time(), "status": args.get("status", "received")}
 
         if operation == "channels_heartbeat":
-            # Record into in-memory liveness table
-            import time as _time_hb
-            self._liveness[agent_id] = {
-                "last_heartbeat_at_ns": _time_hb.time_ns(),
-                "status": args.get("status", "online"),
-                "namespace": args.get("namespace"),
-            }
-            # Emit presence event
-            presence_body = {
-                "event": f"agent_{args.get('status', 'online')}",
-                "agent_id": agent_id,
-                "state": args.get("status", "online"),
-                "changed_at": time.time(),
-            }
-            import copy as _copy
-            import time as _time
-            async with store._lock:
-                seq = sum(1 for m in store._messages if m.channel == "sox/presence") + 1
-                from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
-                    _StoredMessage,
-                )
-                msg_id = store._next_id
-                store._next_id += 1
-                msg = _StoredMessage(
-                    id=msg_id,
-                    channel="sox/presence",
-                    sender="__server__",
-                    body=_copy.deepcopy(presence_body),
-                    correlation_id=None,
-                    sent_at=_time.time(),
-                )
-                msg.seq = seq  # type: ignore[attr-defined]
-                msg.reply_to = None  # type: ignore[attr-defined]
-                store._messages.append(msg)
-            store._new_message_event.set()
-            return {"recorded_at": time.time(), "status": args.get("status", "online")}
+            return await store.heartbeat(
+                agent_id,
+                str(args.get("status", "online")),
+                int(args["ttl"]) if "ttl" in args and args["ttl"] is not None else None,
+            )
 
         if operation == "replay":
             channel = args["channel"]
@@ -1074,40 +1042,18 @@ class SharedMemoryTarget:
             return {"messages": replay_msgs, "has_more": has_more}
 
         if operation == "list_agents":
-            import time as _time_la
-            _STALE_S = 30.0
-            _OFFLINE_S = 90.0
-            status_filter = args.get("status_filter")
-            ns_filter = args.get("namespace")
-            now_ns = _time_la.time_ns()
-            result_agents: list[dict[str, Any]] = []
-            for aid, rec in list(self._liveness.items()):
-                hb_ns = rec["last_heartbeat_at_ns"]
-                reported = rec["status"]
-                ns = rec.get("namespace")
-                if reported == "offline":
-                    state = "offline"
-                else:
-                    age_s = (now_ns - hb_ns) / 1_000_000_000
-                    if age_s >= _OFFLINE_S:
-                        state = "offline"
-                    elif age_s >= _STALE_S:
-                        state = "stale"
-                    elif reported == "busy":
-                        state = "busy"
-                    else:
-                        state = "online"
-                if status_filter is not None and state not in status_filter:
-                    continue
-                if ns_filter is not None and ns != ns_filter:
-                    continue
-                result_agents.append({
-                    "agent_id": aid,
-                    "presence_state": state,
-                    "last_heartbeat_at": hb_ns,
-                    "namespace": ns,
-                })
-            return {"agents": result_agents}
+            status_filter_raw = args.get("status_filter")
+            status_filter_list: list[str] | None = (
+                [str(s) for s in status_filter_raw]
+                if isinstance(status_filter_raw, list)
+                else None
+            )
+            ns_filter: str | None = args.get("namespace")  # type: ignore[assignment]
+            agents = await store.list_agents(
+                status_filter=status_filter_list,
+                namespace=ns_filter,
+            )
+            return {"agents": agents}
 
         if operation in ("group_create", "group_invite", "group_join",
                          "group_leave", "group_list_members"):
@@ -1158,7 +1104,7 @@ class SharedMemoryTarget:
                 if not already:
                     members.append({"agent_id": invitee, "status": "invited", "joined_at": now})
                 store._groups[group_id] = members
-            return {"group_id": group_id, "invited_agent": invitee, "invited_at": now}
+            return {"invited": True, "agent_id": invitee, "invited_at": now}
 
         if operation == "group_join":
             async with store._lock:

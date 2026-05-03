@@ -29,8 +29,8 @@ sequence:
       group_id: "group/test-group-cij"
       agent_id: agent-group-member
     expected_output:
-      group_id: "{{any_string}}"
-      invited_agent: agent-group-member
+      invited: true
+      agent_id: agent-group-member
       invited_at: "{{any_number}}"
 
   - id: join-group

@@ -320,9 +320,10 @@ class MemoryStore(BackingStore):
         return {"message_id": message_id, "status": status, "acked_at": acked_at}
 
     async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
-        """Update liveness record for agent_id.
+        """Update liveness record for agent_id and emit on sox/presence.
 
         Spec: spec/operations/channels_heartbeat.output.schema.json
+        Spec: spec/primitives/presence.md §5
         """
         now = time.time()
         expires_at = now + (ttl or 30)
@@ -334,6 +335,29 @@ class MemoryStore(BackingStore):
                 "expires_at": expires_at,
                 "namespace": existing.get("namespace"),
             }
+            # Emit presence-change event on sox/presence (spec/primitives/presence.md §5).
+            presence_channel = "sox/presence"
+            seq = self._channel_seq.get(presence_channel, 0) + 1
+            self._channel_seq[presence_channel] = seq
+            msg_id = self._next_id
+            self._next_id += 1
+            presence_msg = _StoredMessage(
+                id=msg_id,
+                channel=presence_channel,
+                sender="__server__",
+                body={
+                    "event": f"agent_{status}",
+                    "agent_id": agent_id,
+                    "state": status,
+                    "changed_at": now,
+                },
+                correlation_id=None,
+                sent_at=now,
+                seq=seq,
+                reply_to=None,
+            )
+            self._messages.append(presence_msg)
+        self._new_message_event.set()
         return {
             "agent_id": agent_id,
             "status": status,

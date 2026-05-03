@@ -17,6 +17,6 @@ sequence:
     input: {}
     expected_output:
       channels: "{{any_array}}"
-      protocol_version: "{{any_string}}"
+      _sox_protocol: "{{any_object}}"
 
 assertions: []

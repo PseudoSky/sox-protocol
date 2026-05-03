@@ -551,10 +551,10 @@ class SqliteStore(BackingStore):
         return {"message_id": message_id, "status": status, "acked_at": acked_at}
 
     async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
-        """Update liveness record for agent_id.
+        """Update liveness record for agent_id and emit on sox/presence.
 
-        TODO: persist to DB in future
         Spec: spec/operations/channels_heartbeat.output.schema.json
+        Spec: spec/primitives/presence.md §5
         """
         now = time.time()
         expires_at = now + (ttl or 30)
@@ -565,6 +565,17 @@ class SqliteStore(BackingStore):
             "expires_at": expires_at,
             "namespace": existing.get("namespace"),
         }
+        # Emit presence-change event on sox/presence (spec/primitives/presence.md §5).
+        await self.send(
+            "sox/presence",
+            "__server__",
+            {
+                "event": f"agent_{status}",
+                "agent_id": agent_id,
+                "state": status,
+                "changed_at": now,
+            },
+        )
         return {
             "agent_id": agent_id,
             "status": status,

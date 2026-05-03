@@ -491,10 +491,10 @@ class FilesystemStore(BackingStore):
         return {"message_id": message_id, "status": status, "acked_at": acked_at}
 
     async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
-        """Update liveness record for agent_id.
+        """Update liveness record for agent_id and emit on sox/presence.
 
-        TODO: persist to filesystem in future
         Spec: spec/operations/channels_heartbeat.output.schema.json
+        Spec: spec/primitives/presence.md §5
         """
         self.__init_extras()
         now = time.time()
@@ -506,6 +506,17 @@ class FilesystemStore(BackingStore):
             "expires_at": expires_at,
             "namespace": existing.get("namespace"),
         }
+        # Emit presence-change event on sox/presence (spec/primitives/presence.md §5).
+        await self.send(
+            "sox/presence",
+            "__server__",
+            {
+                "event": f"agent_{status}",
+                "agent_id": agent_id,
+                "state": status,
+                "changed_at": now,
+            },
+        )
         return {
             "agent_id": agent_id,
             "status": status,

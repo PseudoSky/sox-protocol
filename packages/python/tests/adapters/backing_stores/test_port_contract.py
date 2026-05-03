@@ -741,3 +741,142 @@ class TestUnsubscribeDiscard:
         assert pending_cleared == 0
         msgs = await store.recv("agent-d")
         assert len(msgs) == 1, f"expected message still present, got {len(msgs)}"
+
+
+# ---------------------------------------------------------------------------
+# TestGroupInviteOutput — spec/operations/group_invite.output.schema.json
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("store")
+class TestGroupInviteOutput:
+    """Verify group_invite returns the spec-canonical output shape.
+
+    Spec: spec/operations/group_invite.output.schema.json
+    Required fields: invited (bool), agent_id (str), invited_at (int/float).
+    """
+
+    @pytest.mark.asyncio
+    async def test_group_invite_returns_spec_fields(self, store: BackingStore) -> None:
+        """group_invite must return {invited, agent_id, invited_at} — spec shape."""
+        group = await store.group_create(creator_id="owner-gi", group_id="gi-test-1")
+        group_id: str = str(group["group_id"])
+
+        result = await store.group_invite(
+            inviter_id="owner-gi", group_id=group_id, invitee_id="invitee-gi"
+        )
+
+        assert "invited" in result, "missing 'invited' field (spec-required)"
+        assert "agent_id" in result, "missing 'agent_id' field (spec-required)"
+        assert "invited_at" in result, "missing 'invited_at' field (spec-required)"
+        # Must NOT contain legacy field names
+        assert "invited_agent" not in result, "legacy 'invited_agent' must not be present"
+        assert result.get("agent_id") == "invitee-gi"
+
+    @pytest.mark.asyncio
+    async def test_group_invite_invited_true_for_new_invitee(self, store: BackingStore) -> None:
+        """invited=True when invitee is newly added."""
+        group = await store.group_create(creator_id="owner-gi2", group_id="gi-test-2")
+        group_id = str(group["group_id"])
+
+        result = await store.group_invite(
+            inviter_id="owner-gi2", group_id=group_id, invitee_id="new-invitee"
+        )
+
+        assert result["invited"] is True
+
+    @pytest.mark.asyncio
+    async def test_group_invite_invited_at_is_numeric(self, store: BackingStore) -> None:
+        """invited_at must be a numeric timestamp."""
+        group = await store.group_create(creator_id="owner-gi3", group_id="gi-test-3")
+        group_id = str(group["group_id"])
+
+        result = await store.group_invite(
+            inviter_id="owner-gi3", group_id=group_id, invitee_id="ts-invitee"
+        )
+
+        invited_at = result["invited_at"]
+        assert isinstance(invited_at, (int, float)), (
+            f"invited_at must be numeric, got {type(invited_at)}"
+        )
+        assert float(str(invited_at)) > 0
+
+    @pytest.mark.asyncio
+    async def test_group_invite_non_member_raises_value_error(
+        self, store: BackingStore
+    ) -> None:
+        """Inviter who is not an active member must raise ValueError."""
+        group = await store.group_create(creator_id="owner-gi4", group_id="gi-test-4")
+        group_id = str(group["group_id"])
+
+        with pytest.raises(ValueError):
+            await store.group_invite(
+                inviter_id="non-member", group_id=group_id, invitee_id="target"
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestHeartbeatPresenceEmit — spec/primitives/presence.md §5
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("store")
+class TestHeartbeatPresenceEmit:
+    """Verify heartbeat emits a message on sox/presence.
+
+    Spec: spec/primitives/presence.md §5
+    Body shape: {event, agent_id, state, changed_at}
+    """
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_emits_on_sox_presence(self, store: BackingStore) -> None:
+        """A subscriber to sox/presence receives a message after heartbeat."""
+        await store.subscribe("observer-hb", "sox/presence")
+        await store.heartbeat("agent-hb-emit", "online")
+
+        msgs = await store.recv("observer-hb")
+        assert len(msgs) >= 1, "expected at least 1 message on sox/presence after heartbeat"
+        msg = msgs[0]
+        assert msg["channel"] == "sox/presence"
+        assert msg["sender"] == "__server__"
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_presence_body_shape(self, store: BackingStore) -> None:
+        """sox/presence event body must contain event, agent_id, state, changed_at."""
+        await store.subscribe("observer-shape", "sox/presence")
+        await store.heartbeat("agent-body-shape", "busy")
+
+        msgs = await store.recv("observer-shape")
+        assert len(msgs) >= 1
+        body = msgs[0]["body"]
+        assert isinstance(body, dict)
+        assert "event" in body, "missing 'event' field"
+        assert "agent_id" in body, "missing 'agent_id' field"
+        assert "state" in body, "missing 'state' field"
+        assert "changed_at" in body, "missing 'changed_at' field"
+        assert body["agent_id"] == "agent-body-shape"
+        assert body["state"] == "busy"
+        assert "busy" in str(body["event"])
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_offline_emits_agent_offline(self, store: BackingStore) -> None:
+        """Heartbeat with status=offline emits agent_offline event."""
+        await store.subscribe("observer-offline", "sox/presence")
+        await store.heartbeat("agent-going-offline", "offline")
+
+        msgs = await store.recv("observer-offline")
+        assert len(msgs) >= 1
+        body = msgs[0]["body"]
+        assert isinstance(body, dict)
+        assert body["state"] == "offline"
+        assert "offline" in str(body["event"])
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_presence_sender_is_server(self, store: BackingStore) -> None:
+        """sox/presence messages must be emitted by __server__, not the calling agent."""
+        await store.subscribe("observer-sender", "sox/presence")
+        await store.heartbeat("agent-sender-check", "online")
+
+        msgs = await store.recv("observer-sender")
+        assert len(msgs) >= 1
+        assert msgs[0]["sender"] == "__server__"
