@@ -77,6 +77,8 @@ class BackingStore(ABC):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
+        *,
+        reply_to: str | None = None,
     ) -> tuple[str, float, int, BackpressureInfo]:
         """Append a message to *channel* and return ``(message_id, sent_at, seq)``.
 
@@ -89,6 +91,11 @@ class BackingStore(ABC):
             correlation_id: Optional caller-supplied correlation token.  When
                 provided, callers MAY use it for application-level
                 deduplication (``spec/ports/backing-store.md §4.1``).
+            reply_to: Optional ``message_id`` of the parent message this
+                message is replying to.  Used to build threading chains.
+                When ``None`` (the default), the message is a top-level
+                message with no parent.  Echoed verbatim in the stored
+                envelope and returned on ``recv``/``replay``.
 
         Returns:
             A ``(message_id, sent_at, seq, backpressure)`` 4-tuple where

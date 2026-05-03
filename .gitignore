@@ -15,3 +15,6 @@ node_modules/
 packages/typescript/node_modules/
 packages/typescript/package-lock.json
 packages/typescript/dist/
+
+# Claude Code agent worktrees (transient)
+.claude/worktrees/

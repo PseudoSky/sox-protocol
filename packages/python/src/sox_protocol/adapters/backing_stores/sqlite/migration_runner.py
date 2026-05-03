@@ -71,6 +71,7 @@ def _parse_version(v: str) -> tuple[int, ...]:
 # new shape for fresh databases.
 _MIGRATION_CHAIN: list[tuple[str, str]] = [
     ("1.0", "1.1"),
+    ("1.1", "1.2"),
 ]
 
 
@@ -134,12 +135,21 @@ async def _apply_migration(
             f"(needed to upgrade {from_version} → {to_version})"
         )
 
-    # Migration-specific structural-skip detection. For v1.0 → v1.1 we
-    # skip if `seq` already exists (which it will on fresh databases that
-    # got the latest schema.sql directly).
+    # Migration-specific structural-skip detection.  For each migration we
+    # check whether its structural change is already present (which happens
+    # when a fresh database was initialised from the latest schema.sql).
     needs_apply = True
     if (from_version, to_version) == ("1.0", "1.1"):
         if await _column_exists(conn, "messages", "seq"):
+            needs_apply = False
+            _log.info(
+                "Migration %s → %s: structural change already present; "
+                "recording version bump only.",
+                from_version,
+                to_version,
+            )
+    elif (from_version, to_version) == ("1.1", "1.2"):
+        if await _column_exists(conn, "messages", "reply_to"):
             needs_apply = False
             _log.info(
                 "Migration %s → %s: structural change already present; "
@@ -236,8 +246,12 @@ async def migrate(
         #     Detection: the structural marker column is missing → treat
         #     the database as starting at the earliest known migration
         #     source so the chain runs in full.
-        seq_column_present = await _column_exists(conn, "messages", "seq")
-        if seq_column_present:
+        # Fresh-database detection: check for the latest-version structural
+        # marker column (reply_to, added in v1.2).  A fresh database
+        # initialised from schema.sql has this column already; we just
+        # record the target version and skip the chain.
+        reply_to_present = await _column_exists(conn, "messages", "reply_to")
+        if reply_to_present:
             await _set_persisted_version(conn, target_version)
             await conn.commit()
             return starting, []

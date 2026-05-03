@@ -208,6 +208,8 @@ class FilesystemStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
+        *,
+        reply_to: str | None = None,
     ) -> tuple[str, float, int, BackpressureInfo]:
         """Write a message file and return ``(message_id, sent_at, seq, backpressure)``.
 
@@ -236,6 +238,7 @@ class FilesystemStore(BackingStore):
             "correlation_id": correlation_id,
             "sent_at": sent_at,
             "seq": seq,
+            "reply_to": reply_to,
         }
         dest = msgs_dir / filename
         _atomic_write(dest, json.dumps(payload))

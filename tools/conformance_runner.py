@@ -998,40 +998,19 @@ class SharedMemoryTarget:
             body = args["body"]
             correlation_id = args.get("correlation_id")
             reply_to = args.get("reply_to")
-
-            # Assign seq atomically
-            async with store._lock:
-                # Count existing messages on this channel for seq
-                seq = sum(1 for m in store._messages if m.channel == channel) + 1
-                import time as _time
-                sent_at = _time.time()
-                from sox_protocol.adapters.backing_stores.memory.store import (  # type: ignore[import]
-                    _StoredMessage,
-                )
-                msg_id = store._next_id
-                store._next_id += 1
-                import copy as _copy
-                msg = _StoredMessage(
-                    id=msg_id,
-                    channel=channel,
-                    sender=agent_id,
-                    body=_copy.deepcopy(body),
-                    correlation_id=correlation_id,
-                    sent_at=sent_at,
-                )
-                # Store reply_to as extra attribute
-                msg.reply_to = reply_to  # type: ignore[attr-defined]
-                msg.seq = seq  # type: ignore[attr-defined]
-                store._messages.append(msg)
-            store._new_message_event.set()
+            corr_str = str(correlation_id) if correlation_id is not None else None
+            reply_to_str = str(reply_to) if reply_to is not None else None
+            message_id, sent_at, seq, backpressure = await store.send(
+                channel, agent_id, body, corr_str, reply_to=reply_to_str
+            )
             return {
                 "sent_at": sent_at,
-                "message_id": str(msg_id),
+                "message_id": message_id,
                 "seq": seq,
                 "backpressure": {
-                    "queue_depth": 0,
-                    "threshold": 1000,
-                    "state": "ok",
+                    "queue_depth": backpressure.queue_depth,
+                    "threshold": backpressure.threshold,
+                    "state": backpressure.state,
                 },
             }
 
@@ -1039,20 +1018,7 @@ class SharedMemoryTarget:
             max_messages = args.get("max_messages", 50)
             channel_filter: list[str] | None = args.get("channels")
             msgs = await store.recv(agent_id, channel_filter, max_messages)
-            # Augment with seq if not present
-            result_msgs: list[dict[str, Any]] = []
-            for m in msgs:
-                wire = dict(m)
-                if "seq" not in wire:
-                    # Find the seq from stored message
-                    async with store._lock:
-                        for sm in store._messages:
-                            if str(sm.id) == wire.get("message_id"):
-                                wire["seq"] = getattr(sm, "seq", 1)
-                                wire["reply_to"] = getattr(sm, "reply_to", None)
-                                break
-                result_msgs.append(wire)
-            return {"drained_at": time.time(), "messages": result_msgs}
+            return {"drained_at": time.time(), "messages": msgs}
 
         if operation == "list_channels":
             channels = await store.list_channels()
@@ -1108,9 +1074,12 @@ class SharedMemoryTarget:
             return {"recorded_at": time.time(), "status": args.get("status", "online")}
 
         if operation == "replay":
+            # NOTE: simulator path. Phase 03-fix-replay-since will replace this
+            # with a real store.replay() call once the impl honors `since`
+            # end-to-end and the corresponding HTTP fixtures pass.
             channel = args["channel"]
-            since_seq = args.get("since_seq", 0)
-            limit = args.get("limit", 100)
+            since_seq = int(args.get("since_seq", 0))
+            limit = int(args.get("limit", 100))
             async with store._lock:
                 msgs_out = []
                 for sm in store._messages:

@@ -49,6 +49,12 @@ def _matches_pattern(channel: str, pattern: str) -> bool:
 
 def _build_message(row: aiosqlite.Row) -> dict[str, object]:
     """Convert a ``messages`` table row into a spec-conformant message dict."""
+    # reply_to was added in schema v1.2; guard against rows from pre-migration
+    # databases where the column may not yet exist (row access raises IndexError).
+    try:
+        reply_to: object = row["reply_to"]
+    except IndexError:
+        reply_to = None
     return {
         "message_id": str(row["id"]),
         "channel": row["channel"],
@@ -58,7 +64,7 @@ def _build_message(row: aiosqlite.Row) -> dict[str, object]:
         "sent_at": row["sent_at"],
         "seq": row["seq"],
         "ts": None,
-        "reply_to": None,
+        "reply_to": reply_to,
         "delivered_to": None,
         "origin_server": None,
         "_meta": None,
@@ -82,7 +88,7 @@ class SqliteStore(BackingStore):
         msg_id, sent_at, seq = await store.send("ticket:X", "agent-a", {"text": "hi"})
     """
 
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
 
     def __init__(
         self,
@@ -191,6 +197,8 @@ class SqliteStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
+        *,
+        reply_to: str | None = None,
     ) -> tuple[str, float, int, BackpressureInfo]:
         """Persist a message and return ``(message_id, sent_at, seq, backpressure)``.
 
@@ -216,10 +224,10 @@ class SqliteStore(BackingStore):
             queue_depth: int = depth_row[0]
         async with conn.execute(
             """
-            INSERT INTO messages (channel, sender, body, correlation_id, sent_at, delivered_to, seq)
-            VALUES (?, ?, ?, ?, ?, '[]', ?)
+            INSERT INTO messages (channel, sender, body, correlation_id, sent_at, delivered_to, seq, reply_to)
+            VALUES (?, ?, ?, ?, ?, '[]', ?, ?)
             """,
-            (channel, sender, body_json, correlation_id, sent_at, seq),
+            (channel, sender, body_json, correlation_id, sent_at, seq, reply_to),
         ) as cur:
             row_id = cur.lastrowid
         await conn.commit()
@@ -275,7 +283,7 @@ class SqliteStore(BackingStore):
         # interleave between our SELECT and UPDATE within this process.
         async with conn.execute(
             """
-            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq, reply_to
             FROM messages
             ORDER BY channel, sent_at ASC, id ASC
             """
@@ -459,7 +467,7 @@ class SqliteStore(BackingStore):
 
         async with conn.execute(
             """
-            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+            SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq, reply_to
             FROM messages
             WHERE id > ?
             ORDER BY channel, sent_at ASC, id ASC
@@ -609,7 +617,7 @@ class SqliteStore(BackingStore):
         if until is not None:
             async with conn.execute(
                 """
-                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq, reply_to
                 FROM messages
                 WHERE channel = ? AND seq >= ? AND seq <= ?
                 ORDER BY seq ASC, id ASC
@@ -620,7 +628,7 @@ class SqliteStore(BackingStore):
         else:
             async with conn.execute(
                 """
-                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq
+                SELECT id, channel, sender, body, correlation_id, sent_at, delivered_to, seq, reply_to
                 FROM messages
                 WHERE channel = ? AND seq >= ?
                 ORDER BY seq ASC, id ASC

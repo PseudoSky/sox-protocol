@@ -16,18 +16,16 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
-| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `READY` | python-pro | 1 | 2026-05-03T00:00:00Z |
-| 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
+| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `DONE` | python-pro+orchestrator | 2 | 2026-05-03T00:00:00Z |
+| 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `READY` | python-pro | 0 | 2026-05-03T00:00:00Z |
 | 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 06-fix-group-invite-output | Resolve spec/impl mismatch: `spec/operations/group_invite.output.schema.json` says `{invited, agent_id}` but impl emits `{group_id, invited_agent}`. Decide which is canonical (spec normally wins; check ADR / git history for original intent). Update the loser. Delete the `tools/conformance_runner.py:1108` client-side remap that masks this on stdio. Closes `groups/01-create-invite-join`. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 07-review | Code review covering all 6 fixes + verification that no new harness simulations were introduced. HTTP conformance MUST reach 33/0/34 (parity with stdio). Closes engagement. | `BLOCKED` | code-reviewer | 0 | 2026-05-04T00:00:00Z |
 
-## Currently next action
+## Phase 01-plan retrospective
 
-Dispatch **phase 02-fix-reply-to** to `python-pro`. Inputs:
-- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (tasks `tsk_threading_01..03`, ordering DAG)
-- `.workflow/plans/fixture-spec-realignment/implementation-plan.md` (per-fixture detail + risk register R1)
+(See "Currently next action" further down for the live next step.)
 
 Phase 01-plan transition (2026-05-03):
 - Read STATE.md, RESUME.md, V1-SCOPE.md, commit bb7aaa7 body, conformance_runner.py:766-1127, BackingStore ABC + impls, store_dispatch middleware, all 9 failing fixture YAMLs.
@@ -74,4 +72,33 @@ The python-pro agent produced ~150 LOC of structurally sound work (BackingStore.
 - Run `python3 -m pytest packages/python/tests/ --tb=line -q -x --ignore=packages/python/tests/transports/http/test_coverage2.py` (NOTE: `-x` to fail-fast) early and often, not just at the end.
 - When individual tests pass but full-run fails, the cause is almost always: (a) shared sqlite file across tests, (b) session-scoped fixture state, (c) `asyncio.get_event_loop()` deprecation pollution per RESUME.md §"Test pollution from `enforcer/` tests". Investigate WHICH of these before continuing.
 - If you reuse the stashed work as reference: `git stash show -p stash@{0}` reads it. Do NOT `git stash pop` — start fresh in your worktree.
+
+### 2026-05-03 — phase 02 attempt 2 (truncated; work salvaged by orchestrator)
+
+The python-pro agent (worktree-isolated) truncated mid-edit ("Now update MemoryStore.send:") and committed nothing — the worktree was auto-cleaned.
+
+**Re-evaluation of attempt 1:** The orchestrator popped attempt 1's stash back into the parent repo and re-ran the four invariants in isolation (no other agents writing to the tree concurrently). Result:
+
+- **pytest: 1238 passed, 0 failed** — the "45-failures" in the original attempt 1 verification was caused by AGENT COLLISION: the test-automator (live-install-e2e phase 02) was concurrently writing files in `tests/fixtures/live_install/` during the python-pro agent's pytest run. The pollution was real but environmental, not in the diff.
+- mypy --strict: clean (81 source files)
+- stdio conformance: 31 / 2 / 34 — the 2 failures were `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor`. The agent had over-deleted, removing the replay simulator (intended for phase 03 deletion) along with the send/recv simulators (phase 02 scope). Orchestrator restored the replay simulator branch with a TODO comment pointing to phase 03.
+- HTTP conformance: 27 / 6 / 34 (+3 from baseline 24/9/34, exactly the 3 threading fixtures the plan targeted).
+
+**Net of orchestrator fix-up:**
+- stdio: 33/0/34 (parity preserved)
+- HTTP: 27/6/34 (3 threading fixtures now pass via real wire)
+- pytest: 1238 passed
+- mypy: clean
+
+Phase 02 marked DONE. Phase 03 ready (the fix-replay-since gap is now visible on stdio if the simulator were removed; the natural progression is for phase 03 to fix the impl, then delete that simulator branch).
+
+## Currently next action (phase 02 closed)
+
+Dispatch **phase 03-fix-replay-since** (python-pro, worktree-isolated). Inputs:
+- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (replay tasks + DAG)
+- `tools/conformance_runner.py:1076-1095` — the simulator branch the orchestrator restored. Phase 03 must delete this branch (re-introducing the call to `store.replay()`) AS PART OF the fix.
+- `BackingStore.replay` impl in MemoryStore + SqliteStore — the planner hypothesized `since` is not honored end-to-end. Verify and fix.
+- Spec ambiguity Q2 from phase 01: where does the version-block get injected? (relevant when phase 05 lands).
+
+**Lesson for phase 03:** keep the simulator-deletion in lock-step with the impl fix. Do not delete a simulator branch unless the underlying impl already passes the affected fixtures on BOTH stdio and HTTP. Run conformance on both transports as a cross-check.
 

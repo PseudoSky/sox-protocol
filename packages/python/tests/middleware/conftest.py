@@ -38,6 +38,8 @@ class StubBackingStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
+        *,
+        reply_to: str | None = None,
     ) -> tuple[str, float, int, BackpressureInfo]:
         import time
 
@@ -54,6 +56,7 @@ class StubBackingStore(BackingStore):
                 "correlation_id": correlation_id,
                 "sent_at": sent_at,
                 "seq": seq,
+                "reply_to": reply_to,
             }
         )
         return (msg_id, sent_at, seq, BackpressureInfo(queue_depth=0, threshold=1000, state="ok"))

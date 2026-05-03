@@ -105,8 +105,10 @@ class StoreDispatchMiddleware:
                 body = {}
             correlation_id = inp.get("correlation_id")
             corr_str = str(correlation_id) if correlation_id is not None else None
+            reply_to_raw = inp.get("reply_to")
+            reply_to_str = str(reply_to_raw) if reply_to_raw is not None else None
             message_id, sent_at, seq, backpressure = await self._store.send(
-                channel, sender, body, corr_str
+                channel, sender, body, corr_str, reply_to=reply_to_str
             )
             return {
                 "message_id": message_id,

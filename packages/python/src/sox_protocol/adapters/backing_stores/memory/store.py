@@ -122,6 +122,8 @@ class MemoryStore(BackingStore):
         sender: str,
         body: dict[str, object],
         correlation_id: str | None = None,
+        *,
+        reply_to: str | None = None,
     ) -> tuple[str, float, int, BackpressureInfo]:
         """Persist a message in memory and return ``(message_id, sent_at, seq, backpressure)``.
 
@@ -141,6 +143,7 @@ class MemoryStore(BackingStore):
                 correlation_id=correlation_id,
                 sent_at=sent_at,
                 seq=seq,
+                reply_to=reply_to,
             )
             self._messages.append(msg)
             # Compute queue depth: undelivered messages on this channel

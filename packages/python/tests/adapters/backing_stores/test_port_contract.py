@@ -140,6 +140,39 @@ class TestRoundTrip:
         msgs = await store.recv("agent-a")
         assert msgs[0]["correlation_id"] is None
 
+    async def test_reply_to_round_trips(self, store: BackingStore) -> None:
+        """reply_to is persisted and echoed verbatim on recv.
+
+        Spec: spec/primitives/threads.md (reply_to links a message to its
+        parent). This exercises the fix for the threading conformance fixtures
+        threading/01-reply-to-link, threading/02-deep-thread, and
+        threading/03-thread-depth-zero.
+        """
+        await store.subscribe("agent-a", "ch:thread")
+        parent_id, _, _, _ = await store.send("ch:thread", "agent-b", {"type": "parent"})
+        # Send a reply referencing the parent message id.
+        await store.send(
+            "ch:thread",
+            "agent-b",
+            {"type": "reply"},
+            reply_to=parent_id,
+        )
+        # Drain both messages.
+        msgs = await store.recv("agent-a")
+        assert len(msgs) == 2
+        # First message is top-level — reply_to must be None.
+        assert msgs[0]["reply_to"] is None
+        # Second message is the reply — reply_to must match the parent id.
+        assert msgs[1]["reply_to"] == parent_id
+
+    async def test_reply_to_defaults_to_none(self, store: BackingStore) -> None:
+        """When reply_to is not supplied it is returned as None (not absent)."""
+        await store.subscribe("agent-a", "ch:noreply")
+        await store.send("ch:noreply", "sender", {"x": 1})
+        msgs = await store.recv("agent-a")
+        assert "reply_to" in msgs[0]
+        assert msgs[0]["reply_to"] is None
+
     async def test_recv_returns_empty_when_no_messages(self, store: BackingStore) -> None:
         """recv returns [] when there are no pending messages."""
         await store.subscribe("agent-a", "ch:empty")

@@ -69,6 +69,40 @@ async def test_store_dispatch_send_non_dict_body_coerced(stub_store: StubBacking
     assert "message_id" in result
 
 
+@pytest.mark.asyncio
+async def test_store_dispatch_send_reply_to_forwarded(stub_store: StubBackingStore) -> None:
+    """reply_to in the input is extracted and forwarded to BackingStore.send.
+
+    Closes threading/01-reply-to-link root cause: StoreDispatchMiddleware was
+    dropping reply_to before this fix.
+    """
+    pipeline = _make_pipeline(stub_store)
+    await pipeline.dispatch(
+        "send",
+        {
+            "channel": "ch:thread",
+            "sender": "alice",
+            "body": {"type": "reply"},
+            "reply_to": "msg-parent-42",
+        },
+        connection_id="c",
+    )
+    assert len(stub_store._messages) == 1
+    assert stub_store._messages[0]["reply_to"] == "msg-parent-42"
+
+
+@pytest.mark.asyncio
+async def test_store_dispatch_send_reply_to_absent_defaults_none(stub_store: StubBackingStore) -> None:
+    """When reply_to is not in the input the store receives None (backward compat)."""
+    pipeline = _make_pipeline(stub_store)
+    await pipeline.dispatch(
+        "send",
+        {"channel": "ch", "sender": "alice", "body": {}},
+        connection_id="c",
+    )
+    assert stub_store._messages[0]["reply_to"] is None
+
+
 # ---------------------------------------------------------------------------
 # recv
 # ---------------------------------------------------------------------------

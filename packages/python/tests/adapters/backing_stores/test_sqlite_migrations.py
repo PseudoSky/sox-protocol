@@ -101,7 +101,7 @@ async def test_get_persisted_version_returns_zero_zero_on_empty(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_v1_0_db_gets_seq_column_after_initialize(tmp_path: Path) -> None:
-    """End-to-end: v1.0 db → SqliteStore.initialize() → seq column exists."""
+    """End-to-end: v1.0 db → SqliteStore.initialize() → seq + reply_to columns exist."""
     db = tmp_path / "v1_0.db"
     await _build_v1_0_db(db, with_data=True)
 
@@ -110,8 +110,9 @@ async def test_v1_0_db_gets_seq_column_after_initialize(tmp_path: Path) -> None:
     try:
         assert store._conn is not None
         assert await _column_exists(store._conn, "messages", "seq")
+        assert await _column_exists(store._conn, "messages", "reply_to")
         v = await get_persisted_version(store._conn)
-        assert v == "1.1"
+        assert v == "1.2"
     finally:
         await store.close()
 
@@ -156,7 +157,7 @@ async def test_initialize_is_idempotent_on_migrated_db(tmp_path: Path) -> None:
     try:
         assert s2._conn is not None
         v = await get_persisted_version(s2._conn)
-        assert v == "1.1"
+        assert v == "1.2"
         # Existing rows still present and consistent.
         async with s2._conn.execute("SELECT COUNT(*) FROM messages") as cur:
             row = await cur.fetchone()
@@ -176,7 +177,7 @@ async def test_fresh_db_records_target_version_directly(tmp_path: Path) -> None:
     try:
         assert store._conn is not None
         v = await get_persisted_version(store._conn)
-        assert v == "1.1"
+        assert v == "1.2"
     finally:
         await store.close()
 
@@ -230,7 +231,7 @@ async def test_refuses_to_downgrade(tmp_path: Path) -> None:
     conn.row_factory = aiosqlite.Row
     try:
         with pytest.raises(ValueError, match="newer than the adapter"):
-            await migrate(conn, "1.1")
+            await migrate(conn, "1.2")
     finally:
         await conn.close()
 
@@ -243,8 +244,8 @@ async def test_no_op_when_already_at_target(tmp_path: Path) -> None:
     await store.initialize()
     try:
         assert store._conn is not None
-        starting, applied = await migrate(store._conn, "1.1")
-        assert starting == "1.1"
+        starting, applied = await migrate(store._conn, "1.2")
+        assert starting == "1.2"
         assert applied == []
     finally:
         await store.close()
@@ -292,7 +293,7 @@ async def test_chain_for_equal_versions_returns_empty(tmp_path: Path) -> None:
         _chain_for,
     )
 
-    assert _chain_for("1.1", "1.1") == []
+    assert _chain_for("1.2", "1.2") == []
 
 
 def test_migration_chain_is_contiguous() -> None:
