@@ -15,6 +15,7 @@ Spec reference: ``spec/ports/identity.md §2, §4, §5``
 
 from __future__ import annotations
 
+import asyncio
 import time as _time_module
 from collections.abc import Callable
 
@@ -70,17 +71,44 @@ class IdentityVerifier:
         self._clock = clock
         # Replay cache: nonce -> timestamp_seen.  TTL-pruned on every verify.
         self._seen_nonces: dict[str, float] = {}
+        # Protects the prune+check+insert sequence against concurrent coroutines.
+        self._nonces_lock: asyncio.Lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _prune_replay_cache(self, now: float) -> None:
-        """Evict expired nonces from the replay cache."""
+        """Evict expired nonces from the replay cache.
+
+        Must be called while ``_nonces_lock`` is held.
+        """
         cutoff = now - self._replay_window
         expired = [n for n, ts in self._seen_nonces.items() if ts < cutoff]
         for n in expired:
             del self._seen_nonces[n]
+
+    async def _check_and_insert_nonce(self, nonce: str, now: float) -> bool:
+        """Atomically prune, check, and insert *nonce* under the replay lock.
+
+        Returns ``True`` if *nonce* was freshly inserted (i.e. not a replay).
+        Returns ``False`` if *nonce* was already present (replay detected).
+
+        The entire prune+check+insert sequence executes while holding
+        ``_nonces_lock``, eliminating the TOCTOU race between concurrent
+        ``verify()`` coroutines that each see the same nonce as absent before
+        either one inserts it.
+
+        The lock is NOT held during signature verification (the CPU-bound step
+        that precedes this call), so concurrent dispatches with distinct nonces
+        are not serialised.
+        """
+        async with self._nonces_lock:
+            self._prune_replay_cache(now)
+            if nonce in self._seen_nonces:
+                return False
+            self._seen_nonces[nonce] = now
+            return True
 
     async def _fail(
         self,
@@ -195,9 +223,25 @@ class IdentityVerifier:
             )
             raise exc5  # pragma: no cover — _fail always raises
 
-        # 5. Replay check (prune first to clean up stale entries).
-        self._prune_replay_cache(now)
-        if request.nonce in self._seen_nonces:
+        # 5. Signature verification (CPU-bound; runs outside the lock so
+        # concurrent dispatches with distinct nonces are not serialised).
+        payload = canonical_payload(request)
+        if not verify_signature(record.public_key, payload, request.signature):
+            exc_sig = SignatureMismatchError("Identity verification failed")
+            await self._fail(
+                exc_sig,
+                claimed_agent_id=request.agent_id,
+                operation=operation,
+                connection_id=connection_id,
+            )
+            raise exc_sig  # pragma: no cover — _fail always raises
+
+        # 7. Atomic replay check + insert under the nonces lock.
+        # _check_and_insert_nonce() prunes stale entries, checks for the nonce,
+        # and inserts it — all inside asyncio.Lock — eliminating the TOCTOU race
+        # between concurrent verify() coroutines with the same nonce.
+        inserted = await self._check_and_insert_nonce(request.nonce, now)
+        if not inserted:
             exc6 = ReplayDetectedError("Duplicate nonce within replay window")
             await self._fail(
                 exc6,
@@ -206,21 +250,6 @@ class IdentityVerifier:
                 connection_id=connection_id,
             )
             raise exc6  # pragma: no cover — _fail always raises
-
-        # 6. Signature verification.
-        payload = canonical_payload(request)
-        if not verify_signature(record.public_key, payload, request.signature):
-            exc7 = SignatureMismatchError("Identity verification failed")
-            await self._fail(
-                exc7,
-                claimed_agent_id=request.agent_id,
-                operation=operation,
-                connection_id=connection_id,
-            )
-            raise exc7  # pragma: no cover — _fail always raises
-
-        # All checks passed — record the nonce and return.
-        self._seen_nonces[request.nonce] = now
         return VerifiedIdentity(
             agent_id=record.agent_id,
             verified_at=now,

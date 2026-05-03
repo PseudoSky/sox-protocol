@@ -440,3 +440,70 @@ async def test_verifier_persists_binding_across_calls(
         req = _make_request(agent_id="alice", private_seed=private_seed)
         result = await verifier.verify(req, operation="recv", connection_id="conn-persistent")
         assert result.agent_id == "alice"
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — TOCTOU regression test
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_same_nonce_only_one_succeeds(
+    reg: InMemoryCredentialRegistry,
+    audit: AuditLogWriter,
+    keypair: tuple[bytes, bytes],
+) -> None:
+    """Exactly one concurrent verify() with the same nonce succeeds; the rest raise ReplayDetectedError.
+
+    Without the asyncio.Lock protecting the prune+check+insert sequence, two or
+    more coroutines can each observe the nonce as absent (between the check and
+    the insert of the first coroutine), causing multiple tasks to pass through
+    the replay guard with the same nonce — violating the replay-protection
+    invariant.
+
+    This test fires N=32 concurrent verify() calls, all sharing a single nonce
+    and a single valid signing key.  The asyncio.Lock in
+    _check_and_insert_nonce() must ensure exactly 1 passes.
+    """
+    import asyncio as _asyncio
+
+    private_seed, pub = keypair
+    await reg.register("alice", pub)
+
+    # Use a real (non-frozen) clock so the timestamp freshness check passes for
+    # all tasks.  The nonce is fixed — every task presents the same envelope.
+    import time as _time
+
+    now = _time.time()
+    fixed_nonce = "concurrent-replay-test-nonce"
+    verifier = IdentityVerifier(reg, audit, replay_window_seconds=300.0)
+
+    req = _make_request(
+        agent_id="alice",
+        nonce=fixed_nonce,
+        timestamp=now,
+        private_seed=private_seed,
+    )
+
+    N = 32
+    successes: list[VerifiedIdentity] = []
+    replay_errors: list[ReplayDetectedError] = []
+
+    async def _attempt() -> None:
+        try:
+            result = await _asyncio.wait_for(
+                verifier.verify(req, operation="send"),
+                timeout=5.0,
+            )
+            successes.append(result)
+        except ReplayDetectedError as exc:
+            replay_errors.append(exc)
+
+    await _asyncio.gather(*[_attempt() for _ in range(N)])
+
+    assert len(successes) == 1, (
+        f"Expected exactly 1 success, got {len(successes)}. "
+        "The nonces lock is either absent or not covering the full check+insert."
+    )
+    assert len(replay_errors) == N - 1, (
+        f"Expected {N - 1} replay rejections, got {len(replay_errors)}."
+    )
