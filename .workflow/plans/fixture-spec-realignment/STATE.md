@@ -16,7 +16,7 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
 | 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
-| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `READY` | python-pro | 0 | 2026-05-03T00:00:00Z |
+| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `READY` | python-pro | 1 | 2026-05-03T00:00:00Z |
 | 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
@@ -61,3 +61,17 @@ V1-SCOPE.md declares these features as v1 MUST. The implementation accepts the i
 - Original surfacing: P5-04 review identified these as the natural successor engagement
 - Spec authority: `docs/V1-SCOPE.md`
 - Harness simulator inventory: `tools/conformance_runner.py:766-1127`
+
+## Attempt log
+
+### 2026-05-03 — phase 02 attempt 1 (FAILED, work stashed)
+
+The python-pro agent produced ~150 LOC of structurally sound work (BackingStore.send `reply_to: str | None = None` keyword-only, MemoryStore + SqliteStore + FilesystemStore persistence, `StoreDispatchMiddleware` plumbing, sqlite migration v1.1→v1.2 adding the `reply_to` column with correct migration_runner chain extension and fresh-DB detection updated to look for `reply_to` instead of `seq`). The diff is preserved in `git stash@{0}` (label: "fixture-spec phase02 attempt-1: …").
+
+**Why it failed:** Full-run pytest produced 45 failures (1193/45). Individual reruns of every failing test in fresh processes passed. Classic test pollution — likely a session-scoped sqlite fixture or shared db file that one test leaves in a state another can't recover from. The agent truncated mid-investigation ("Let me check if that test still passes:") before isolating the cause.
+
+**Lesson for attempt 2:**
+- Run `python3 -m pytest packages/python/tests/ --tb=line -q -x --ignore=packages/python/tests/transports/http/test_coverage2.py` (NOTE: `-x` to fail-fast) early and often, not just at the end.
+- When individual tests pass but full-run fails, the cause is almost always: (a) shared sqlite file across tests, (b) session-scoped fixture state, (c) `asyncio.get_event_loop()` deprecation pollution per RESUME.md §"Test pollution from `enforcer/` tests". Investigate WHICH of these before continuing.
+- If you reuse the stashed work as reference: `git stash show -p stash@{0}` reads it. Do NOT `git stash pop` — start fresh in your worktree.
+
