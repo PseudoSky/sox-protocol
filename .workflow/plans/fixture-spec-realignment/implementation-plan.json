@@ -1,0 +1,364 @@
+{
+  "engagement": "fixture-spec-realignment",
+  "plan_version": "1",
+  "created": "2026-05-04",
+  "planner": "sox-cto-system:planner",
+  "scope_summary": "Per-failure root-cause + file-touch + harness-deletion plan for the 9 HTTP conformance failures. Phases 02-06 of STATE.md each consume one or more nodes here. Stdio currently passes only because tools/conformance_runner.py:766-1127 hand-rolls the missing semantics. Every fix lands the real-wire behavior AND deletes the masking simulator branch.",
+  "verified_assumptions": [
+    {
+      "claim": "BackingStore.send signature does NOT accept reply_to",
+      "evidence": "packages/python/src/sox_protocol/core/ports/backing_store.py:73-112 — async def send(channel, sender, body, correlation_id=None) -> tuple[str, float, int, BackpressureInfo]. No reply_to parameter."
+    },
+    {
+      "claim": "MemoryStore._StoredMessage already has a reply_to field but no path delivers a value",
+      "evidence": "packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py:41 (reply_to: str | None = None) and :55 (to_wire emits reply_to). MemoryStore.send (line 119-159) constructs _StoredMessage WITHOUT setting reply_to."
+    },
+    {
+      "claim": "StoreDispatchMiddleware.send branch ignores ctx.input['reply_to']",
+      "evidence": "packages/python/src/sox_protocol/core/middleware/plugins/store_dispatch.py:100-121 — only channel, sender, body, correlation_id are extracted before calling self._store.send(...)."
+    },
+    {
+      "claim": "spec/operations/group_invite.output.schema.json mandates {invited, agent_id, invited_at}; fixture mandates {group_id, invited_agent, invited_at}",
+      "evidence": "spec/operations/group_invite.output.schema.json required: ['invited','agent_id','invited_at'] additionalProperties:false. spec/conformance/groups/01-create-invite-join.yaml:32-34 expects invited_agent + group_id."
+    },
+    {
+      "claim": "spec/group_invite.output is canonical (post-2fb72ac)",
+      "evidence": "git log -- spec/operations/group_invite.output.schema.json shows commit 2fb72ac 'fix(spec): resolve all 02-patch review findings — group schema/prose alignment'. The schema was deliberately aligned in P3."
+    },
+    {
+      "claim": "BackingStore.send already passes msg.reply_to=None as wire default and stdio's harness simulator (line 996-1036) hand-attaches reply_to to the in-memory _StoredMessage before append",
+      "evidence": "tools/conformance_runner.py:1000 reads args['reply_to']; line 1023 sets msg.reply_to via setattr. This is the masking simulation."
+    },
+    {
+      "claim": "SQLite store has reply_to=None hard-coded in to_wire equivalent",
+      "evidence": "packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py:61 — \"reply_to\": None as a static dict literal."
+    },
+    {
+      "claim": "BackingStore.replay impls in both stores DO honor 'since' end-to-end with the correct comparator",
+      "evidence": "memory/store.py:378-392 filters m.seq >= since and sorts; sqlite/store.py:603-628 issues a SQL WHERE seq >= ? predicate. The implementation is sound; the failure must be at the wire-protocol field naming layer (fixture sends 'since_seq', spec input requires 'since')."
+    },
+    {
+      "claim": "Spec input field name is 'since' (NOT 'since_seq')",
+      "evidence": "spec/operations/replay.input.schema.json required: ['channel','since','limit']. The fixtures use since_seq (replay/01-replay-since-seq.yaml:63 'since_seq: 3'; replay/02:45 'since_seq: 999')."
+    },
+    {
+      "claim": "MemoryStore.unsubscribe ALREADY discards queued-but-unread messages",
+      "evidence": "packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py:279-302 — adds agent_id to msg.delivered_to for matching channels, returns (removed, pending_cleared)."
+    },
+    {
+      "claim": "Stdio tool surface uses key 'patterns' for unsubscribe input; spec uses 'channels'",
+      "evidence": "core/mcp_server/tools.py:273 channels__unsubscribe(patterns: list[str]); spec unsubscribe.input.schema.json required ['channels']. The HTTP route at routes.py:380-403 already supports both via the middleware (store_dispatch.py:151 inp.get('channels', inp.get('patterns', []))) and remaps removed→unsubscribed at line 402-403."
+    },
+    {
+      "claim": "list_channels HTTP route already injects _sox_protocol block",
+      "evidence": "packages/python/src/sox_protocol/adapters/transports/http/routes.py:426-435 augments response with _sox_protocol block when missing. But fixture also requires top-level protocol_version (yaml line 20: 'protocol_version: {{any_string}}')."
+    },
+    {
+      "claim": "HTTP heartbeat does NOT emit a sox/presence event; only the harness simulator does",
+      "evidence": "MemoryStore.heartbeat (memory/store.py:319-339) updates self._liveness only; no message append. tools/conformance_runner.py:1072-1108 hand-builds a presence_body and appends a _StoredMessage on channel='sox/presence' (the masking simulation)."
+    },
+    {
+      "claim": "Fixture unsubscribe expected_output uses key 'unsubscribed'; HTTP route already remaps removed→unsubscribed",
+      "evidence": "routes.py:399-403; subscription-patterns/02-unsubscribe-discards-queue.yaml:38 'unsubscribed: {{any_array}}'. So the unsubscribe failure mode is NOT the field-name remap — it's that pending messages are not actually discarded for THIS fixture path. Need investigation of the recv-after-unsubscribe path: MemoryStore impl does discard via delivered_to set; the simulator at 976-994 also discards. Hypothesis: subscriber_count or recv path is fine on memory store; failure must be in the SqliteStore's unsubscribe — but HTTP runs against MemoryStore via SharedMemoryTarget? Re-check: HTTP uses ProcessHttpTarget (subprocess) which spawns the http server which uses MemoryStore by default. Need phase 04 agent to bisect via direct fixture run."
+    }
+  ],
+  "tasks": [
+    {
+      "id": "tsk_threading_01",
+      "fixture_id": "threading/01-reply-to-link",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:14 (send tool row) — 'Supports reply_to for threading'; line 41 (reply_to envelope row); line 92 (Threading row).",
+      "root_cause_hypothesis": "reply_to is silently dropped at the StoreDispatchMiddleware boundary because (a) the abstract BackingStore.send signature lacks reply_to, (b) StoreDispatchMiddleware.send (store_dispatch.py:100-121) does not extract inp['reply_to'], (c) MemoryStore.send (memory/store.py:119-159) constructs _StoredMessage without setting reply_to even though the dataclass already has the field at line 41, (d) SqliteStore similarly hard-codes reply_to=None in its wire output at line 61. The harness simulator at conformance_runner.py:996-1036 monkey-patches msg.reply_to to make stdio appear to pass.",
+      "fix_target": "impl",
+      "files_to_touch": [
+        "packages/python/src/sox_protocol/core/ports/backing_store.py",
+        "packages/python/src/sox_protocol/core/middleware/plugins/store_dispatch.py",
+        "packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py",
+        "packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py",
+        "packages/python/src/sox_protocol/adapters/backing_stores/filesystem/store.py"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "996-1036", "describes": "SharedMemoryTarget._dispatch 'send' branch hand-rolls _StoredMessage construction with msg.reply_to setattr. Delete the entire branch — let the real Pipeline + StoreDispatchMiddleware + MemoryStore handle send."},
+        {"file": "tools/conformance_runner.py", "lines": "1038-1055", "describes": "SharedMemoryTarget._dispatch 'recv' branch monkey-augments wire['reply_to'] from getattr(sm, 'reply_to', None). Delete; MemoryStore._StoredMessage.to_wire already emits reply_to once the field is populated."},
+        {"file": "tools/conformance_runner.py", "lines": "1110-1126", "describes": "SharedMemoryTarget._dispatch 'replay' branch also monkey-augments reply_to. Delete; covered by tsk_replay_01/02 deletion."}
+      ],
+      "test_additions": [
+        "Unit test in packages/python/tests/adapters/backing_stores/memory/test_store.py: send(reply_to='msg-1') → recv returns reply_to='msg-1' verbatim.",
+        "Unit test in packages/python/tests/adapters/backing_stores/sqlite/test_store.py: same shape against SQLite migration path.",
+        "Middleware test in packages/python/tests/core/middleware/plugins/test_store_dispatch.py: ctx.input={'reply_to':'X'} round-trips through the send branch."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "02-fix-reply-to",
+      "estimated_complexity": "M",
+      "contract_promise": {
+        "modified_signatures": {
+          "BackingStore.send": "async def send(self, channel: str, sender: str, body: dict, correlation_id: str | None = None, reply_to: str | None = None) -> tuple[str, float, int, BackpressureInfo]"
+        },
+        "added_symbols": [],
+        "wire_invariants": [
+          "Existing send call sites without reply_to remain valid (default None).",
+          "to_wire output remains schema-compatible (reply_to was already present, just always None)."
+        ]
+      }
+    },
+    {
+      "id": "tsk_threading_02",
+      "fixture_id": "threading/02-deep-thread",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:92 (Threading row) — 'reply_to on envelope; thread_depth on recv (0, n, or -1); server-side ancestor walk'.",
+      "root_cause_hypothesis": "Same reply_to-dropping root cause as tsk_threading_01. Additionally: spec mandates 'server-side ancestor walk' for thread_depth>=1, but recv impl does not honor thread_depth. Verify by inspecting spec/operations/recv.input.schema.json and MemoryStore.recv. Phase 02 must investigate whether recv thread_depth is also impl-missing or whether the fixture only requires reply_to to be echoed (the assertions section only checks no_loss and seq+reply_to on the deepest message). Conservative reading: ONLY reply_to plumbing is needed; thread_depth ancestor inlining is NOT exercised by this fixture's expected_output (it asserts on seq:3 + reply_to to level-2). PROCEED ASSUMING reply_to fix alone closes this fixture; if false, escalate to a thread_depth subtask.",
+      "fix_target": "impl",
+      "files_to_touch": [],
+      "harness_simulations_to_delete": [],
+      "test_additions": [
+        "Conformance fixture itself acts as the integration test once tsk_threading_01 lands."
+      ],
+      "depends_on_fixtures": ["threading/01-reply-to-link"],
+      "phase": "02-fix-reply-to",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["Closes once tsk_threading_01 lands; no additional impl change expected."]
+      }
+    },
+    {
+      "id": "tsk_threading_03",
+      "fixture_id": "threading/03-thread-depth-zero",
+      "v1_scope_anchor": "spec/operations/recv.input.schema.json#thread_depth + docs/V1-SCOPE.md:92.",
+      "root_cause_hypothesis": "Same as tsk_threading_01. thread_depth=0 explicitly means 'do NOT inline ancestors' — the fixture only asserts that reply_to is present as a string reference. Closes when reply_to plumbs through.",
+      "fix_target": "impl",
+      "files_to_touch": [],
+      "harness_simulations_to_delete": [],
+      "test_additions": [],
+      "depends_on_fixtures": ["threading/01-reply-to-link"],
+      "phase": "02-fix-reply-to",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["Closes when tsk_threading_01 lands."]
+      }
+    },
+    {
+      "id": "tsk_replay_01",
+      "fixture_id": "replay/01-replay-since-seq",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:22 (replay row) — 'Replay historical messages from a channel using a per-channel seq cursor. Parameters: channel, since (seq), until (seq or null), limit'.",
+      "root_cause_hypothesis": "Wire-protocol field-name mismatch: fixture sends 'since_seq' but spec/operations/replay.input.schema.json requires 'since'. The HTTP route at routes.py:572-584 forwards body verbatim to the pipeline; StoreDispatchMiddleware.replay branch (store_dispatch.py:217-232) reads inp.get('since', 0) — so since_seq is silently treated as 0 and ALL messages are returned (4 instead of expected 2). Stdio passes only because the harness simulator (conformance_runner.py:1110-1126) reads args.get('since_seq', 0). FIX-TARGET: spec — the fixture is correct in INTENT but uses an outdated parameter name; canonical spec says 'since'. Update the fixture YAML to use 'since: 3' (and fixture 02 to use 'since: 999'). Alternative fix-target: accept both 'since' and 'since_seq' in the input schema as a transitional alias — REJECTED: spec/operations/replay.input.schema.json has additionalProperties default-false on the parent, and adding aliases pollutes a v1 contract. Spec wins; fixture is the loser.",
+      "fix_target": "spec",
+      "files_to_touch": [
+        "spec/conformance/replay/01-replay-since-seq.yaml",
+        "spec/conformance/replay/02-replay-empty-future-cursor.yaml"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "1110-1126", "describes": "SharedMemoryTarget._dispatch 'replay' branch reads args.get('since_seq', 0). Delete the whole branch (both transports must dispatch through StoreDispatchMiddleware which uses 'since')."}
+      ],
+      "test_additions": [
+        "After fixture rename, run conformance via stdio — must pass through the real pipeline (no simulator path)."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "03-fix-replay-since",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["Spec replay.input.schema.json is unchanged; only the fixture YAML field-name aligns."]
+      }
+    },
+    {
+      "id": "tsk_replay_02",
+      "fixture_id": "replay/02-replay-empty-future-cursor",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:22 (replay row).",
+      "root_cause_hypothesis": "Same as tsk_replay_01 — fixture uses since_seq, spec requires since.",
+      "fix_target": "spec",
+      "files_to_touch": [],
+      "harness_simulations_to_delete": [],
+      "test_additions": [],
+      "depends_on_fixtures": ["replay/01-replay-since-seq"],
+      "phase": "03-fix-replay-since",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["Closes with tsk_replay_01."]
+      }
+    },
+    {
+      "id": "tsk_unsubscribe_discard",
+      "fixture_id": "subscription-patterns/02-unsubscribe-discards-queue",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:17 (unsubscribe row) — 'Discards queued-but-unread messages for removed subscriptions'.",
+      "root_cause_hypothesis": "Memory store IS already implemented correctly (memory/store.py:279-302 — pending_cleared via delivered_to set). HTTP route field-name remap is in place (routes.py:402-403 removed→unsubscribed). Hypothesis: failure is in SqliteStore.unsubscribe (sqlite/store.py — needs verification: phase 04 agent must read it). Alternative hypothesis: HTTP transport tests use MemoryStore; if MemoryStore is correct, the failure must be in the recv-after-unsubscribe path where the HTTP route's _resolve_agent_id resolves a different agent_id than the unsubscribe path used. Phase 04 task: (1) read SqliteStore.unsubscribe — confirm whether pending_cleared is implemented; (2) run the fixture against HTTP with logging; (3) if MemoryStore is correct and SqliteStore is wrong, fix SqliteStore. The harness simulator at conformance_runner.py:976-994 hand-rolls the discard via delivered_to.add — DELETE this branch unconditionally; both stores must handle this for stdio's SharedMemoryTarget path to flow through the real pipeline.",
+      "fix_target": "impl",
+      "files_to_touch": [
+        "packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "976-994", "describes": "SharedMemoryTarget._dispatch 'unsubscribe' branch hand-rolls fnmatch-against-_messages and adds agent_id to delivered_to. Delete; MemoryStore.unsubscribe already does this correctly."}
+      ],
+      "test_additions": [
+        "If SqliteStore lacks pending_cleared: add packages/python/tests/adapters/backing_stores/sqlite/test_store.py case mirroring the memory unit test.",
+        "Direct HTTP integration test: subscribe → send → unsubscribe → recv returns []."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "04-fix-unsubscribe-discard",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["Both stores honor unsubscribe-discards-queue. SqliteStore.unsubscribe returns (removed, pending_cleared) tuple per BackingStore ABC."]
+      }
+    },
+    {
+      "id": "tsk_presence_heartbeat",
+      "fixture_id": "presence/01-heartbeat-updates-presence-channel",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:21 (heartbeat row) — 'Triggers events on sox/presence'; spec/primitives/presence.md §5 — 'The server emits presence-change events on the reserved sox/presence channel'.",
+      "root_cause_hypothesis": "MemoryStore.heartbeat (memory/store.py:319-339) and SqliteStore.heartbeat (sqlite/store.py:545+) update only the liveness table; they do NOT append a sox/presence message. The spec says the server emits coalesced state-transition events on sox/presence with body shape {event, agent_id, state, changed_at}. The harness simulator at conformance_runner.py:1072-1108 hand-rolls this emit. FIX: both stores' heartbeat impls must, on a state transition (or on every call for v1 — coalescing is post-v1 per spec.md hint), append a _StoredMessage on channel='sox/presence' with sender='__server__' and the documented body shape, then set _new_message_event so subscribers see it via recv. Then delete the simulator's emit logic.",
+      "fix_target": "impl",
+      "files_to_touch": [
+        "packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py",
+        "packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "1072-1108", "describes": "SharedMemoryTarget._dispatch 'channels_heartbeat' branch hand-emits a sox/presence _StoredMessage. Delete; the real BackingStore.heartbeat impls must do this."}
+      ],
+      "test_additions": [
+        "Unit test on MemoryStore: heartbeat(agent_id='a','online') causes a subsequent recv on a 'sox/presence' subscriber to return the documented body shape.",
+        "Same against SqliteStore."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "05-fix-presence-namespace",
+      "estimated_complexity": "M",
+      "contract_promise": {
+        "modified_signatures": {
+          "BackingStore.heartbeat": "Behavior change: implementations MUST append a sox/presence message envelope as a side-effect on each call (or each transition; spec leaves coalescing as post-v1 SHOULD)."
+        },
+        "added_symbols": [],
+        "wire_invariants": ["heartbeat output schema unchanged; the only change is the side-effect emit on sox/presence."]
+      }
+    },
+    {
+      "id": "tsk_namespace_version_block",
+      "fixture_id": "namespace-isolation/02-version-block",
+      "v1_scope_anchor": "docs/V1-SCOPE.md:18 (list_channels row) — 'Returns the mandatory _sox_protocol version negotiation block (server_version, supported_versions, min_client_version)'; line 89 (Version negotiation row).",
+      "root_cause_hypothesis": "Two-part gap. (1) The fixture expected_output is {channels, protocol_version: any_string}. Spec output schema is {channels, _sox_protocol} — the fixture asserts on a top-level 'protocol_version' key that the spec does NOT define (only the simulator at conformance_runner.py:1057-1067 hand-adds protocol_version='1.0' top-level). Spec wins: fixture must be amended to assert on _sox_protocol.server_version (or _sox_protocol existence) instead. (2) HTTP route already injects _sox_protocol (routes.py:426-435), so the assertion against _sox_protocol will pass once the fixture is corrected. The simulator's protocol_version top-level field is masking the spec/fixture mismatch. FIX-TARGET: both. Spec output schema has additionalProperties:false → cannot add protocol_version. Fix the fixture to assert _sox_protocol structure.",
+      "fix_target": "spec",
+      "files_to_touch": [
+        "spec/conformance/namespace-isolation/02-version-block.yaml"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "1057-1067", "describes": "SharedMemoryTarget._dispatch 'list_channels' branch returns top-level 'protocol_version': '1.0' AND _sox_protocol. The protocol_version top-level field is NOT in spec; delete it. Keep _sox_protocol injection or delete entirely once the real BackingStore.list_channels owns the augmentation. Recommend: delete entire list_channels branch and let the real MemoryStore + a (new) thin wrapper in StoreDispatchMiddleware add _sox_protocol — OR keep the routes.py augmentation and add an equivalent in tools.py for stdio. Phase 05 agent decides."}
+      ],
+      "test_additions": [
+        "Conformance fixture (after correction) is the integration test."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "05-fix-presence-namespace",
+      "estimated_complexity": "S",
+      "contract_promise": {
+        "modified_signatures": {},
+        "added_symbols": [],
+        "wire_invariants": ["spec/operations/list_channels.output.schema.json unchanged. Fixture YAML aligned with schema."]
+      }
+    },
+    {
+      "id": "tsk_group_invite",
+      "fixture_id": "groups/01-create-invite-join",
+      "v1_scope_anchor": "spec/operations/group_invite.output.schema.json (canonical post-2fb72ac); spec/primitives/groups.md §5.2.",
+      "root_cause_hypothesis": "Spec/impl/fixture three-way mismatch. Spec output: {invited:bool, agent_id:str, invited_at:int}. BackingStore.group_invite docstring (backing_store.py:303) matches spec. Concrete MemoryStore.group_invite likely returns matching shape OR the simulator override returns {group_id, invited_agent, invited_at} (conformance_runner.py:1213). Fixture expects {group_id, invited_agent, invited_at} — i.e. the legacy/simulator shape. Canonical: SPEC. P3's commit 2fb72ac was a deliberate alignment to the spec shape. FIX: (1) Verify MemoryStore + SqliteStore group_invite both return spec shape; if not, fix them. (2) Update fixture YAML to expect {invited:true, agent_id:agent-group-member, invited_at:any_number}. (3) Delete the simulator override at conformance_runner.py:1197-1213.",
+      "fix_target": "spec",
+      "files_to_touch": [
+        "spec/conformance/groups/01-create-invite-join.yaml",
+        "packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py",
+        "packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py"
+      ],
+      "harness_simulations_to_delete": [
+        {"file": "tools/conformance_runner.py", "lines": "1197-1213", "describes": "SharedMemoryTarget._handle_group 'group_invite' branch returns {group_id, invited_agent, invited_at} — masks the spec/impl shape divergence on stdio. Delete; the real MemoryStore.group_invite must return spec-shape."},
+        {"file": "tools/conformance_runner.py", "lines": "1164-1166", "describes": "Dispatch into _handle_group simulator. Phase 06 agent should evaluate whether the entire _handle_group simulator (group_create through group_list_members) can be deleted in favor of the real BackingStore impls. If yes, delete; otherwise keep but verify each branch's shape against spec."}
+      ],
+      "test_additions": [
+        "Unit test packages/python/tests/adapters/backing_stores/memory/test_store.py: group_invite returns dict with keys exactly {invited, agent_id, invited_at}.",
+        "Same against SqliteStore."
+      ],
+      "depends_on_fixtures": [],
+      "phase": "06-fix-group-invite-output",
+      "estimated_complexity": "M",
+      "contract_promise": {
+        "modified_signatures": {
+          "BackingStore.group_invite": "Output dict shape: {invited: bool, agent_id: str, invited_at: int}. (ABC docstring already says this; impl alignment is the work.)"
+        },
+        "added_symbols": [],
+        "wire_invariants": ["spec/operations/group_invite.output.schema.json unchanged. Fixture and impl both move to match spec."]
+      }
+    }
+  ],
+  "ordering_dag": {
+    "nodes": [
+      "tsk_threading_01",
+      "tsk_threading_02",
+      "tsk_threading_03",
+      "tsk_replay_01",
+      "tsk_replay_02",
+      "tsk_unsubscribe_discard",
+      "tsk_presence_heartbeat",
+      "tsk_namespace_version_block",
+      "tsk_group_invite"
+    ],
+    "edges": [
+      {"from": "tsk_threading_01", "to": "tsk_threading_02", "reason": "thread-depth fixtures cannot pass until reply_to is plumbed through."},
+      {"from": "tsk_threading_01", "to": "tsk_threading_03", "reason": "same"},
+      {"from": "tsk_replay_01", "to": "tsk_replay_02", "reason": "trivial fixture-rename ordering."}
+    ],
+    "parallelizable_groups": [
+      ["tsk_threading_01"],
+      ["tsk_replay_01", "tsk_unsubscribe_discard", "tsk_presence_heartbeat", "tsk_namespace_version_block", "tsk_group_invite"]
+    ],
+    "phase_to_tasks": {
+      "02-fix-reply-to": ["tsk_threading_01", "tsk_threading_02", "tsk_threading_03"],
+      "03-fix-replay-since": ["tsk_replay_01", "tsk_replay_02"],
+      "04-fix-unsubscribe-discard": ["tsk_unsubscribe_discard"],
+      "05-fix-presence-namespace": ["tsk_presence_heartbeat", "tsk_namespace_version_block"],
+      "06-fix-group-invite-output": ["tsk_group_invite"]
+    }
+  },
+  "risk_register": [
+    {
+      "id": "R1",
+      "severity": "HIGH",
+      "summary": "BackingStore.send signature change is breaking: every concrete store + every test that calls store.send() directly must update. There are at least 3 store impls (memory, filesystem, sqlite) plus the simulator + numerous unit tests.",
+      "mitigation": "Add reply_to with a default of None — preserves backward compatibility for all positional and keyword call-sites that don't pass it. Use kwarg-only via *, reply_to=None to prevent accidental positional misuse."
+    },
+    {
+      "id": "R2",
+      "severity": "MEDIUM",
+      "summary": "Heartbeat side-effect (sox/presence emit) introduces a write-on-every-call pattern that may interact with backpressure or watch loops in unexpected ways. Spec §5 hints at coalescing as post-v1.",
+      "mitigation": "v1 emits one event per call (no coalescing). Use sender='__server__' to avoid identity verification on the synthetic message. Verify the existing reserved-prefix ACL doesn't reject server-emitted writes."
+    },
+    {
+      "id": "R3",
+      "severity": "LOW",
+      "summary": "Phase 04 (unsubscribe) hypothesis is two-part — the actual root cause requires verification by running the fixture with diagnostic logging. SqliteStore.unsubscribe was not directly read in this planning pass.",
+      "mitigation": "Phase 04 agent's first action: read sqlite/store.py unsubscribe and reproduce via direct conformance run. If MemoryStore is correct, SqliteStore is the suspect."
+    },
+    {
+      "id": "R4",
+      "severity": "LOW",
+      "summary": "Phase 06 group_invite output shape change may break downstream consumers (TUI, claude_code runtime) if they read invited_agent or group_id from the response.",
+      "mitigation": "Grep for 'invited_agent' and 'group_id' as group_invite response keys before changing impl. If any consumers exist, migrate them in the same commit."
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "Q1",
+      "question": "Phase 04: is the unsubscribe failure caused by SqliteStore not implementing pending_cleared, or by a different agent_id resolution path on HTTP vs stdio?",
+      "resolution_path": "Phase 04 agent reads sqlite/store.py:unsubscribe and runs the fixture with logging."
+    },
+    {
+      "id": "Q2",
+      "question": "Phase 05 namespace-version-block: does the routes.py:_sox_protocol injection persist after we remove the simulator's list_channels branch? Stdio's tools.py path needs an equivalent injection layer.",
+      "resolution_path": "Phase 05 agent verifies that core/mcp_server/tools.py channels__list (or equivalent) augments output with _sox_protocol; if not, add it."
+    },
+    {
+      "id": "Q3",
+      "question": "Phase 02: does BackingStore.recv need to honor thread_depth>=1 (ancestor-walk) for any of the 3 threading fixtures? Reading the YAMLs suggests NO — none assert on inlined ancestors. But spec/primitives/threads.md may differ.",
+      "resolution_path": "Phase 02 agent reads spec/primitives/threads.md before writing fixes; if thread_depth>=1 is in v1, scope expands."
+    }
+  ]
+}

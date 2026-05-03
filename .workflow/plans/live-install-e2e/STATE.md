@@ -15,15 +15,41 @@ priority: HIGH — without this, "v1 works on install" is an assumption
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Design the test: isolation strategy (tmp venv vs Docker vs --target), Claude invocation pattern (`--dangerously-skip-permissions`?), agent prompt design (deterministic enough for assertions), API key handling, CI gate strategy. Decide stdio vs HTTP transport for the live test (probably stdio — matches default install). | `READY` | sox-cto-system:planner | 0 | 2026-05-04T00:00:00Z |
-| 02-build-fixture | Construct the test fixture: a fresh-Claude-Code-project skeleton checked into `tests/fixtures/live_install/` with `.claude/` dir, agent .md files for two roles ("alice" + "bob"), prompts that deterministically drive: create_group → invite → join → send → recv → ack. Prompts must be robust to LLM variation (e.g. instruct exact tool calls, not "have a chat"). | `BLOCKED` | test-automator | 0 | 2026-05-04T00:00:00Z |
+| 01-plan | Design the test: isolation strategy (tmp venv vs Docker vs --target), Claude invocation pattern (`--dangerously-skip-permissions`?), agent prompt design (deterministic enough for assertions), API key handling, CI gate strategy. Decide stdio vs HTTP transport for the live test (probably stdio — matches default install). | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
+| 02-build-fixture | Construct the test fixture: a fresh-Claude-Code-project skeleton checked into `tests/fixtures/live_install/` with `.claude/` dir, agent .md files for two roles ("alice" + "bob"), prompts that deterministically drive: create_group → invite → join → send → recv → ack. Prompts must be robust to LLM variation (e.g. instruct exact tool calls, not "have a chat"). | `READY` | test-automator | 0 | 2026-05-03T00:00:00Z |
 | 03-build-test | `tests/integration/test_live_install_e2e.py`: pytest test that (a) creates tmp venv (b) `pip install -e packages/python plugins/sox-plugin-schema-strict` into it (c) runs `python -m sox_protocol.adapters.runtimes.claude_code.install` against a tmp Claude project copy (d) spawns 2 `claude` CLI subprocesses with the agent prompts (e) waits for them to complete (f) asserts the SOX SQLite database contains the expected message rows + ack records. Test marked `@pytest.mark.live` and `@pytest.mark.skipif(not ANTHROPIC_API_KEY)`. | `BLOCKED` | test-automator | 0 | 2026-05-04T00:00:00Z |
 | 04-ci-integration | Add the `live` marker to `pyproject.toml` `[tool.pytest.ini_options]` markers. Add a CI job (separate from the main test job) that runs `pytest -m live` if `ANTHROPIC_API_KEY` secret is configured. Document opt-in path in README. | `BLOCKED` | devops-engineer | 0 | 2026-05-04T00:00:00Z |
 | 05-review | Verify the test reliably passes against the current main + that failures genuinely catch broken installs (e.g. break the installer deliberately and confirm the test fails). | `BLOCKED` | code-reviewer | 0 | 2026-05-04T00:00:00Z |
 
 ## Currently next action
 
-Dispatch **phase 01-plan**. Critical decisions for the planner:
+Phase 01-plan is **DONE** (2026-05-03). Plan artifacts:
+
+- `.workflow/plans/live-install-e2e/implementation-plan.json`
+- `.workflow/plans/live-install-e2e/implementation-plan.md`
+
+Dispatch **phase 02-build-fixture** next (test-automator). Phase 02 pre-flight MUST resolve four open questions before fixtures are committed (see `implementation-plan.json#open_questions_for_phase_02_pre_flight`):
+
+1. Confirm `claude` CLI flags (`--print`, `--dangerously-skip-permissions`, `--max-turns`, `--model`) on the targeted CLI version.
+2. Confirm registered MCP tool names — specifically whether `group_create` exists or group creation goes through `channels__send` to a control channel. Inspect `core/mcp_server/tools.py:register_tools()`.
+3. Confirm `ANTHROPIC_API_KEY` env-var alone authenticates non-interactive `claude --print`.
+4. Confirm correct Claude state-dir env-var (`CLAUDE_CONFIG_DIR` vs `CLAUDE_HOME`).
+
+---
+
+## Phase 01 decision summary
+
+1. **Isolation:** real `python -m venv` under tmp_path; reject `--target` (entry-point flakiness) and Docker (overkill). Override `CLAUDE_CONFIG_DIR` + `HOME` to prevent host-state pollution.
+2. **Invocation:** `claude --dangerously-skip-permissions --print --model claude-sonnet-4-5 --max-turns 10`, **serial** (alice then bob); parallel parked behind `SOX_LIVE_PARALLEL=1` opt-in.
+3. **Determinism:** assert structural DB state (row counts, schema invariants) and tool-use markers in transcript; never assert message body text or non-tool output.
+4. **Token budget:** 10 turns × 4k tokens × 2 agents → estimated **$0.30–$1.50 per run**, sonnet-4-5. Cap enforced by CLI `--max-turns` + prompt instructions + 300s subprocess timeout.
+5. **Negative tests:** three variants — broken MCP server name (load-bearing), missing SKILL.md (load-bearing), missing bootstrap line (soft/diagnostic).
+
+CI: new `python-live-e2e.yml` workflow on push-to-main + weekly cron + workflow_dispatch, gated on `secrets.ANTHROPIC_API_KEY`. NOT triggered on PRs.
+
+---
+
+## Original critical decisions for the planner (preserved for audit)
 
 1. **Isolation strategy.** Three options:
    - (a) `pip install --target <tmpdir>` + `PYTHONPATH` injection — fastest, but leaks `claude` CLI's own resolution

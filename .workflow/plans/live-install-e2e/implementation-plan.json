@@ -1,0 +1,176 @@
+{
+  "engagement": "live-install-e2e",
+  "phase": "01-plan",
+  "produced": "2026-05-03",
+  "decisions": {
+    "isolation_strategy": {
+      "choice": "tmp_venv",
+      "rationale": "Real `python -m venv` under pytest tmp_path gives clean isolation of Python imports, the `claude_code` install module, the `sox_plugin_schema_strict` plugin, and the SQLite DB path. `--target` was rejected because the installer's `importlib.resources.files('sox_protocol')` lookup plus the schema-strict entry-point discovery both rely on the resolved `site-packages` layout — `--target`+`PYTHONPATH` injection is fragile under entry-point scanning. Docker was rejected as overkill for the v1 milestone and would force a Docker dependency on contributors running the live test locally; revisit if (b) leaks CLAUDE_HOME / `~/.claude` globals between runs.",
+      "alternatives_rejected": [
+        {"option": "pip install --target <tmpdir> + PYTHONPATH", "reason": "entry-point discovery for sox_plugin_schema_strict requires real site-packages; --target is known-flaky for plugins that ship console_scripts/entry-points"},
+        {"option": "Docker container", "reason": "adds Docker-in-CI requirement and ~60s container build per run; no isolation benefit over a venv given Claude CLI state lives in $HOME, not in Python install"}
+      ],
+      "implementation_notes": [
+        "Use stdlib `venv.create(tmp_path/'venv', with_pip=True)` to avoid uv-on-CI bootstrapping order issues.",
+        "Resolve `<venv>/bin/python` and `<venv>/bin/pip` explicitly; never rely on shell activation.",
+        "`pip install -e packages/python` followed by `pip install plugins/sox-plugin-schema-strict`. Editable install of the main package gives stack traces that point at repo source on failure.",
+        "Override Claude CLI state dir for the test run: pass `CLAUDE_CONFIG_DIR=<tmp_path>/.claude_home` and `HOME=<tmp_path>/home` in the subprocess env so the test cannot pollute the developer's real Claude session history."
+      ]
+    },
+    "claude_invocation": {
+      "command_template": "claude --dangerously-skip-permissions --print --model claude-sonnet-4-5 --max-turns {N} '<prompt>'",
+      "parallelism": "serial",
+      "rationale": "STATE.md risk-register flags concurrent Claudes on one API key as the most likely flake source. Serial execution (alice runs to completion, then bob runs to completion) is sufficient because the SOX messaging primitives (group_create / invite / join / send / recv) are designed to be drained at checkpoint, not require live concurrency. Serial is also cheaper to debug — a failure is unambiguous about which agent broke. Parallel mode is parked behind a `SOX_LIVE_PARALLEL=1` opt-in that phase 03 may stub but MUST NOT enable by default.",
+      "verification_required_in_phase_02": [
+        "Run `claude --help` in the runtime to confirm `--dangerously-skip-permissions`, `--print`, `--max-turns`, `--model` are real flags on the CLI version present in CI.",
+        "If `--max-turns` is not exposed at the CLI level, fall back to constraining via system prompt (`After at most {N} tool calls, exit.`) and assert turn-count from log output.",
+        "Confirm the CLI honors `ANTHROPIC_API_KEY` env-var (vs requiring `claude setup-token`)."
+      ],
+      "subprocess_shape": {
+        "transport": "stdio (matches the default installer; HTTP transport is out of scope for this engagement)",
+        "stdin": "closed (use --print, no interactive REPL)",
+        "stdout_capture": "fully captured for log assertions; tee to artifact dir for CI debug",
+        "stderr_capture": "captured separately",
+        "timeout_seconds": 300,
+        "cwd": "the tmp Claude project copy (so .mcp.json / .claude/settings.json resolve correctly)"
+      }
+    },
+    "determinism": {
+      "assertions": [
+        "After alice's run: SQLite DB at <project>/.sox/messages.db exists and is non-empty.",
+        "Exactly one row in the `groups` table (the group alice created).",
+        "Exactly one row in the `group_members` table for alice as creator (post-create).",
+        "Alice's transcript (claude --print stdout) contains tool-use markers for at least: mcp__sox__channels__send (for the invite) and one of the group lifecycle tools.",
+        "After bob's run: `group_members` has TWO rows (alice + bob).",
+        "After bob's run: at least one outbound message row from bob exists (the message body to alice).",
+        "After alice's second drain run (or final assertion query): alice's inbox contains bob's message — verified by direct SqliteStore query, NOT by parsing alice's stdout.",
+        "All invocations exited with returncode 0 within timeout.",
+        "Total Claude CLI tool-call count (parsed from --print transcript) is within the budget cap (decision §token_budget)."
+      ],
+      "non_assertions": [
+        "Exact message body text — LLM phrasing drift is not a defect.",
+        "Exact ordering of internal reasoning / non-tool-call output lines.",
+        "Whether the agent used additional non-SOX tools (Read, Bash, etc.) — only that the SOX tool-set was exercised.",
+        "Wall-clock duration of the run (only that it stayed under timeout).",
+        "Token count below an exact threshold — only that it stayed under the documented cap (cap is enforced by --max-turns, not asserted post-hoc)."
+      ],
+      "assertion_implementation": "Open `<project>/.sox/messages.db` directly via `sqlite3` stdlib (NOT via the freshly-installed venv) and run typed SELECT count(*) queries against the canonical SOX schema. Schema is owned by `SqliteStore`; phase 03 must `from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore` and reuse its accessor methods for forward-compat with schema migrations."
+    },
+    "token_budget": {
+      "per_agent_max_turns": 10,
+      "per_turn_max_tokens": 4000,
+      "model": "claude-sonnet-4-5",
+      "estimated_cost_usd_band": "$0.30 – $1.50 per full live-run (two agents, serial, sonnet-4-5 pricing 2026-05). Worst-case (both agents hit the turn cap with full 4k output each): ~80k output tokens + ~40k input tokens ≈ $1.20.",
+      "estimation_notes": "Estimate is a band, not a point. Phase 04 must record the realised cost from the first 5 CI runs and tighten the band in implementation-plan.md before the engagement closes.",
+      "enforcement": "Primary cap is CLI-level `--max-turns 10`. Secondary cap is the system prompt (`Stop after sending exactly one SOX message and a final summary`). Tertiary cap is the subprocess timeout (300s)."
+    },
+    "negative_tests": [
+      {
+        "name": "broken-mcp-server-name",
+        "design": "Phase 03 ships a parametrised pytest variant that, after the legitimate install, mutates `<project>/.mcp.json` to rename the `sox` server to `sox-broken`. The same alice run is then re-executed and MUST fail (returncode != 0 OR DB never gets a `groups` row OR transcript shows the mcp tool unavailable).",
+        "asserts": "The negative variant raises `pytest.fail('negative test should have failed')` if alice's run somehow succeeds — proving the positive path's success was real, not coincidence."
+      },
+      {
+        "name": "missing-skill-md",
+        "design": "Delete `<project>/.claude/skills/inter-agent-channels/SKILL.md` after install. Alice's prompt instructs her to load the skill; without it she should not know which tools to call. Assert the SOX DB stays empty.",
+        "asserts": "groups table row count == 0 after alice's run; her transcript may or may not return non-zero depending on Claude CLI behavior, so DB-state is the load-bearing assertion."
+      },
+      {
+        "name": "missing-bootstrap-line",
+        "design": "Run install, then strip the BOOTSTRAP_LINE from each `<project>/.claude/agents/*.md`. Without bootstrap, alice may not load the skill. Soft-assert: log a warning if the run succeeds anyway (it means the bootstrap line is non-load-bearing for this prompt design — useful signal, not a failure)."
+      }
+    ]
+  },
+  "phase_02_fixture_design": {
+    "files_to_create": [
+      "tests/fixtures/live_install/.claude/agents/alice.md",
+      "tests/fixtures/live_install/.claude/agents/bob.md",
+      "tests/fixtures/live_install/.claude/CLAUDE.md",
+      "tests/fixtures/live_install/README.md",
+      "tests/fixtures/live_install/prompts/alice_prompt.txt",
+      "tests/fixtures/live_install/prompts/bob_prompt.txt"
+    ],
+    "agent_prompts": {
+      "alice": [
+        "Role: alice, the group creator.",
+        "Step 1: Call mcp__sox__channels__send or the appropriate group_create tool to create a group named 'live-e2e-test'.",
+        "Step 2: Send an invite to agent 'bob' for that group.",
+        "Step 3: Send the message body 'PING' to the group.",
+        "Step 4: Print 'ALICE_DONE' on a line by itself and stop. Do not call any other tools.",
+        "Constraint: at most 6 SOX tool calls total. If a tool returns an error, retry once then print the error and stop."
+      ],
+      "bob": [
+        "Role: bob, the invitee.",
+        "Step 1: Call mcp__sox__channels__recv to drain inbox.",
+        "Step 2: For each invite found, call the corresponding group_join tool.",
+        "Step 3: Call mcp__sox__channels__recv again to read group messages.",
+        "Step 4: Send 'PONG' as a reply to the group.",
+        "Step 5: Print 'BOB_DONE' and stop.",
+        "Constraint: at most 6 SOX tool calls total."
+      ]
+    },
+    "design_principles": [
+      "Prompts are imperative, not conversational ('Call X' not 'have a conversation about X'). LLM drift on imperative prompts is markedly lower than on open-ended ones.",
+      "Each prompt names the EXACT mcp__sox__... tool name; phase 02 must verify these names match the registered tool surface (cross-reference TOOL_SUBSTITUTIONS in install.py).",
+      "Prompts include a 'print SENTINEL and stop' instruction so the test can detect successful completion without parsing tool-call sequences.",
+      "Prompts cap their own tool-call count, complementing the --max-turns CLI cap."
+    ],
+    "open_question_for_phase_02": "Is `group_create` a distinct MCP tool, or is it expressed via a `channels__send` to a control channel? Phase 02 MUST inspect `register_tools()` in `core/mcp_server/tools.py` and align prompt wording before fixtures are committed. The plan currently uses 'group_create' as a placeholder."
+  },
+  "phase_03_test_skeleton": {
+    "file": "tests/integration/test_live_install_e2e.py",
+    "actual_path_in_repo": "packages/python/tests/integration/test_live_install_e2e.py",
+    "structure": [
+      {"section": "module-level skips", "content": "@pytest.mark.live + @pytest.mark.skipif(not os.environ.get('ANTHROPIC_API_KEY')) + @pytest.mark.skipif(shutil.which('claude') is None)"},
+      {"section": "fixture: tmp_venv", "content": "session-scoped fixture that builds a venv, pip-installs packages/python (editable) and plugins/sox-plugin-schema-strict, returns a dataclass with python_path, pip_path, site_packages_path. Cached across the module."},
+      {"section": "fixture: tmp_project", "content": "function-scoped fixture that copies tests/fixtures/live_install/ to tmp_path and runs `<venv>/bin/python -m sox_protocol.adapters.runtimes.claude_code install --project-dir <tmp_project>`."},
+      {"section": "helper: run_claude(prompt_path, project_dir, env_extras)", "content": "subprocess.run wrapper that injects ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR, HOME overrides, captures stdout/stderr, asserts returncode 0, returns parsed transcript."},
+      {"section": "helper: assert_db_state(project_dir, expected)", "content": "opens SqliteStore at <project>/.sox/messages.db, runs structural assertions per the determinism decision."},
+      {"section": "test_live_install_happy_path", "content": "positive path: alice, then bob, then final db assertion. Captures transcripts to <tmp>/artifacts/."},
+      {"section": "test_live_install_negative_broken_mcp_name", "content": "as designed in negative_tests[0]."},
+      {"section": "test_live_install_negative_missing_skill", "content": "as designed in negative_tests[1]."}
+    ],
+    "estimated_runtime_seconds": "150 – 360 (venv build ~30s once per session, two Claude runs ~60-150s each, db assertions <1s)"
+  },
+  "phase_04_ci": {
+    "approach": "Add a NEW workflow file rather than a job in python-ci.yml — this test category has different triggers (push to main only, not every PR), different secret requirements, and different cost profile.",
+    "workflow_file": ".github/workflows/python-live-e2e.yml",
+    "triggers": [
+      "push to main (paths: packages/python/**, plugins/sox-plugin-schema-strict/**, tests/integration/test_live_install_e2e.py, tests/fixtures/live_install/**)",
+      "workflow_dispatch (manual run for debugging)",
+      "schedule: weekly cron at off-peak (Sunday 06:00 UTC) to catch upstream Claude CLI drift"
+    ],
+    "secret_required": "ANTHROPIC_API_KEY",
+    "secret_handling": "Job conditioned on `if: secrets.ANTHROPIC_API_KEY != ''` so forks without the secret silently skip.",
+    "claude_cli_install_step": "Phase 04 must research the canonical install path (npm package vs binary release). Plan placeholder: `npm install -g @anthropic-ai/claude-code` followed by `claude --version` smoke-check.",
+    "marker_registration": {
+      "file": "packages/python/pyproject.toml",
+      "edit": "Append `'live: requires ANTHROPIC_API_KEY and the claude CLI; opts out by default'` to the pytest markers list."
+    },
+    "default_pytest_skip": "Confirm that the existing addopts='--strict-markers' plus the @pytest.mark.live decorator means default `pytest` runs (incl. the standard test job in python-ci.yml) skip these tests automatically — no explicit `-m 'not live'` should be needed."
+  },
+  "phase_05_review_criteria": [
+    "Reviewer runs `pytest -m live` against current main with their own ANTHROPIC_API_KEY. Test must pass on first attempt (no retries).",
+    "Reviewer deliberately corrupts the installer (suggested: change `_MCP_SERVER_NAME` from 'sox' to 'sox-zzz' in install.py) and re-runs. Test MUST fail with a useful error message naming the missing tool / empty DB.",
+    "Reviewer confirms cost band: collects $cost from API console for one run, attaches to REVIEW.md.",
+    "Reviewer confirms default `pytest packages/python/tests/` (no -m flag) skips all live tests with no ANTHROPIC_API_KEY required.",
+    "Reviewer reads agent prompts and confirms each instructs only existing tools (no hallucinated tool names).",
+    "Reviewer verifies CI workflow runs only on push-to-main and workflow_dispatch; NOT on every PR.",
+    "Reviewer adds an explicit ADR-0005 entry documenting why this test exists and what it covers that in-process tests do not."
+  ],
+  "risks": [
+    {"risk": "Claude CLI flag drift", "mitigation": "Pin minimum CLI version in workflow; smoke-check `claude --version` in CI before running tests; phase 02 verifies `--print` / `--max-turns` flags before committing fixtures."},
+    {"risk": "Per-minute rate limit even on serial runs", "mitigation": "Add 5s sleep between alice and bob; on rate-limit failure (429) retry once with 60s backoff."},
+    {"risk": "$ cost overrun on flaky retries", "mitigation": "Workflow retry-count = 0 (no auto-retry); failed run posts to PR/commit comment so a human decides."},
+    {"risk": "Claude CLI mutates ~/.claude state across runs (caches, history)", "mitigation": "CLAUDE_CONFIG_DIR + HOME overrides per the isolation_strategy implementation_notes."},
+    {"risk": "schema-strict plugin entry-point not picked up in venv", "mitigation": "Phase 03 fixture adds an explicit `<venv>/bin/python -c 'from sox_protocol.core.middleware.registry import load_plugins; ...'` smoke check before the live test runs."},
+    {"risk": "Tool name in prompts doesn't match registered tool surface (e.g. group_create is hypothetical)", "mitigation": "Phase 02 pre-flight: enumerate registered tools and align prompts. Listed as open question above."},
+    {"risk": "Stdio transport's MCP server may not start under `claude --dangerously-skip-permissions` if .mcp.json paths are absolute and the venv's python doesn't exist on the runner's PATH", "mitigation": "Use the venv python's absolute path in the installer's .mcp.json output (the installer already does this via sys.executable — verify in phase 03)."}
+  ],
+  "open_questions_for_phase_02_pre_flight": [
+    "Confirm exact `claude` CLI flags: `--print`, `--dangerously-skip-permissions`, `--max-turns`, `--model` all available on the CLI version targeted in CI.",
+    "Confirm the registered MCP tool names map 1:1 with what TOOL_SUBSTITUTIONS in install.py implies. Specifically: is there a `group_create` tool, or is group creation expressed via channels__send to a control channel?",
+    "Confirm `ANTHROPIC_API_KEY` env-var is enough to authenticate a non-interactive `claude --print` invocation (vs requiring prior `claude setup-token`).",
+    "Confirm whether `CLAUDE_CONFIG_DIR` is the correct env-var (vs `CLAUDE_HOME`); check Claude Code docs."
+  ]
+}

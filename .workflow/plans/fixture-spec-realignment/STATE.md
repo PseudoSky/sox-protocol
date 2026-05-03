@@ -15,8 +15,8 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
 |---|---|---|---|---|---|
-| 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `READY` | sox-cto-system:planner | 0 | 2026-05-04T00:00:00Z |
-| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
+| 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
+| 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `READY` | python-pro | 0 | 2026-05-03T00:00:00Z |
 | 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
@@ -25,13 +25,15 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 
 ## Currently next action
 
-Dispatch **phase 01-plan** to a planner agent. Inputs:
-- The 9 failures listed in commit `bb7aaa7`'s body and in this STATE.md's phases 02–06
-- `tools/conformance_runner.py` lines 766–1127 (the `SharedMemoryTarget` simulator) — every harness simulation that masks a real gap must be identified and slated for deletion as part of the corresponding fix
-- `docs/V1-SCOPE.md` — the authoritative v1 contract that each fixture validates
-- Each failure's YAML fixture under `spec/conformance/`
+Dispatch **phase 02-fix-reply-to** to `python-pro`. Inputs:
+- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (tasks `tsk_threading_01..03`, ordering DAG)
+- `.workflow/plans/fixture-spec-realignment/implementation-plan.md` (per-fixture detail + risk register R1)
 
-Planner produces `implementation-plan.json` with: per-failure root-cause hypothesis, files to touch, harness simulations to delete, test additions, ordering dependencies (e.g. reply_to must land before any thread-depth fixture can pass).
+Phase 01-plan transition (2026-05-03):
+- Read STATE.md, RESUME.md, V1-SCOPE.md, commit bb7aaa7 body, conformance_runner.py:766-1127, BackingStore ABC + impls, store_dispatch middleware, all 9 failing fixture YAMLs.
+- Verified: BackingStore.send signature lacks reply_to; StoreDispatchMiddleware drops reply_to; MemoryStore._StoredMessage already has the field unused; SqliteStore hard-codes None; spec replay.input requires `since` (fixtures use `since_seq`); group_invite spec is canonical post-2fb72ac (fixture/simulator are legacy); HTTP route already injects `_sox_protocol` block; both stores' heartbeat lacks sox/presence emit; MemoryStore.unsubscribe is correct (Sqlite likely the suspect).
+- Output: 9 SEKTaskNodes across 5 phases; 7 simulator branches enumerated for deletion; 4 risks + 3 open questions logged.
+- Plan files: `.workflow/plans/fixture-spec-realignment/implementation-plan.{json,md}`.
 
 ## Termination targets
 
