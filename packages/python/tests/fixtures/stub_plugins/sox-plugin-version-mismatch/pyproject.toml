@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sox-plugin-version-mismatch"
+version = "1.0.0"
+description = "Version-mismatch stub plugin for SOX Protocol integration tests"
+requires-python = ">=3.11"
+
+[project.entry-points."sox_protocol.plugins"]
+"io.sox.version-mismatch" = "sox_plugin_version_mismatch:make_middleware"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sox_plugin_version_mismatch*"]
+
+[tool.setuptools.package-data]
+sox_plugin_version_mismatch = ["sox-plugin.yaml"]

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sox-plugin-cyclic-b"
+version = "1.0.0"
+description = "Cyclic-B stub plugin for SOX Protocol integration tests"
+requires-python = ">=3.11"
+
+[project.entry-points."sox_protocol.plugins"]
+"io.sox.cyclic-b" = "sox_plugin_cyclic_b:make_middleware"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sox_plugin_cyclic_b*"]
+
+[tool.setuptools.package-data]
+sox_plugin_cyclic_b = ["sox-plugin.yaml"]

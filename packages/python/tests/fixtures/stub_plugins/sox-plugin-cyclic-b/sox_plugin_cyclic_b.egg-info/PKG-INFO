@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: sox-plugin-cyclic-b
+Version: 1.0.0
+Summary: Cyclic-B stub plugin for SOX Protocol integration tests
+Requires-Python: >=3.11

@@ -1,0 +1,11 @@
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+metadata:
+  id: io.sox.version-mismatch
+  version: 1.0.0
+  display_name: Version Mismatch Test Plugin
+  description: Declares protocol_version >=2.0 to trigger PluginProtocolVersionMismatch.
+spec:
+  protocol_version: ">=2.0,<3.0"
+  plugin_kind: interceptor
+  signatures: []

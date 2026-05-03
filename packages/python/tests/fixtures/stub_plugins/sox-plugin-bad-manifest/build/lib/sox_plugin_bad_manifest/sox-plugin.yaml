@@ -1,0 +1,11 @@
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+metadata:
+  id: io.sox.bad-manifest
+  version: 1.0.0
+  display_name: Bad Manifest Test Plugin
+  description: Missing required 'signatures' field to trigger PluginManifestInvalid.
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: interceptor
+  # signatures field intentionally omitted to trigger schema validation failure

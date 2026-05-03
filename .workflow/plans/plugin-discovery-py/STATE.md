@@ -2,7 +2,7 @@
 slug: plugin-discovery-py
 target: Wire MiddlewareRegistry.load_plugins() into server startup with manifest validation. Out-of-tree plugins discoverable via Python entry-points. sox-plugin.yaml validated against schema before registration. `--allow-plugins` allowlist mandatory for production (risk #1). `--no-discovery` flag for testing/security audits.
 created: 2026-05-01
-last_event: 2026-05-04T00:00:00Z
+last_event: 2026-05-01T23:00:00Z
 orchestrator_protocol: v1
 parent_plan: plugin-architecture
 prereqs: [plugin-contract-freeze]
@@ -18,14 +18,13 @@ prereqs: [plugin-contract-freeze]
 | 02-build | Build `core/middleware/plugin_loader.py` (reads sox-plugin.yaml from package, validates schema, validates protocol_version range, applies must_run_before/after toposort with cycle detection per B1 spec) | `DONE` | python-pro | 1 | 2026-05-01T18:30:00Z |
 | 03-allowlist | Implement `--allow-plugins ID,...` CLI flag + `SOX_ALLOWED_PLUGINS` env var. Default-deny in production mode; default-allow in dev mode (with explicit warning) | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
 | 04-bootstrap-integration | `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins()` after `build_default_pipeline` | `DONE` | python-pro | 1 | 2026-05-04T00:00:00Z |
-| 05-test | Install stub plugin into temp venv; assert discovered + invoked. Test allowlist denial. Test version-mismatch refusal envelope shape | `READY` | test-automator | 0 | 2026-05-01T15:00:00Z |
-| 06-review | Code review including security audit of the discovery boundary | `BLOCKED` | code-reviewer | 0 | 2026-05-01T15:00:00Z |
+| 05-test | Install stub plugin into temp venv; assert discovered + invoked. Test allowlist denial. Test version-mismatch refusal envelope shape | `DONE` | test-automator | 1 | 2026-05-01T23:00:00Z |
+| 06-review | Code review including security audit of the discovery boundary | `READY` | code-reviewer | 0 | 2026-05-01T23:00:00Z |
 
 ## Currently next action
 
-Dispatch **phase 05-test**: install stub plugin into temp venv (real venv, not
-mocked entry-points); assert discovered + invoked end-to-end. Test
-version-mismatch refusal envelope shape.
+Dispatch **phase 06-review**: code review of the full plugin discovery system
+including security audit of the discovery boundary.
 
 ## Transition log
 
@@ -133,7 +132,7 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
 
 ## Termination targets
 
-- [ ] All 6 phases DONE
+- [ ] All 6 phases DONE (5/6 complete; phase 06-review pending)
 - [x] `core/middleware/plugin_loader.py` reads sox-plugin.yaml, validates against schema, validates protocol_version range, instantiates via declared entry
 - [x] `MiddlewareRegistry.load_plugins(allowlist=...)` calls load_entry_points + validates + filters by allowlist + registers
 - [x] `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins(...)` after `build_default_pipeline`
@@ -141,9 +140,9 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
 - [x] `sox serve --no-discovery` flag short-circuits the loader entirely
 - [x] Production mode (env `SOX_ENV=production`): empty allowlist refuses to load any plugin; non-empty allowlist filters strictly
 - [x] Dev mode (default): all discovered plugins loaded, with stderr warning per discovered-but-unallowlisted plugin
-- [ ] Integration test: stub plugin in temp venv discovered + invoked end-to-end
-- [ ] Integration test: stub plugin with mismatched protocol_version rejected with `plugin_protocol_version_mismatch` envelope
-- [ ] Integration test: stub plugin with cyclic must_run_before/after rejected with `plugin_ordering_cycle` envelope
+- [x] Integration test: stub plugin in temp venv discovered + invoked end-to-end
+- [x] Integration test: stub plugin with mismatched protocol_version rejected with `plugin_protocol_version_mismatch` envelope
+- [x] Integration test: stub plugin with cyclic must_run_before/after rejected with `plugin_ordering_cycle` envelope
 - [x] mypy --strict clean; lint-imports kept
 
 ### 2026-05-04 — phase 04-bootstrap-integration: DONE
@@ -236,6 +235,65 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
   user-supplied lifespan runs via `mcp._lifespan(mcp)` (stored as `self._lifespan`
   in `FastMCP.__init__`). Tests use `_lifespan` directly to avoid FastMCP
   internals.
+
+### 2026-05-01 — phase 05-test: DONE
+
+**Agent:** test-automator
+
+**Files landed:**
+
+- `packages/python/tests/fixtures/stub_plugins/sox-plugin-noop/` (NEW)
+  - Minimal transformer plugin; `kind="transformer"`, protocol `>=1.0,<2.0`.
+  - Injects `ctx.metadata["sox_noop_ran"] = True` to prove it ran.
+  - Entry-point: `io.sox.noop = sox_plugin_noop:make_noop_middleware`
+
+- `packages/python/tests/fixtures/stub_plugins/sox-plugin-version-mismatch/` (NEW)
+  - Declares `protocol_version: ">=2.0,<3.0"` — incompatible with host `1.0.0`.
+  - Triggers `PluginProtocolVersionMismatch` with five-field envelope.
+
+- `packages/python/tests/fixtures/stub_plugins/sox-plugin-bad-manifest/` (NEW)
+  - `sox-plugin.yaml` missing required `signatures` field.
+  - Triggers `PluginManifestInvalid` at schema validation.
+
+- `packages/python/tests/fixtures/stub_plugins/sox-plugin-cyclic-a/` (NEW)
+  - Declares `must_run_before: [io.sox.cyclic-b]`.
+
+- `packages/python/tests/fixtures/stub_plugins/sox-plugin-cyclic-b/` (NEW)
+  - Declares `must_run_before: [io.sox.cyclic-a]`.
+  - Together with cyclic-a, triggers `PluginOrderingCycle`.
+
+- `packages/python/tests/integration/test_plugin_discovery_e2e.py` (NEW, 25 tests)
+
+**Isolation strategy:** `pip install --target <tmpdir>` + `monkeypatch.syspath_prepend`
++ `importlib.invalidate_caches()`. In-process (no subprocess venv). Module-scoped
+install fixtures install each stub once per pytest session. Dev venv is untouched.
+
+**Scenarios covered (25 tests across 7 test classes):**
+
+1. `TestHappyPath` (7 tests) — noop discovered, registered, invokable; metadata
+   marker injected; no-allowlist dev mode; with-allowlist dev mode; no_discovery
+   short-circuit.
+2. `TestProductionEmptyAllowlist` (2 tests) — production + no allowlist raises
+   `PluginNotAllowed`; `no_discovery=True` overrides production restriction (R4).
+3. `TestVersionMismatch` (4 tests) — `PluginProtocolVersionMismatch` raised with
+   all five §5.1 envelope fields; compatible host version loads cleanly.
+4. `TestBadManifest` (3 tests) — `PluginManifestInvalid` raised; error code correct;
+   message names "signatures".
+5. `TestCyclicPlugins` (4 tests) — `PluginOrderingCycle` raised; envelope correct;
+   both plugin ids in arrow-notation message; `cycle_members` attribute populated.
+6. `TestAllowlistFilter` (2 tests) — production + `allowlist=["io.sox.noop"]` filters
+   cyclic pair before toposort; no cycle error; only noop in `resolved_order`.
+7. `TestResolvedOrderSemantics` (3 tests) — `resolved_order` is a tuple; empty before
+   load; stable on repeated access.
+
+**Acceptance gates at commit:**
+
+- `mypy --strict`: Success, 81 source files, 0 errors (no source changes)
+- `pytest`: 1221 passed, 2 failed (pre-existing group_invite — unchanged)
+- stdio conformance: 33 passed, 0 failed, 34 skipped (no regression)
+- HTTP conformance: 24 passed, 9 failed, 34 skipped (no regression)
+
+**No production source changes.** Phase 05 adds only test + fixture files.
 
 ## Reference
 

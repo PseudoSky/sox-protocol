@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sox-plugin-noop"
+version = "1.0.0"
+description = "Noop stub plugin for SOX Protocol integration tests"
+requires-python = ">=3.11"
+
+[project.entry-points."sox_protocol.plugins"]
+"io.sox.noop" = "sox_plugin_noop:make_noop_middleware"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["sox_plugin_noop*"]
+
+[tool.setuptools.package-data]
+sox_plugin_noop = ["sox-plugin.yaml"]

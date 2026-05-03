@@ -1,0 +1,2 @@
+[sox_protocol.plugins]
+io.sox.bad-manifest = sox_plugin_bad_manifest:make_middleware

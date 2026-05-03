@@ -1,0 +1,2 @@
+[sox_protocol.plugins]
+io.sox.version-mismatch = sox_plugin_version_mismatch:make_middleware

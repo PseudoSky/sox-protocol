@@ -1,0 +1,2 @@
+[sox_protocol.plugins]
+io.sox.cyclic-a = sox_plugin_cyclic_a:make_middleware

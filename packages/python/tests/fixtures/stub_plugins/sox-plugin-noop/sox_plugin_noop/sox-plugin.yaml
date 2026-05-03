@@ -1,0 +1,11 @@
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+metadata:
+  id: io.sox.noop
+  version: 1.0.0
+  display_name: Noop Test Plugin
+  description: Pass-through stub plugin for integration tests.
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: transformer
+  signatures: []
