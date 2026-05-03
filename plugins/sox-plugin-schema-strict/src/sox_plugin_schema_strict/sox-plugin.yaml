@@ -1,0 +1,25 @@
+apiVersion: sox.dev/v1
+kind: SoxPlugin
+metadata:
+  id: io.sox.schema-strict
+  version: "1.0.0"
+  display_name: Schema-Strict Body Validator
+  description: >
+    Validates each SOX operation's input body against the corresponding
+    spec/operations/<op>.input.schema.json before dispatch.  Raises
+    ValidationError (mapped to validation_failed envelope by the host)
+    when the input violates the schema.  Runs before store_dispatch in
+    the default chain.
+spec:
+  protocol_version: ">=1.0,<2.0"
+  plugin_kind: transformer
+  plugin_capabilities:
+    - schema_validator: ">=1.0"
+  must_run_before:
+    - store_dispatch
+  must_run_after: []
+  requires: []
+  applies_to:
+    operations:
+      - "*"
+  signatures: []

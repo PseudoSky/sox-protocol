@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sox-plugin-schema-strict"
+version = "1.0.0"
+description = "SOX Protocol reference plugin: schema-strict body validator (kind: transformer)"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.0",
+]
+
+[project.entry-points."sox_protocol.plugins"]
+"io.sox.schema-strict" = "sox_plugin_schema_strict:factory"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sox_plugin_schema_strict*"]
+
+[tool.setuptools.package-data]
+sox_plugin_schema_strict = ["sox-plugin.yaml", "schemas/*.json"]
