@@ -44,10 +44,15 @@ from sox_protocol.adapters.transports.http.sse import build_sse_router
 from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry
 from sox_protocol.core.identity.keys import generate_keypair
 from sox_protocol.core.identity.verifier import IdentityVerifier
-from sox_protocol.core.middleware import Pipeline, build_default_pipeline
+from sox_protocol.core.middleware import Pipeline, build_default_pipeline, extend_pipeline_with_registry
+from sox_protocol.core.middleware.errors import PluginStartupError
+from sox_protocol.core.middleware.registry import register_middleware
 from sox_protocol.core.ports.backing_store import BackingStore
 
 _PROTOCOL_VERSION = "1.0"
+
+# Host protocol version for plugin compatibility checks.
+_HOST_PROTOCOL_VERSION = "1.0.0"
 
 
 def _build_identity_stack(
@@ -84,6 +89,12 @@ def create_app(
     # Deprecated in 03-build-http — ignored if present, kept for call-site
     # backward compatibility during the test migration window.
     identity: object | None = None,
+    # Plugin discovery parameters (phase 04-bootstrap-integration).
+    # Defaults preserve existing behaviour when not supplied (dev mode,
+    # no explicit allowlist, discovery enabled).
+    allowlist: list[str] | None = None,
+    env: str = "dev",
+    no_discovery: bool = False,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -97,6 +108,16 @@ def create_app(
         identity: Deprecated — ignored.  Kept for call-site backward
             compatibility during the test migration window; will be removed in
             v1.1.  Pass ``pipeline`` instead.
+        allowlist: Plugin ids that are permitted to load.  ``None`` means
+            "no explicit allowlist provided" (dev: load all; production:
+            refuse all).  When ``None``, ``SOX_ALLOWED_PLUGINS`` env var is
+            also consulted so that the CLI path (which sets env vars before
+            calling ``create_app``) works transparently.
+        env: Runtime environment string.  ``"production"`` activates strict
+            allowlist enforcement.  Defaults to ``"dev"``.  Also reads
+            ``SOX_ENV`` env var when left at its default.
+        no_discovery: When ``True``, skip all plugin discovery.  Also reads
+            ``SOX_NO_DISCOVERY`` env var when left at its default (``False``).
 
     Returns:
         A fully configured :class:`FastAPI` application.
@@ -125,6 +146,58 @@ def create_app(
         # bearer-token path can still complete auth successfully.
         _, _verifier2, built_registry, built_private_key = _build_identity_stack(store)
         built_pipeline = pipeline
+
+    # 4b. Discover and load out-of-tree plugins, then extend the pipeline.
+    #     Resolve env/allowlist/no_discovery from kwargs first, falling back
+    #     to env vars written by cli/serve.py _resolve_plugin_env.
+    import os as _os  # noqa: PLC0415 (deferred to avoid top-level os import conflict)
+
+    _resolved_env = env if env != "dev" else _os.environ.get("SOX_ENV", "dev")
+    _raw_allowlist = _os.environ.get("SOX_ALLOWED_PLUGINS", "")
+    _resolved_allowlist: list[str] | None = allowlist
+    if _resolved_allowlist is None and _raw_allowlist:
+        _resolved_allowlist = [p for p in _raw_allowlist.split(",") if p]
+    _resolved_no_discovery = no_discovery or (_os.environ.get("SOX_NO_DISCOVERY", "") == "1")
+
+    try:
+        register_middleware.load_plugins(
+            allowlist=_resolved_allowlist,
+            env=_resolved_env,
+            host_protocol_version=_HOST_PROTOCOL_VERSION,
+            no_discovery=_resolved_no_discovery,
+        )
+    except PluginStartupError as _exc:
+        import sys as _sys  # noqa: PLC0415
+        import logging as _logging  # noqa: PLC0415
+        _plog = _logging.getLogger(__name__)
+        _envelope = _exc.to_envelope()
+        _plog.error(
+            "[sox] HTTP plugin startup failed: %s",
+            _envelope,
+            extra={"sox_error_envelope": _envelope},
+        )
+        print(
+            f"[sox] ERROR: HTTP plugin startup failed — {_envelope}",
+            file=_sys.stderr,
+        )
+        raise
+
+    if register_middleware.resolved_order:
+        from sox_protocol.core.middleware.default_chain import _StoreTerminal  # noqa: PLC0415
+        from sox_protocol.core.middleware.plugins.store_dispatch import (  # noqa: PLC0415
+            StoreDispatchMiddleware,
+        )
+        import logging as _logging2  # noqa: PLC0415
+        _plog2 = _logging2.getLogger(__name__)
+        _store_terminal = _StoreTerminal(StoreDispatchMiddleware(store))
+        built_pipeline = extend_pipeline_with_registry(
+            built_pipeline, register_middleware, _store_terminal
+        )
+        _plog2.info(
+            "[sox] HTTP pipeline extended with %d plugin(s): %s",
+            len(register_middleware.resolved_order),
+            list(register_middleware.resolved_order),
+        )
 
     app = FastAPI(
         title="SOX Protocol HTTP Transport",

@@ -20,6 +20,8 @@ Spec reference: ``spec/ports/middleware.md §4``; ``docs/adr/0003 §Decision (2)
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from sox_protocol.core.identity.verifier import IdentityVerifier
 from sox_protocol.core.middleware.context import MiddlewareContext
@@ -99,3 +101,49 @@ def build_default_pipeline(
     middlewares = registry.assemble(list(DEFAULT_ORDER))
 
     return Pipeline(middlewares, _StoreTerminal(store_mw))
+
+
+def extend_pipeline_with_registry(
+    base_pipeline: Pipeline,
+    registry: MiddlewareRegistry,
+    terminal: Callable[..., Awaitable[Any]],
+) -> Pipeline:
+    """Rebuild Pipeline with default chain + registered plugin factories.
+
+    Plugin middlewares (from ``registry.resolved_order``) are appended to the
+    default chain in the resolved topological order.  The terminal handler
+    is preserved.
+
+    This helper is called by both server bootstraps (stdio lifespan and HTTP
+    ``create_app``) after ``load_plugins()`` has been invoked on *registry*.
+    If ``resolved_order`` is empty (no plugins discovered, or
+    ``--no-discovery`` set), the returned Pipeline is identical to
+    *base_pipeline* with the caller-supplied *terminal*.
+
+    Per analysis §7.5 risk #4 (hot-reload deferred): the pipeline is rebuilt
+    **once at startup**, never per-request.  ``Pipeline.with_appended`` is
+    intentionally absent from this module to prevent per-request mutation.
+
+    Args:
+        base_pipeline: The pipeline returned by ``build_default_pipeline()``.
+            Its existing ``_middlewares`` list forms the default chain prefix.
+        registry: The ``MiddlewareRegistry`` whose ``resolved_order`` lists the
+            plugin ids to append.  Each id must already be registered on
+            *registry* (``load_plugins()`` guarantees this).
+        terminal: The terminal async callable.  Should be the same terminal
+            used to build *base_pipeline* (e.g. ``_StoreTerminal``).  Passed
+            explicitly because ``Pipeline._terminal`` is private.
+
+    Returns:
+        A new :class:`Pipeline` whose middleware list is the default chain
+        followed by the ordered plugin middlewares.
+    """
+    # Extract the existing default-chain middlewares.
+    existing: list[Any] = list(base_pipeline._middlewares)  # noqa: SLF001
+
+    # Append plugin middlewares in resolved topological order.
+    for plugin_id in registry.resolved_order:
+        factory = registry.get(plugin_id)
+        existing.append(factory())
+
+    return Pipeline(existing, terminal)

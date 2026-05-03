@@ -2,7 +2,7 @@
 slug: plugin-discovery-py
 target: Wire MiddlewareRegistry.load_plugins() into server startup with manifest validation. Out-of-tree plugins discoverable via Python entry-points. sox-plugin.yaml validated against schema before registration. `--allow-plugins` allowlist mandatory for production (risk #1). `--no-discovery` flag for testing/security audits.
 created: 2026-05-01
-last_event: 2026-05-03T00:00:00Z
+last_event: 2026-05-04T00:00:00Z
 orchestrator_protocol: v1
 parent_plan: plugin-architecture
 prereqs: [plugin-contract-freeze]
@@ -17,21 +17,15 @@ prereqs: [plugin-contract-freeze]
 | 01-plan | Plan plugin_loader.py + bootstrap wire-up + allowlist semantics | `DONE` | sox-cto-system:planner | 1 | 2026-05-01T15:00:00Z |
 | 02-build | Build `core/middleware/plugin_loader.py` (reads sox-plugin.yaml from package, validates schema, validates protocol_version range, applies must_run_before/after toposort with cycle detection per B1 spec) | `DONE` | python-pro | 1 | 2026-05-01T18:30:00Z |
 | 03-allowlist | Implement `--allow-plugins ID,...` CLI flag + `SOX_ALLOWED_PLUGINS` env var. Default-deny in production mode; default-allow in dev mode (with explicit warning) | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
-| 04-bootstrap-integration | `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins()` after `build_default_pipeline` | `BLOCKED` | python-pro | 0 | 2026-05-01T15:00:00Z |
-| 05-test | Install stub plugin into temp venv; assert discovered + invoked. Test allowlist denial. Test version-mismatch refusal envelope shape | `BLOCKED` | test-automator | 0 | 2026-05-01T15:00:00Z |
+| 04-bootstrap-integration | `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins()` after `build_default_pipeline` | `DONE` | python-pro | 1 | 2026-05-04T00:00:00Z |
+| 05-test | Install stub plugin into temp venv; assert discovered + invoked. Test allowlist denial. Test version-mismatch refusal envelope shape | `READY` | test-automator | 0 | 2026-05-01T15:00:00Z |
 | 06-review | Code review including security audit of the discovery boundary | `BLOCKED` | code-reviewer | 0 | 2026-05-01T15:00:00Z |
 
 ## Currently next action
 
-Dispatch **phase 04-bootstrap-integration**: invoke `registry.load_plugins(...)`
-in `core/mcp_server/server.py` lifespan and `adapters/transports/http/server.py`
-create_app — AFTER `build_default_pipeline`. Both bootstraps read
-`SOX_ALLOWED_PLUGINS`, `SOX_ENV`, `SOX_NO_DISCOVERY` env vars (set by phase 03
-CLI layer; bootstrap doesn't see argparse args directly). Per ratified
-planner contract: use `extend_pipeline_with_registry` helper in
-`default_chain.py` to rebuild the Pipeline with default chain + registered
-factories at startup. No `Pipeline.with_appended` (hot-reload deferred per
-risk #4).
+Dispatch **phase 05-test**: install stub plugin into temp venv (real venv, not
+mocked entry-points); assert discovered + invoked end-to-end. Test
+version-mismatch refusal envelope shape.
 
 ## Transition log
 
@@ -142,7 +136,7 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
 - [ ] All 6 phases DONE
 - [x] `core/middleware/plugin_loader.py` reads sox-plugin.yaml, validates against schema, validates protocol_version range, instantiates via declared entry
 - [x] `MiddlewareRegistry.load_plugins(allowlist=...)` calls load_entry_points + validates + filters by allowlist + registers
-- [ ] `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins(...)` after `build_default_pipeline`
+- [x] `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins(...)` after `build_default_pipeline`
 - [x] `sox serve --allow-plugins ID,...` flag respected; `SOX_ALLOWED_PLUGINS` env var also respected
 - [x] `sox serve --no-discovery` flag short-circuits the loader entirely
 - [x] Production mode (env `SOX_ENV=production`): empty allowlist refuses to load any plugin; non-empty allowlist filters strictly
@@ -150,7 +144,98 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
 - [ ] Integration test: stub plugin in temp venv discovered + invoked end-to-end
 - [ ] Integration test: stub plugin with mismatched protocol_version rejected with `plugin_protocol_version_mismatch` envelope
 - [ ] Integration test: stub plugin with cyclic must_run_before/after rejected with `plugin_ordering_cycle` envelope
-- [ ] mypy --strict clean; lint-imports kept
+- [x] mypy --strict clean; lint-imports kept
+
+### 2026-05-04 — phase 04-bootstrap-integration: DONE
+
+**Agent:** python-pro
+**Commit:** feat(plugin-discovery): bootstrap wire-up + extend_pipeline_with_registry
+
+**Helper added:**
+
+- `extend_pipeline_with_registry(base_pipeline, registry, terminal) -> Pipeline`
+  in `core/middleware/default_chain.py`. Reads `base_pipeline._middlewares` to
+  extract the default chain, appends each plugin factory from
+  `registry.resolved_order`, and returns a new `Pipeline` with the same
+  terminal. Rebuild-once-at-startup pattern; no `Pipeline.with_appended` per
+  analysis §7.5 risk #4 (hot-reload deferred). Re-exported from
+  `core/middleware/__init__.py`.
+
+**stdio bootstrap wire-up (`core/mcp_server/server.py`):**
+
+- Added `from sox_protocol.core.middleware.registry import register_middleware`
+  and `_HOST_PROTOCOL_VERSION = "1.0.0"` constant.
+- After `pipeline = build_default_pipeline(...)` in `_lifespan`: reads
+  `SOX_ALLOWED_PLUGINS` / `SOX_ENV` / `SOX_NO_DISCOVERY` env vars, calls
+  `register_middleware.load_plugins(...)`.
+- On `PluginStartupError`: logs structured envelope to stderr + `sys.exit(1)`
+  (fail-fast per ADR 0004).
+- If `resolved_order` non-empty: rebuilds pipeline via
+  `extend_pipeline_with_registry` with a fresh `_StoreTerminal`.
+- Note: FastMCP 2.x stores the user lifespan as `mcp._lifespan` (not via
+  `mcp.lifespan()`). Tests call `mcp._lifespan(mcp)` directly to exercise the
+  plugin init path.
+
+**HTTP bootstrap wire-up (`adapters/transports/http/server.py`):**
+
+- Added `_HOST_PROTOCOL_VERSION = "1.0.0"` constant.
+- Added `allowlist`, `env`, `no_discovery` kwargs to `create_app()` with
+  defaults preserving existing behaviour (`env="dev"`, `allowlist=None`,
+  `no_discovery=False`).
+- After `built_pipeline` is determined: resolves allowlist/env/no_discovery
+  from kwargs first, falls back to env vars (`SOX_ALLOWED_PLUGINS`,
+  `SOX_ENV`, `SOX_NO_DISCOVERY`), calls `register_middleware.load_plugins(...)`.
+- On `PluginStartupError`: logs + re-raises (uvicorn exits non-zero on ASGI
+  startup failure).
+- If `resolved_order` non-empty: extends pipeline via
+  `extend_pipeline_with_registry`.
+
+**Error envelope shape on production + empty allowlist:**
+
+```json
+{
+  "error_code": "plugin_not_allowed",
+  "plugin_id": "*",
+  "message": "SOX_ENV=production requires an explicit --allow-plugins allowlist. ..."
+}
+```
+
+**Tests added (`tests/middleware/test_bootstrap_wireup.py`, 10 tests):**
+
+- `TestHttpCreateAppNoDiscovery`: `no_discovery=True` kwarg + `SOX_NO_DISCOVERY=1`
+  env var → app created, `resolved_order == ()`.
+- `TestHttpCreateAppProductionEmptyAllowlist`: `env=production`, no allowlist →
+  `PluginNotAllowed` raised with required envelope fields. Also via env vars.
+- `TestHttpCreateAppHappyPath`: fake entry-point → plugin loaded, appears in
+  `resolved_order`.
+- `TestMcpServerNoDiscovery`: `SOX_NO_DISCOVERY=1` → lifespan yields cleanly,
+  `resolved_order == ()`; spy confirms `load_plugins` called with
+  `no_discovery=True`.
+- `TestMcpServerProductionEmptyAllowlist`: `SOX_ENV=production` + fake entry-point
+  → `sys.exit(1)` from lifespan.
+- `TestLoadPluginsCalledAfterBuildPipeline`: spy confirms `build_default_pipeline`
+  is called before `load_plugins` in `create_app`.
+
+**Acceptance gates at commit:**
+
+- `mypy --strict`: Success, 81 source files, 0 errors
+- `pytest`: 1196 passed, 2 failed (pre-existing group_invite — unchanged)
+- stdio conformance: 33 passed, 0 failed, 34 skipped (no regression)
+- HTTP conformance: 24 passed, 9 failed, 34 skipped (no regression)
+
+**Notes:**
+
+- `host_protocol_version` is hard-coded as `_HOST_PROTOCOL_VERSION = "1.0.0"` in
+  both bootstrap files. No shared version module exists in the codebase; both
+  bootstraps carry their own constant (parallel to `_PROTOCOL_VERSION = "1.0"` in
+  `http/server.py`). Phase 06-review may unify these.
+- The conformance harness runs with no env vars → dev mode, no real entry points
+  → `load_plugins` finds 0 plugins → `resolved_order = ()` → no conformance
+  regression.
+- FastMCP 2.x `mcp.lifespan()` iterates provider lifespans only; the
+  user-supplied lifespan runs via `mcp._lifespan(mcp)` (stored as `self._lifespan`
+  in `FastMCP.__init__`). Tests use `_lifespan` directly to avoid FastMCP
+  internals.
 
 ## Reference
 

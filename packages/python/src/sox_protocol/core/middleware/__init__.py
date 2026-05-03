@@ -58,7 +58,11 @@ Spec reference: ``spec/ports/middleware.md §2``
 """
 
 from sox_protocol.core.middleware.context import MiddlewareContext
-from sox_protocol.core.middleware.default_chain import DEFAULT_ORDER, build_default_pipeline
+from sox_protocol.core.middleware.default_chain import (
+    DEFAULT_ORDER,
+    build_default_pipeline,
+    extend_pipeline_with_registry,
+)
 from sox_protocol.core.middleware.errors import (
     ChainConfigurationError,
     MiddlewareError,
@@ -100,6 +104,7 @@ __all__ = [
     "DEFAULT_ORDER",
     "default_chain",
     "build_default_pipeline",
+    "extend_pipeline_with_registry",
     # Errors
     "MiddlewareError",
     "ChainConfigurationError",

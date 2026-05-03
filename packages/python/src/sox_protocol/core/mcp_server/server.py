@@ -63,8 +63,15 @@ from sox_protocol.core.identity.keys import generate_keypair
 from sox_protocol.core.identity.verifier import IdentityVerifier
 from sox_protocol.core.mcp_server.listener import Listener
 from sox_protocol.core.mcp_server.tools import register_tools
-from sox_protocol.core.middleware import build_default_pipeline
+from sox_protocol.core.middleware import build_default_pipeline, extend_pipeline_with_registry
+from sox_protocol.core.middleware.errors import PluginStartupError
+from sox_protocol.core.middleware.registry import register_middleware
 from sox_protocol.core.ports.backing_store import BackingStore
+
+# Host protocol version — used for plugin compatibility checks.
+# Kept here (not in a shared version module) because no such module exists;
+# both bootstraps hard-code it from this same constant pattern.
+_HOST_PROTOCOL_VERSION = "1.0.0"
 
 _log = logging.getLogger(__name__)
 
@@ -308,6 +315,52 @@ def create_server() -> FastMCP[dict[str, object]]:
 
         # 4. Build the middleware pipeline.
         pipeline = build_default_pipeline(verifier=verifier, store=store)
+
+        # 4b. Discover and load out-of-tree plugins, then extend the pipeline.
+        #     Reads SOX_ALLOWED_PLUGINS, SOX_ENV, SOX_NO_DISCOVERY env vars
+        #     (written by cli/serve.py _resolve_plugin_env before transport branch).
+        _raw_allowlist = os.environ.get("SOX_ALLOWED_PLUGINS", "")
+        _plugin_allowlist: list[str] | None = (
+            [p for p in _raw_allowlist.split(",") if p]
+            if _raw_allowlist
+            else None
+        )
+        _plugin_env = os.environ.get("SOX_ENV", "dev")
+        _no_discovery = os.environ.get("SOX_NO_DISCOVERY", "") == "1"
+        try:
+            register_middleware.load_plugins(
+                allowlist=_plugin_allowlist,
+                env=_plugin_env,
+                host_protocol_version=_HOST_PROTOCOL_VERSION,
+                no_discovery=_no_discovery,
+            )
+        except PluginStartupError as _exc:
+            _envelope = _exc.to_envelope()
+            _log.error(
+                "[sox] plugin startup failed: %s",
+                _envelope,
+                extra={"sox_error_envelope": _envelope},
+            )
+            print(
+                f"[sox] ERROR: plugin startup failed — {_envelope}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        if register_middleware.resolved_order:
+            from sox_protocol.core.middleware.default_chain import _StoreTerminal  # noqa: PLC0415
+            from sox_protocol.core.middleware.plugins.store_dispatch import (  # noqa: PLC0415
+                StoreDispatchMiddleware,
+            )
+            _store_terminal = _StoreTerminal(StoreDispatchMiddleware(store))
+            pipeline = extend_pipeline_with_registry(
+                pipeline, register_middleware, _store_terminal
+            )
+            _log.info(
+                "[sox] pipeline extended with %d plugin(s): %s",
+                len(register_middleware.resolved_order),
+                list(register_middleware.resolved_order),
+            )
 
         # 5. Start the background listener.
         listener = Listener(store=store, agent_id=agent_id)
