@@ -349,11 +349,37 @@ class MiddlewareRegistry:
             )
 
         # Step 3: validate each discovered entry-point.
+        # When an explicit allowlist is provided, plugins that are NOT on the
+        # allowlist are skipped before validation — there is no point validating
+        # manifests we will never load, and doing so can cause spurious failures
+        # (e.g. a globally-installed plugin with an incompatible protocol version
+        # would abort startup even though it is explicitly excluded by the
+        # allowlist).  In dev mode with no allowlist, all discovered plugins are
+        # validated (and any validation failure is a hard error).
         from importlib.metadata import EntryPoint
+
+        _allowlist_set: frozenset[str] | None = (
+            frozenset(allowlist) if allowlist is not None else None
+        )
 
         manifests: dict[str, Manifest] = {}
         ep_map: dict[str, EntryPoint] = {}
         for ep_name, ep in eps.items():
+            # Pre-filter: when an explicit allowlist is given AND we are in
+            # production mode, skip validation of plugins that are NOT on the
+            # allowlist.  Production silently drops unallowlisted plugins (step
+            # 4), so validating them is unnecessary and can cause spurious
+            # PluginProtocolVersionMismatch errors when a globally-installed
+            # plugin has an incompatible host version but is explicitly excluded.
+            #
+            # Dev mode intentionally validates all discovered plugins so the
+            # "dev loads all plugins with a warning" contract is preserved.
+            if is_production and _allowlist_set is not None and ep_name not in _allowlist_set:
+                _log.debug(
+                    "Plugin %r not in allowlist; skipping validation (production).",
+                    ep_name,
+                )
+                continue
             try:
                 raw = read_manifest_for_entry_point(ep)
                 manifest = validate_manifest(raw)
@@ -425,6 +451,17 @@ class MiddlewareRegistry:
         for plugin_id in sorted_ids:
             ep = ep_map[plugin_id]
             factory: Callable[[], Middleware] = ep.load()
+            if plugin_id in self._factories:
+                # Already registered from a prior load_plugins call (e.g. multiple
+                # create_app calls in the same process during tests).  The factory
+                # is functionally identical — re-registering would produce the same
+                # middleware, so skip silently to preserve idempotency.
+                _log.debug(
+                    "Plugin %r already registered; skipping re-registration "
+                    "(idempotent load_plugins).",
+                    plugin_id,
+                )
+                continue
             try:
                 self.register(plugin_id, factory)
             except ValueError as exc:

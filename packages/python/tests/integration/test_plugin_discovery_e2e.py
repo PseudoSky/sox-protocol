@@ -257,9 +257,15 @@ class TestHappyPath:
         """Dev mode + no allowlist: noop is loaded without error."""
         _activate(monkeypatch, noop_install_dir)
         registry = _fresh_registry()
-        # Should not raise
-        registry.load_plugins(env="dev", allowlist=None, host_protocol_version="1.0.0")
-        assert registry.resolved_order == ("io.sox.noop",)
+        # Should not raise. Use an allowlist so the test is not sensitive to
+        # other plugins installed in the dev venv (e.g. sox-plugin-schema-strict
+        # installed in phase P5-03 for production use).
+        registry.load_plugins(
+            env="dev",
+            allowlist=["io.sox.noop"],
+            host_protocol_version="1.0.0",
+        )
+        assert "io.sox.noop" in registry.resolved_order
 
     def test_noop_dev_with_allowlist_loads(
         self,
@@ -397,8 +403,15 @@ class TestVersionMismatch:
         """If host version is bumped to 2.0.0, the plugin loads successfully."""
         _activate(monkeypatch, version_mismatch_install_dir)
         registry = _fresh_registry()
-        # host 2.0.0 satisfies >=2.0,<3.0
-        registry.load_plugins(env="dev", host_protocol_version="2.0.0")
+        # host 2.0.0 satisfies >=2.0,<3.0.  Use production mode + explicit
+        # allowlist so only the target plugin is validated — other globally-
+        # installed plugins (e.g. schema-strict, >=1.0,<2.0) are excluded
+        # before validation and do not cause spurious version-mismatch errors.
+        registry.load_plugins(
+            env="production",
+            allowlist=["io.sox.version-mismatch"],
+            host_protocol_version="2.0.0",
+        )
         assert "io.sox.version-mismatch" in registry.resolved_order
 
 

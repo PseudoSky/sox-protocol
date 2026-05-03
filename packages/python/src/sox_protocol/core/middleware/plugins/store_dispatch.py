@@ -48,6 +48,34 @@ class StoreDispatchMiddleware:
     def __init__(self, store: BackingStore) -> None:
         self._store = store
 
+    @staticmethod
+    def _resolve_agent_id(inp: dict[str, object], ctx: MiddlewareContext) -> str:
+        """Resolve agent_id for non-identity-enforced operations.
+
+        Priority: ``inp["agent_id"]`` → ``ctx.agent_id`` → ``ctx.metadata["_agent_id"]``.
+
+        The third tier exists so that the HTTP transport can pass the bearer
+        token as a routing hint without injecting ``agent_id`` into the
+        schema-validated input body (which would cause
+        ``additionalProperties: false`` schema rejections for ops whose input
+        schemas do not include ``agent_id``).
+
+        Args:
+            inp: The operation input dict (``ctx.input``).
+            ctx: The middleware context.
+
+        Returns:
+            The resolved agent id string, or ``""`` if not found anywhere.
+        """
+        if "agent_id" in inp:
+            return str(inp["agent_id"])
+        if ctx.agent_id:
+            return ctx.agent_id
+        meta_hint = ctx.metadata.get("_agent_id")
+        if meta_hint:
+            return str(meta_hint)
+        return ""
+
     async def __call__(
         self,
         ctx: MiddlewareContext,
@@ -93,7 +121,7 @@ class StoreDispatchMiddleware:
             }
 
         elif op == "recv":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             channels_raw = inp.get("channels")
             channels: list[str] | None = None
             if isinstance(channels_raw, list):
@@ -111,14 +139,16 @@ class StoreDispatchMiddleware:
             return {"drained_at": time.time(), "messages": messages}
 
         elif op == "subscribe":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             pattern = str(inp.get("pattern", ""))
             matched = await self._store.subscribe(agent_id, pattern)
             return {"subscribed": True, "matched_channels": matched}
 
         elif op == "unsubscribe":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
-            patterns_raw = inp.get("patterns", [])
+            agent_id = self._resolve_agent_id(inp, ctx)
+            # Spec field name is "channels"; legacy internal name was "patterns".
+            # Accept both so routes.py does not need to remap before dispatch.
+            patterns_raw = inp.get("channels", inp.get("patterns", []))
             patterns: list[str] = (
                 [str(p) for p in patterns_raw]
                 if isinstance(patterns_raw, list)
@@ -150,7 +180,7 @@ class StoreDispatchMiddleware:
             return {"agents": agents}
 
         elif op == "channels_ack":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             message_id = str(inp.get("message_id", ""))
             status = str(inp.get("status", "ack"))
             reason_raw = inp.get("reason")
@@ -158,14 +188,14 @@ class StoreDispatchMiddleware:
             return await self._store.ack(agent_id, message_id, status, reason)
 
         elif op == "channels_heartbeat":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             status = str(inp.get("status", "active"))
             ttl_raw = inp.get("ttl")
             ttl: int | None = int(ttl_raw) if isinstance(ttl_raw, (int, float)) else None
             return await self._store.heartbeat(agent_id, status, ttl)
 
         elif op == "channels_collect":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             channels_raw = inp.get("channels")
             collect_channels: list[str] | None = (
                 [str(c) for c in channels_raw]
@@ -202,7 +232,16 @@ class StoreDispatchMiddleware:
             return {"messages": replay_msgs, "has_more": has_more}
 
         elif op == "group_create":
-            creator_id = str(inp.get("creator_id", ctx.agent_id or ""))
+            # creator_id is not in the spec schema; resolve from ctx (set by auth
+            # for enforced ops) or from the metadata hint injected by the HTTP
+            # transport.  Legacy routes that injected creator_id into the body
+            # are also supported via the inp fallback.
+            creator_id = str(
+                inp.get("creator_id", None)
+                or ctx.agent_id
+                or ctx.metadata.get("_agent_id")
+                or ""
+            )
             group_id_raw = inp.get("group_id")
             group_id_str: str | None = (
                 str(group_id_raw) if group_id_raw is not None else None
@@ -210,23 +249,31 @@ class StoreDispatchMiddleware:
             return await self._store.group_create(creator_id, group_id_str)
 
         elif op == "group_invite":
-            inviter_id = str(inp.get("inviter_id", ctx.agent_id or ""))
+            # Spec field name is "agent_id" (the invitee); internal name was
+            # "invitee_id".  Accept both for backward compatibility.
+            inviter_id = str(
+                inp.get("inviter_id", None)
+                or ctx.agent_id
+                or ctx.metadata.get("_agent_id")
+                or ""
+            )
             group_id = str(inp.get("group_id", ""))
-            invitee_id = str(inp.get("invitee_id", ""))
+            # Accept spec field "agent_id" OR legacy "invitee_id".
+            invitee_id = str(inp.get("agent_id", inp.get("invitee_id", "")))
             return await self._store.group_invite(inviter_id, group_id, invitee_id)
 
         elif op == "group_join":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             group_id = str(inp.get("group_id", ""))
             return await self._store.group_join(agent_id, group_id)
 
         elif op == "group_leave":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             group_id = str(inp.get("group_id", ""))
             return await self._store.group_leave(agent_id, group_id)
 
         elif op == "group_list_members":
-            agent_id = str(inp.get("agent_id", ctx.agent_id or ""))
+            agent_id = self._resolve_agent_id(inp, ctx)
             group_id = str(inp.get("group_id", ""))
             return await self._store.group_list_members(agent_id, group_id)
 

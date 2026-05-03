@@ -4,11 +4,9 @@
 Registers one POST handler per SOX operation at ``/v1/ops/<operation>``.
 Each handler:
 1. Extracts the bearer token (agent_id) from the Authorization header.
-2. Validates the request body against the operation's input schema (JSON Schema,
-   compiled at module load time from ``spec/operations/<op>.input.schema.json``).
-3. Dispatches through ``Pipeline.dispatch`` (which runs AuthMiddleware →
-   StoreDispatchMiddleware).
-4. Returns the operation output as JSON.
+2. Dispatches through ``Pipeline.dispatch`` (which runs AuthMiddleware →
+   schema_strict transformer → StoreDispatchMiddleware).
+3. Returns the operation output as JSON.
 
 Phase 03-build-http (pipeline-integration): all 15 direct ``store.<op>()``
 calls converted to ``await pipeline.dispatch(...)``.  ``IdentityResolver``,
@@ -18,11 +16,15 @@ import set; bearer token is wrapped in a :class:`SignedRequest` envelope via
 and injected into ``ctx.metadata["_connection_credential"]`` so AuthMiddleware
 performs real cryptographic verification.
 
+Phase 05-P5-03 (migrate-routes): ``_validate_body`` and its 22 inline
+call-sites deleted.  Input validation is now performed by the
+``sox-plugin-schema-strict`` transformer in the Pipeline — discovered via the
+entry-point mechanism wired in ``server.py:create_app``.  Client-visible error
+envelopes are identical (same ``error_code="validation_error"`` shape).
+
 Spec reference: ``spec/operations/*.json``
 
 Fix catalogue (04-spec-realignment):
-- FIX-1: Schema-driven input validation replaces ``_require_fields``; validators
-  are compiled at module load time.
 - FIX-2: Wildcard subscription rejection enforced at transport boundary for
   ``dm/*`` and ``group/*`` prefixes per ``subscribe.input.schema.json``.
 - FIX-3: ``backpressure_over_limit`` emission in ``op_send``; hard-coded
@@ -39,11 +41,8 @@ import json
 import logging
 import re
 import time
-from pathlib import Path
 from typing import Any
 
-import jsonschema
-import jsonschema.exceptions
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -61,67 +60,6 @@ from sox_protocol.core.middleware.pipeline import Pipeline
 _log = logging.getLogger(__name__)
 
 _PROTOCOL_VERSION = "1.0"
-
-# ---------------------------------------------------------------------------
-# FIX-1: Schema-driven validators compiled at module load time
-# ---------------------------------------------------------------------------
-
-def _load_op_schema(op_name: str) -> dict[str, Any]:
-    """Load ``spec/operations/<op_name>.input.schema.json`` relative to this package.
-
-    Args:
-        op_name: Operation name (e.g. ``"send"``).
-
-    Returns:
-        Parsed JSON Schema dict.
-    """
-    # Walk up from this file to the repo root, then into spec/operations/
-    here = Path(__file__).resolve()
-    # packages/python/src/sox_protocol/adapters/transports/http/routes.py
-    # → repo root is 7 levels up
-    repo_root = here.parents[7]
-    schema_path = repo_root / "spec" / "operations" / f"{op_name}.input.schema.json"
-    if not schema_path.exists():
-        raise FileNotFoundError(f"Schema not found: {schema_path}")
-    with schema_path.open(encoding="utf-8") as fh:
-        return json.load(fh)  # type: ignore[no-any-return]
-
-
-def _compile(op_name: str) -> jsonschema.Draft202012Validator:
-    """Compile and return a cached Draft 2020-12 validator for *op_name*.
-
-    Args:
-        op_name: Operation name.
-
-    Returns:
-        A compiled :class:`jsonschema.Draft202012Validator`.
-    """
-    schema = _load_op_schema(op_name)
-    validator = jsonschema.Draft202012Validator(schema)
-    return validator
-
-
-# Module-level compiled validators — loaded once at import time.
-_VALIDATORS: dict[str, jsonschema.Draft202012Validator] = {
-    op: _compile(op)
-    for op in [
-        "send",
-        "recv",
-        "subscribe",
-        "unsubscribe",
-        "list_channels",
-        "channels_ack",
-        "channels_heartbeat",
-        "channels_collect",
-        "replay",
-        "list_agents",
-        "group_create",
-        "group_invite",
-        "group_join",
-        "group_leave",
-        "group_list_members",
-    ]
-}
 
 # ---------------------------------------------------------------------------
 # FIX-2: Wildcard subscription rejection patterns
@@ -143,40 +81,6 @@ def _wildcard_forbidden(pattern: str) -> bool:
         True when the pattern matches ``dm/.*\\*`` or ``group/.*\\*``.
     """
     return bool(_FORBIDDEN_WILDCARD_RE.match(pattern))
-
-
-# ---------------------------------------------------------------------------
-# Validation helper
-# ---------------------------------------------------------------------------
-
-def _validate_body(op_name: str, body: object) -> JSONResponse | None:
-    """Validate *body* against the compiled schema for *op_name*.
-
-    Args:
-        op_name: Operation name key in ``_VALIDATORS``.
-        body: Parsed request body.
-
-    Returns:
-        A 400 :class:`JSONResponse` with ``validation_error`` envelope if
-        validation fails, else ``None``.
-    """
-    validator = _VALIDATORS[op_name]
-    errors = sorted(validator.iter_errors(body), key=lambda e: list(e.path))
-    if not errors:
-        return None
-    violations = [
-        {
-            "field": ".".join(str(p) for p in err.absolute_path) or "<root>",
-            "issue": err.message,
-        }
-        for err in errors
-    ]
-    return sox_error_response(
-        error_code="validation_error",
-        message=f"Input does not conform to {op_name}.input.schema.json.",
-        status_code=400,
-        detail={"violations": violations},
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +149,11 @@ async def _dispatch(
             operation=operation,
             input=body,
             connection_id=connection_id,
-            metadata={"_connection_credential": credential},
+            # Pass token as _agent_id routing hint so StoreDispatchMiddleware
+            # can resolve the caller for non-identity-enforced operations
+            # without requiring it to be injected into the validated body dict
+            # (which would violate schema additionalProperties: false).
+            metadata={"_connection_credential": credential, "_agent_id": token},
         )
         # Pipeline returns either an operation success dict or a sox-error
         # envelope (any dict containing an "error_code" field). Map error
@@ -262,6 +170,7 @@ async def _dispatch(
                 "missing_credential": 401,
                 "invalid_credential": 401,
                 "unknown_agent": 401,
+                "validation_error": 400,
                 "validation_failed": 400,
                 "plugin_capability_conflict": 400,
                 "plugin_ordering_cycle": 500,
@@ -342,16 +251,6 @@ def register_operation_routes(
             return request.client.host or "unknown"
         return "unknown"
 
-    def _inject_agent_id(body: dict[str, object], token: str) -> dict[str, object]:
-        """Inject token as agent_id into body for operations where AuthMiddleware
-        does not enforce identity (and therefore does not set ctx.agent_id).
-        StoreDispatchMiddleware reads ``inp.get("agent_id", ctx.agent_id or "")``
-        so providing it here ensures correct routing even for non-enforced ops.
-        """
-        result = dict(body)
-        result.setdefault("agent_id", token)
-        return result
-
     # ------------------------------------------------------------------
     # FIX-1 + FIX-3: send
     # ------------------------------------------------------------------
@@ -366,11 +265,8 @@ def register_operation_routes(
             body: Any = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("send", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
+        if not isinstance(body, dict):
+            body = {}
         resp = await _dispatch(pipeline, private_key, registry, "send", body, token, _connection_id(request), auto_register=auto_register)
         # FIX-3: pipeline result may carry backpressure_over_limit from
         # StoreDispatchMiddleware; surface it as 429 if so.
@@ -429,10 +325,6 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("recv", body)
-        if val_err is not None:
-            return val_err
         if not isinstance(body, dict):
             body = {}
         return await _dispatch(pipeline, private_key, registry, "recv", body, token, _connection_id(request), auto_register=auto_register)
@@ -451,12 +343,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation (also enforces minLength/maxLength)
-        val_err = _validate_body("subscribe", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        pattern = str(body["pattern"])
+        if not isinstance(body, dict):
+            body = {}
+        pattern = str(body.get("pattern", ""))
         # FIX-2: wildcard subscription rejection at transport boundary
         if _wildcard_forbidden(pattern):  # pragma: no cover — schema already rejects these patterns
             return sox_error_response(
@@ -501,18 +390,11 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation; spec field is "channels"
-        val_err = _validate_body("unsubscribe", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        # Remap spec field "channels" → StoreDispatchMiddleware field "patterns".
-        # Also inject agent_id (unsubscribe is not in _IDENTITY_ENFORCED_OPERATIONS
-        # so ctx.agent_id won't be set by AuthMiddleware).
-        dispatch_body: dict[str, object] = _inject_agent_id(body, token)
-        if "channels" in dispatch_body and "patterns" not in dispatch_body:
-            dispatch_body["patterns"] = dispatch_body.pop("channels")
-        resp = await _dispatch(pipeline, private_key, registry, "unsubscribe", dispatch_body, token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        # StoreDispatchMiddleware accepts the spec field name "channels" directly
+        # for unsubscribe (since phase 05-P5-03). No remap needed here.
+        resp = await _dispatch(pipeline, private_key, registry, "unsubscribe", body, token, _connection_id(request), auto_register=auto_register)
         # Normalize: StoreDispatchMiddleware returns {"removed": [...], "pending_cleared": int}
         # but HTTP clients expect {"unsubscribed": [...], "pending_cleared": int}.
         if resp.status_code == 200:
@@ -536,15 +418,11 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("list_channels", body)
-        if val_err is not None:
-            return val_err
         if not isinstance(body, dict):
             body = {}
         # list_channels is not enforced by AuthMiddleware; inject agent_id for
         # StoreDispatchMiddleware's fallback lookup.
-        resp = await _dispatch(pipeline, private_key, registry, "list_channels", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        resp = await _dispatch(pipeline, private_key, registry, "list_channels", body, token, _connection_id(request), auto_register=auto_register)
         # Add _sox_protocol version block expected by list_channels output schema.
         if resp.status_code == 200:
             content = json.loads(bytes(resp.body))
@@ -571,12 +449,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation (requires message_id + status)
-        val_err = _validate_body("channels_ack", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "channels_ack", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "channels_ack", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # channels_heartbeat
@@ -592,12 +467,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation (requires status)
-        val_err = _validate_body("channels_heartbeat", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "channels_heartbeat", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "channels_heartbeat", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # channels_collect  (FIX-5: documented degraded mode)
@@ -634,14 +506,27 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation (requires reply_to, count, timeout)
-        val_err = _validate_body("channels_collect", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        reply_to: str = str(body["reply_to"])
-        count: int = int(body["count"])
-        timeout_s: float = float(body["timeout"])
+        if not isinstance(body, dict):
+            body = {}
+
+        # channels_collect uses a custom poll-loop (see FIX-5 degraded mode),
+        # so the original body never reaches pipeline.dispatch directly.
+        # Validate the input schema here by dispatching a sentinel call through
+        # the pipeline, which runs schema_strict first.  A validation_error
+        # ShortCircuitResponse surfaces as a non-200 response that we return
+        # immediately; a 200 response means schema passed and we proceed.
+        # The sentinel uses operation "channels_collect" with the original body
+        # so schema_strict validates against channels_collect.input.schema.json.
+        _sentinel_resp = await _dispatch(
+            pipeline, private_key, registry, "channels_collect", body, token,
+            _connection_id(request), auto_register=auto_register,
+        )
+        if _sentinel_resp.status_code != 200:
+            return _sentinel_resp
+
+        reply_to: str = str(body.get("reply_to", ""))
+        count: int = int(body.get("count", 0))
+        timeout_s: float = float(body.get("timeout", 0))
         status_filter_raw = body.get("status_filter")
         status_filter: list[str] | None = (
             [str(s) for s in status_filter_raw] if isinstance(status_filter_raw, list) else None
@@ -694,12 +579,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation (requires channel, since, limit)
-        val_err = _validate_body("replay", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "replay", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "replay", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # FIX-4: list_agents — backed by BackingStore port via pipeline
@@ -720,10 +602,6 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("list_agents", body)
-        if val_err is not None:
-            return val_err
         if not isinstance(body, dict):
             body = {}
         # list_agents IS in _IDENTITY_ENFORCED_OPERATIONS; ctx.agent_id set by AuthMiddleware.
@@ -743,17 +621,11 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("group_create", body)
-        if val_err is not None:
-            return val_err
         if not isinstance(body, dict):
             body = {}
-        # StoreDispatchMiddleware reads "creator_id" falling back to ctx.agent_id.
-        # group_create is not enforced so inject creator_id explicitly.
-        dispatch_body_gc = dict(body)
-        dispatch_body_gc.setdefault("creator_id", token)
-        return await _dispatch(pipeline, private_key, registry, "group_create", dispatch_body_gc, token, _connection_id(request), auto_register=auto_register)
+        # StoreDispatchMiddleware resolves creator_id from ctx.metadata["_agent_id"]
+        # (the bearer token passed via _dispatch metadata) since phase 05-P5-03.
+        return await _dispatch(pipeline, private_key, registry, "group_create", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # group_invite
@@ -769,26 +641,21 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("group_invite", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        # Remap spec field "agent_id" (invitee) → StoreDispatchMiddleware field "invitee_id".
-        # Also inject "inviter_id" (the caller) since group_invite is not enforced.
-        dispatch_body = dict(body)
-        if "agent_id" in dispatch_body and "invitee_id" not in dispatch_body:
-            dispatch_body["invitee_id"] = dispatch_body.pop("agent_id")
-        dispatch_body.setdefault("inviter_id", token)
-        resp = await _dispatch(pipeline, private_key, registry, "group_invite", dispatch_body, token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        # StoreDispatchMiddleware accepts the spec field name "agent_id" directly
+        # for group_invite (since phase 05-P5-03). inviter_id is resolved from
+        # ctx.metadata["_agent_id"] (the bearer token) passed by _dispatch.
+        resp = await _dispatch(pipeline, private_key, registry, "group_invite", body, token, _connection_id(request), auto_register=auto_register)
         # The pipeline converts store.group_invite ValueError (membership check) to an
-        # internal_error envelope.  Map it back to 403 GROUP_MEMBERSHIP_REQUIRED to
-        # preserve the pre-pipeline HTTP contract (v1 transitional; v1.1 will raise
-        # a typed GroupMembershipError that the pipeline surfaces as a ShortCircuit).
-        if resp.status_code == 200:
+        # internal_error envelope (HTTP 500).  Map it back to 403
+        # GROUP_MEMBERSHIP_REQUIRED to preserve the pre-pipeline HTTP contract
+        # (v1 transitional; v1.1 will raise a typed GroupMembershipError that
+        # the pipeline surfaces as a ShortCircuit with a distinct error_code).
+        if resp.status_code in (200, 500):
             content = json.loads(bytes(resp.body))
             if content.get("error_code") == "internal_error":
-                # Re-map membership-check errors to 403; all other internal errors stay 500.
+                # Re-map membership-check errors to 403.
                 return sox_error_response(
                     error_code="GROUP_MEMBERSHIP_REQUIRED",
                     message=content.get("message", "Group membership required"),
@@ -810,12 +677,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("group_join", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "group_join", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "group_join", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # group_leave
@@ -831,12 +695,9 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("group_leave", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "group_leave", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "group_leave", body, token, _connection_id(request), auto_register=auto_register)
 
     # ------------------------------------------------------------------
     # group_list_members
@@ -852,9 +713,6 @@ def register_operation_routes(
             body = await request.json()
         except Exception:
             body = {}
-        # FIX-1: schema-driven validation
-        val_err = _validate_body("group_list_members", body)
-        if val_err is not None:
-            return val_err
-        assert isinstance(body, dict)
-        return await _dispatch(pipeline, private_key, registry, "group_list_members", _inject_agent_id(body, token), token, _connection_id(request), auto_register=auto_register)
+        if not isinstance(body, dict):
+            body = {}
+        return await _dispatch(pipeline, private_key, registry, "group_list_members", body, token, _connection_id(request), auto_register=auto_register)

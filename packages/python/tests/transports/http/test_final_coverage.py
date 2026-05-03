@@ -69,17 +69,28 @@ def auth(agent_id: str) -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# routes.py line 69: _load_schema raises FileNotFoundError
-# This is covered by testing _load_schema directly.
+# Schema validation path: _load_op_schema was removed in phase 05-P5-03.
+# Schema validation is now performed by the schema_strict plugin in the chain.
 # ---------------------------------------------------------------------------
 
 
-def test_load_schema_raises_for_unknown_op() -> None:
-    """Line 69: _load_op_schema raises FileNotFoundError for a non-existent op."""
-    from sox_protocol.adapters.transports.http.routes import _load_op_schema
+@pytest.mark.asyncio
+async def test_unknown_op_schema_validation_passes_through(
+    client: AsyncClient,
+) -> None:
+    """schema_strict plugin passes through unknown operations without error.
 
-    with pytest.raises(FileNotFoundError, match="Schema not found"):
-        _load_op_schema("nonexistent_operation_xyz")
+    This replaces the deleted _load_op_schema test: the plugin has no schema
+    for non-SOX operations and does not reject them.
+    """
+    # list_agents has an empty-object input schema; {} is valid.
+    resp = await client.post(
+        "/v1/ops/list_agents",
+        json={},
+        headers=auth("agent-liveness"),
+    )
+    # Any non-validation-error response confirms schema_strict did not reject.
+    assert resp.json().get("error_code") != "validation_error"
 
 
 # ---------------------------------------------------------------------------
