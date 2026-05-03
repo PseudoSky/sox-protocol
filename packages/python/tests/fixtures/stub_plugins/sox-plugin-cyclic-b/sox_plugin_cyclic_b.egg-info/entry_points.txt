@@ -1,2 +1,0 @@
-[sox_protocol.plugins]
-io.sox.cyclic-b = sox_plugin_cyclic_b:make_middleware

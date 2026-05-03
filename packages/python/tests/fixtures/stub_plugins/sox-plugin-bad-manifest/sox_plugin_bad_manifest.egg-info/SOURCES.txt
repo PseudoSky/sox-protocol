@@ -1,8 +1,0 @@
-pyproject.toml
-sox_plugin_bad_manifest/__init__.py
-sox_plugin_bad_manifest/sox-plugin.yaml
-sox_plugin_bad_manifest.egg-info/PKG-INFO
-sox_plugin_bad_manifest.egg-info/SOURCES.txt
-sox_plugin_bad_manifest.egg-info/dependency_links.txt
-sox_plugin_bad_manifest.egg-info/entry_points.txt
-sox_plugin_bad_manifest.egg-info/top_level.txt

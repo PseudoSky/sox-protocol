@@ -1,2 +1,0 @@
-[sox_protocol.plugins]
-io.sox.noop = sox_plugin_noop:make_noop_middleware

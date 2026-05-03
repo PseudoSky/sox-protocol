@@ -1,9 +1,0 @@
-pyproject.toml
-sox_plugin_noop/__init__.py
-sox_plugin_noop/middleware.py
-sox_plugin_noop/sox-plugin.yaml
-sox_plugin_noop.egg-info/PKG-INFO
-sox_plugin_noop.egg-info/SOURCES.txt
-sox_plugin_noop.egg-info/dependency_links.txt
-sox_plugin_noop.egg-info/entry_points.txt
-sox_plugin_noop.egg-info/top_level.txt

@@ -1,5 +1,0 @@
-Metadata-Version: 2.4
-Name: sox-plugin-version-mismatch
-Version: 1.0.0
-Summary: Version-mismatch stub plugin for SOX Protocol integration tests
-Requires-Python: >=3.11

@@ -1,9 +1,0 @@
-pyproject.toml
-sox_plugin_version_mismatch/__init__.py
-sox_plugin_version_mismatch/middleware.py
-sox_plugin_version_mismatch/sox-plugin.yaml
-sox_plugin_version_mismatch.egg-info/PKG-INFO
-sox_plugin_version_mismatch.egg-info/SOURCES.txt
-sox_plugin_version_mismatch.egg-info/dependency_links.txt
-sox_plugin_version_mismatch.egg-info/entry_points.txt
-sox_plugin_version_mismatch.egg-info/top_level.txt
