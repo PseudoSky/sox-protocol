@@ -11,6 +11,9 @@ narrowed_from: 3 plugins → 1 (per analysis §7.6 / optimizer suggestion #2)
 
 # reference-plugins — engagement state
 
+**Engagement closed 2026-05-01 — see [REVIEW.md](./REVIEW.md)**
+Verdict: APPROVED-WITH-FOLLOWUPS. 0 blockers. Contract proven end-to-end (partial: zero plugin-specific core/ accommodations; three latent bug-fixes in core/ were required).
+
 ## Status
 
 | Phase | Title | Status | Agent | Attempts | Last touched |
@@ -18,16 +21,58 @@ narrowed_from: 3 plugins → 1 (per analysis §7.6 / optimizer suggestion #2)
 | 01-plan | Plan one plugin: API surface, manifest, lifecycle, tests, package layout | `DONE` | python-pro (combined) | 1 | 2026-05-04T00:00:00Z |
 | 02-build-schema-strict | `plugins/sox-plugin-schema-strict/` — kind: transformer; pyproject.toml; sox-plugin.yaml; src/; tests/; integration with sox-plugin spec from B1 | `DONE` | python-pro | 1 | 2026-05-04T00:00:00Z |
 | 03-migrate-routes | Delete `routes.py:_validate_body` (and the 22 inline validation calls); replace with the plugin in the chain | `DONE` | python-pro | 1 | 2026-05-01T18:00:00Z |
-| 04-review | Review for contract conformance — does the plugin demonstrate the manifest-driven discovery path end-to-end without core/ modifications? | `READY` | code-reviewer | 0 | 2026-05-01T18:00:00Z |
+| 04-review | Review for contract conformance — does the plugin demonstrate the manifest-driven discovery path end-to-end without core/ modifications? | `DONE` | code-reviewer | 1 | 2026-05-01T18:00:00Z |
 
 ## Currently next action
 
-Dispatch **phase 04-review**: review the full plugin contract proof end-to-end.
-All 4 phases are DONE. The plugin demonstrates manifest-driven discovery with
-zero `core/` modifications (beyond targeted bug-fixes to `StoreDispatchMiddleware`
-field-name canonicalization and `extend_pipeline_with_registry` ordering).
+All 4 phases DONE. Engagement closed. See REVIEW.md for findings and follow-up
+candidates. Next actions are deferred to `fixture-spec-realignment` and
+`reference-plugins-extended`.
 
 ## Transition log
+
+### 2026-05-01 — phase 04-review: DONE
+
+**Agent:** code-reviewer
+
+**Verdict:** APPROVED-WITH-FOLLOWUPS
+
+**Summary:** Full terminal review of P5 commits a237f15 (plugin build) and
+35d1836 (route migration). See REVIEW.md for complete findings.
+
+**Key findings:**
+
+- Acceptance gates: mypy --strict 81 files clean; pytest 1230 passed 0 failed;
+  stdio conformance 33/0/34; HTTP conformance 24/9/34 (all matching documented
+  baselines).
+- Entry-point confirmed: `io.sox.schema-strict` present in
+  `sox_protocol.plugins` group; loads via `load_plugins()` in both bootstraps.
+- routes.py clean: no leftover jsonschema imports, no `_validate_body` traces.
+  142 lines deleted (860 → 718), confirmed.
+- Backward compatibility: plugin envelope shape is byte-for-byte identical to
+  deleted `_validate_body` output. HTTP 400 preserved via `validation_error: 400`
+  status_map entry. Zero breaking changes.
+- Core/ modifications: three files touched (default_chain.py, store_dispatch.py,
+  registry.py). All classified as acceptable latent bug-fixes — not plugin-specific
+  accommodations. See REVIEW.md Section 3 for per-change verdicts.
+- Conformance delta finding: SOX_NO_DISCOVERY=1 shows 25/8/34 vs 24/9/34 with
+  plugin. The +1 "pass" (unsubscribe-discards-queue) is a false positive —
+  schema validation is bypassed entirely, allowing a spec-violating legacy field
+  through. With plugin enabled the spec is correctly enforced. No new failures.
+- Coverage: 93% (termination target was 100%; 6 lines uncovered in two
+  defensive branches).
+- One `asyncio.get_event_loop()` deprecation warning in plugin unit tests.
+
+**Blockers:** 0
+
+**Follow-ups deferred:**
+- `fixture-spec-realignment`: update `02-unsubscribe-discards-queue` fixture
+  `patterns:` → `channels:`; remove store_dispatch dual-alias shim after fixture
+  is corrected; 8 remaining HTTP failures.
+- `reference-plugins-extended`: plugin coverage to 100%; audit-jsonl and
+  rate-limit-redis plugins.
+- Nice-to-have: fix `asyncio.get_event_loop()` in test_schema_strict.py:60;
+  add warning log for degenerate ordering window in extend_pipeline_with_registry.
 
 ### 2026-05-04 — phase 01-plan + 02-build-schema-strict: combined DONE
 
