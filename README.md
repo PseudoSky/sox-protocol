@@ -299,6 +299,7 @@ Non-Python ports must pass the same suite before merge. See [spec/README.md §Ad
 | **You want to contribute a TS/Rust port** | [packages/typescript/README.md](packages/typescript/README.md) or [packages/rust/README.md](packages/rust/README.md) → [spec/README.md §Adding a new language port](spec/README.md#adding-a-new-language-port) |
 | **You want the research context** | [docs/RESEARCH.md](docs/RESEARCH.md) |
 | **You're evaluating adoption** | [DESIGN.md §1–4](docs/DESIGN.md) → [FUTURE.md](docs/FUTURE.md) → [GLOSSARY.md](docs/GLOSSARY.md) |
+| **You want to run the live Claude E2E test** | [docs/development/live-tests.md](docs/development/live-tests.md) |
 
 ---
 
