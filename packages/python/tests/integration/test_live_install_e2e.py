@@ -252,7 +252,9 @@ def _run_claude(
         CompletedProcess with stdout/stderr captured.
 
     Raises:
-        pytest.fail if the process times out or returns non-zero.
+        pytest.fail if the process times out. Non-zero return codes are
+        surfaced via the returned CompletedProcess.returncode; callers must
+        assert on that field separately (see usage in the happy-path test).
     """
     artifacts_dir = tmp_dir / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -483,6 +485,7 @@ def test_live_install_happy_path(live_project: Path, tmp_path: Path) -> None:
     bob_tx = bob_result.stdout
     _assert_sentinel(bob_tx, "BOB_DONE", "bob")
     _assert_cost_logged(bob_tx, "bob")
+    _assert_tool_used(bob_tx, "mcp__sox__group__join", "bob")
     _assert_tool_used(bob_tx, "mcp__sox__channels__recv", "bob")
     _assert_tool_used(bob_tx, "mcp__sox__channels__send", "bob")
 
@@ -500,9 +503,12 @@ def test_live_install_happy_path(live_project: Path, tmp_path: Path) -> None:
         ("group/live-e2e-test",),
     )
     sub_agents = {r[0] for r in sub_rows}
-    # At minimum alice subscribes (group__create) and bob subscribes (group__join).
-    assert len(sub_agents) >= 1, (
-        f"Expected at least 1 subscription to group/live-e2e-test, got {sub_agents}"
+    # Alice subscribes via group__create; bob subscribes via group__join.
+    # Both MUST be present — otherwise we can't tell whether bob actually joined
+    # or only alice's create did the work.
+    assert len(sub_agents) >= 2, (
+        f"Expected at least 2 distinct subscribers (alice + bob) to "
+        f"group/live-e2e-test, got {sub_agents}"
     )
 
 
