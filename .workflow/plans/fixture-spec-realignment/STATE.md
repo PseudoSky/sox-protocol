@@ -18,8 +18,8 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 | 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
 | 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `DONE` | python-pro+orchestrator | 2 | 2026-05-03T00:00:00Z |
 | 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
-| 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `READY` | python-pro | 0 | 2026-05-04T00:00:00Z |
-| 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
+| 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
+| 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `READY` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 06-fix-group-invite-output | Resolve spec/impl mismatch: `spec/operations/group_invite.output.schema.json` says `{invited, agent_id}` but impl emits `{group_id, invited_agent}`. Decide which is canonical (spec normally wins; check ADR / git history for original intent). Update the loser. Delete the `tools/conformance_runner.py:1108` client-side remap that masks this on stdio. Closes `groups/01-create-invite-join`. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 07-review | Code review covering all 6 fixes + verification that no new harness simulations were introduced. HTTP conformance MUST reach 33/0/34 (parity with stdio). Closes engagement. | `BLOCKED` | code-reviewer | 0 | 2026-05-04T00:00:00Z |
 
@@ -92,7 +92,18 @@ The python-pro agent (worktree-isolated) truncated mid-edit ("Now update MemoryS
 
 Phase 02 marked DONE. Phase 03 ready (the fix-replay-since gap is now visible on stdio if the simulator were removed; the natural progression is for phase 03 to fix the impl, then delete that simulator branch).
 
-## Currently next action (phase 03 closed)
+## Currently next action (phase 04 closed)
+
+Dispatch **phase 05-fix-presence-namespace** (python-pro, worktree-isolated). Inputs:
+- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (tsk_presence_heartbeat, tsk_namespace_version_block)
+- `spec/conformance/presence/01-heartbeat-updates-presence-channel.yaml`
+- `spec/conformance/namespace-isolation/02-version-block.yaml`
+- `packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py` — MemoryStore.heartbeat (needs sox/presence emit)
+- `packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py` — SqliteStore.heartbeat (needs sox/presence emit)
+- `tools/conformance_runner.py:1072-1108` — heartbeat simulator emit to delete
+- `tools/conformance_runner.py:1057-1067` — list_channels version-block simulator to delete/evaluate
+
+## Currently next action (phase 03 closed — preserved for history)
 
 Dispatch **phase 04-fix-unsubscribe-discard** (python-pro, worktree-isolated). Inputs:
 - `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (tsk_unsubscribe_discard)
@@ -118,4 +129,23 @@ Dispatch **phase 04-fix-unsubscribe-discard** (python-pro, worktree-isolated). I
 - pytest: 1250 passed, 0 failed
 - stdio conformance: 33 passed, 0 failed, 34 skipped
 - HTTP conformance: 29 passed, 4 failed, 34 skipped (+2 replay fixtures now pass)
+
+### 2026-05-03 — phase 04 attempt 1 (SUCCESS)
+
+**Root cause confirmed:** Wire-protocol field-name mismatch. The fixture sent `patterns: ["test:unsub"]` but the spec schema (`unsubscribe.input.schema.json`) requires `channels` with `additionalProperties: false`. The HTTP pipeline's schema-strict plugin rejected the body (validation error), so unsubscribe never ran and the queued message was never discarded. The stdio path appeared to pass because the simulator at conformance_runner.py:976-994 read `args.get("patterns", [])` directly, bypassing schema validation entirely.
+
+Both MemoryStore.unsubscribe and SqliteStore.unsubscribe correctly implement the discard semantics — the planner's hypothesis that SqliteStore was the bug was wrong. The actual bug was spec/fixture field-name mismatch.
+
+**Fix target:** spec (fixture field rename) + harness simulator deletion.
+
+**Changes:**
+- `spec/conformance/subscription-patterns/02-unsubscribe-discards-queue.yaml`: `patterns:` → `channels:` (spec field name)
+- `tools/conformance_runner.py:976-994`: deleted simulator branch, replaced with real `store.unsubscribe()` call (accepts both `channels` and legacy `patterns`)
+- `packages/python/tests/adapters/backing_stores/test_port_contract.py`: added `TestUnsubscribeDiscard` class (12 tests across 3 stores covering: before-messages, after-queued, other-channels-retained, non-matching-pattern)
+
+**Invariants:**
+- mypy --strict: Success, 81 source files
+- pytest: 1262 passed, 0 failed
+- stdio conformance: 33 passed, 0 failed, 34 skipped
+- HTTP conformance: 30 passed, 3 failed, 34 skipped (+1 unsubscribe fixture now passes)
 

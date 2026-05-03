@@ -670,3 +670,74 @@ class TestReplaySince:
         msgs, _ = await store.replay(channel, since=0)
         seqs = [int(m["seq"]) for m in msgs]
         assert seqs == sorted(seqs), f"messages not in seq order: {seqs}"
+
+
+class TestUnsubscribeDiscard:
+    """Unit tests for BackingStore.unsubscribe queue-discard semantics.
+
+    Spec: docs/V1-SCOPE.md unsubscribe row — "Discards queued-but-unread messages."
+    Closes fixture: spec/conformance/subscription-patterns/02-unsubscribe-discards-queue.yaml
+    """
+
+    async def test_unsubscribe_before_any_messages_recv_returns_nothing(
+        self, store: BackingStore
+    ) -> None:
+        """Unsubscribe before any messages are sent; recv returns empty.
+
+        Contract: (a) unsubscribe before any messages — recv returns nothing.
+        """
+        await store.subscribe("agent-a", "chan:empty")
+        removed, pending_cleared = await store.unsubscribe("agent-a", ["chan:empty"])
+        assert removed == ["chan:empty"]
+        assert pending_cleared == 0
+        msgs = await store.recv("agent-a")
+        assert msgs == []
+
+    async def test_unsubscribe_after_messages_queued_discards_them(
+        self, store: BackingStore
+    ) -> None:
+        """Messages queued before unsubscribe must not be delivered on subsequent recv.
+
+        Contract: (b) unsubscribe after messages queued — recv returns nothing for
+        that channel.
+        """
+        await store.subscribe("agent-b", "chan:discard")
+        await store.send("chan:discard", "sender", {"x": 1})
+        removed, pending_cleared = await store.unsubscribe("agent-b", ["chan:discard"])
+        assert removed == ["chan:discard"]
+        assert pending_cleared == 1
+        msgs = await store.recv("agent-b")
+        assert msgs == [], f"expected no messages after unsubscribe, got {msgs}"
+
+    async def test_unsubscribe_only_discards_matching_channel_messages(
+        self, store: BackingStore
+    ) -> None:
+        """Messages on retained subscriptions must still be delivered after unsubscribe.
+
+        Contract: (b) other channels' messages still delivered.
+        """
+        await store.subscribe("agent-c", "chan:keep")
+        await store.subscribe("agent-c", "chan:drop")
+        await store.send("chan:keep", "sender", {"keep": True})
+        await store.send("chan:drop", "sender", {"drop": True})
+        removed, pending_cleared = await store.unsubscribe("agent-c", ["chan:drop"])
+        assert removed == ["chan:drop"]
+        assert pending_cleared == 1
+        msgs = await store.recv("agent-c")
+        assert len(msgs) == 1, f"expected 1 message on kept channel, got {len(msgs)}"
+        assert msgs[0]["channel"] == "chan:keep"
+
+    async def test_unsubscribe_non_matching_pattern_does_not_discard(
+        self, store: BackingStore
+    ) -> None:
+        """Unsubscribing a pattern the agent isn't subscribed to discards nothing.
+
+        Contract: (c) unsubscribe with pattern that doesn't match — no messages discarded.
+        """
+        await store.subscribe("agent-d", "chan:actual")
+        await store.send("chan:actual", "sender", {"n": 1})
+        removed, pending_cleared = await store.unsubscribe("agent-d", ["chan:nonexistent"])
+        assert removed == []
+        assert pending_cleared == 0
+        msgs = await store.recv("agent-d")
+        assert len(msgs) == 1, f"expected message still present, got {len(msgs)}"

@@ -32,7 +32,7 @@ sequence:
     as_agent: agent-unsub-recv
     operation: unsubscribe
     input:
-      patterns:
+      channels:
         - "test:unsub"
     expected_output:
       unsubscribed: "{{any_array}}"

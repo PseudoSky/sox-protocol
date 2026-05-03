@@ -974,24 +974,15 @@ class SharedMemoryTarget:
             return {"subscribed": matched}
 
         if operation == "unsubscribe":
-            patterns = args.get("patterns", [])
-            removed: list[str] = []
-            async with store._lock:
-                existing = store._subscriptions.get(agent_id, [])
-                new_patterns = []
-                for p in existing:
-                    if p in patterns:
-                        removed.append(p)
-                        # Discard queued messages for this pattern
-                        for msg in store._messages:
-                            if agent_id not in msg.delivered_to:
-                                import fnmatch as _fnmatch
-                                if _fnmatch.fnmatchcase(msg.channel, p):
-                                    msg.delivered_to.add(agent_id)
-                    else:
-                        new_patterns.append(p)
-                store._subscriptions[agent_id] = new_patterns
-            return {"unsubscribed": removed}
+            # Spec field name is "channels"; accept legacy "patterns" too.
+            patterns_raw = args.get("channels", args.get("patterns", []))
+            patterns_list: list[str] = (
+                [str(p) for p in patterns_raw]
+                if isinstance(patterns_raw, list)
+                else []
+            )
+            removed, _pending_cleared = await store.unsubscribe(agent_id, patterns_list)
+            return {"unsubscribed": removed, "pending_cleared": _pending_cleared}
 
         if operation == "send":
             channel = args["channel"]
