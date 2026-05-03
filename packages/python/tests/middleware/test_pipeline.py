@@ -150,7 +150,9 @@ async def test_short_circuit_skips_subsequent_middlewares() -> None:
     pipeline = Pipeline([mw1, mw2, mw3], _terminal)
     result = await pipeline.dispatch("send", {}, connection_id="c")
 
-    assert result == {"error_code": "denied"}
+    # pipeline_trace + correlation_id are injected by Pipeline; check the
+    # error payload independently of the observability metadata.
+    assert result.get("error_code") == "denied"
     assert "mw3:before" not in log
     assert not reached_terminal
 
@@ -255,7 +257,9 @@ async def test_short_circuit_response_returned_directly() -> None:
 
     result = await pipeline.dispatch("send", {}, connection_id="c")
 
-    assert result == short
+    # Pipeline injects metadata; verify the sox-error payload keys individually.
+    assert result.get("error_code") == short["error_code"]
+    assert result.get("message") == short["message"]
 
 
 # ---------------------------------------------------------------------------

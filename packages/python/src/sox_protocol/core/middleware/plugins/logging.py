@@ -72,6 +72,7 @@ class LoggingMiddleware:
     """
 
     name: str = "middleware_log"
+    kind: str = "hook"
     must_run_before: tuple[str, ...] = ()
     must_run_after: tuple[str, ...] = ("store_dispatch",)
 

@@ -78,10 +78,15 @@ class MiddlewareContext:
         self.operation: str = operation
         self.input: dict[str, object] = input
         self.metadata: dict[str, object] = metadata if metadata is not None else {}
-        self._meta: dict[str, object] = {"middleware_timings": []}
+        self._meta: dict[str, object] = {"pipeline_trace": []}
         self._connection_id: str = connection_id
         self._agent_id: str | None = None
-        self._correlation_id: str = uuid.uuid4().hex
+        # Echo correlation_id from caller-supplied metadata if present;
+        # otherwise generate a fresh UUID per-dispatch (suggestions-v2.md §Q3 risk #7).
+        meta_corr = self.metadata.get("correlation_id")
+        self._correlation_id: str = (
+            str(meta_corr) if isinstance(meta_corr, str) and meta_corr else uuid.uuid4().hex
+        )
         self._correlation_id_frozen: bool = False
 
     # ------------------------------------------------------------------

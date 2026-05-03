@@ -172,7 +172,8 @@ async def test_hook_allow_decision_passes_through() -> None:
     pipeline = Pipeline([dispatcher], _passthrough)
     result = await pipeline.dispatch("send", {}, connection_id="c")
 
-    assert result == {"ok": True}
+    # Pipeline injects metadata; verify the payload key only.
+    assert result.get("ok") is True
 
 
 # ---------------------------------------------------------------------------

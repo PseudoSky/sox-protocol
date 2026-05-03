@@ -387,103 +387,111 @@ async def test_signed_request_stripped_from_input_after_fallback(
 
 
 # ---------------------------------------------------------------------------
-# Deliverable 4 — middleware_timings emitted by AuthMiddleware
+# Deliverable 4 — pipeline_trace emitted by Pipeline (replaces middleware_timings)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_middleware_timings_emitted_on_success(
+async def test_pipeline_trace_emitted_on_success(
     verifier,
     registry,
     sample_keypair,
     sign_request,
 ) -> None:
-    """AuthMiddleware appends a timing entry with verdict='ok' on success."""
+    """Pipeline emits a pipeline_trace entry with verdict='passed' on auth success."""
     private_seed, public_key = sample_keypair
     await registry.register("alice", public_key)
 
     req = sign_request(agent_id="alice", method="recv")
 
-    captured_timings: list[object] = []
-
-    async def _capture_meta(ctx: MiddlewareContext) -> dict[str, object]:
-        captured_timings.extend(ctx._meta.get("middleware_timings", []))
+    async def _terminal(ctx: MiddlewareContext) -> dict[str, object]:
         return {"ok": True, "agent_id": ctx.agent_id}
 
     auth_mw = AuthMiddleware(verifier)
-    pipeline = Pipeline([auth_mw], _capture_meta)
+    pipeline = Pipeline([auth_mw], _terminal)
 
-    await pipeline.dispatch(
+    result = await pipeline.dispatch(
         "recv",
         {},
         connection_id="conn-1",
         metadata={"_connection_credential": req},
     )
 
-    assert len(captured_timings) == 1
-    entry = captured_timings[0]
+    trace = result.get("metadata", {}).get("pipeline_trace", [])  # type: ignore[union-attr]
+    assert isinstance(trace, list)
+    assert len(trace) == 1
+    entry = trace[0]
     assert isinstance(entry, dict)
-    assert entry["middleware"] == "auth"
-    assert entry["verdict"] == "ok"
-    assert isinstance(entry["duration_ms"], int)
+    assert entry["plugin_id"] == "auth"
+    assert entry["kind"] == "auth"
+    assert entry["verdict"] == "passed"
+    assert entry["error_code"] is None
+    assert isinstance(entry["started_at"], float)
+    assert isinstance(entry["finished_at"], float)
+    assert entry["finished_at"] >= entry["started_at"]
+    assert isinstance(entry["correlation_id"], str)
+    assert len(entry["correlation_id"]) > 0
 
 
 @pytest.mark.asyncio
-async def test_middleware_timings_emitted_on_reject(verifier) -> None:
-    """AuthMiddleware appends a timing entry with verdict='reject' on identity failure."""
-    from sox_protocol.core.middleware.context import MiddlewareContext as _Ctx
+async def test_pipeline_trace_emitted_on_reject_missing_credential(verifier) -> None:
+    """Pipeline emits verdict='rejected' when auth short-circuits for missing credential."""
 
-    captured_ctx: list[_Ctx] = []
+    async def _terminal(ctx: MiddlewareContext) -> dict[str, object]:  # pragma: no cover
+        raise AssertionError("should not reach terminal")
 
-    # We need to capture _meta BEFORE the ShortCircuitResponse clears it.
-    # Pipeline catches ShortCircuitResponse and returns sc.response — so
-    # we can't inspect ctx after dispatch. Instead, we test via a direct call.
-
-    from sox_protocol.core.middleware.errors import ShortCircuitResponse
-
-    ctx = _Ctx(operation="recv", input={}, connection_id="conn-1")
     auth_mw = AuthMiddleware(verifier)
+    pipeline = Pipeline([auth_mw], _terminal)
 
-    async def _never_called(ctx: _Ctx) -> dict[str, object]:  # pragma: no cover
-        raise AssertionError("should not reach call_next")
+    result = await pipeline.dispatch(
+        "recv",
+        {},
+        connection_id="conn-1",
+        # No _connection_credential → auth rejects.
+    )
 
-    with pytest.raises(ShortCircuitResponse):
-        await auth_mw(ctx, _never_called)
-
-    timings = ctx._meta.get("middleware_timings", [])
-    assert len(timings) == 1
-    entry = timings[0]
-    assert entry["middleware"] == "auth"
-    assert entry["verdict"] == "reject"
-    assert isinstance(entry["duration_ms"], int)
+    assert result.get("error_code") == "identity_failure"
+    trace = result.get("metadata", {}).get("pipeline_trace", [])  # type: ignore[union-attr]
+    assert isinstance(trace, list)
+    assert len(trace) == 1
+    entry = trace[0]
+    assert entry["plugin_id"] == "auth"
+    assert entry["verdict"] == "rejected"
+    assert entry["error_code"] == "identity_failure"
+    assert isinstance(entry["started_at"], float)
+    assert entry["finished_at"] >= entry["started_at"]
 
 
 @pytest.mark.asyncio
-async def test_middleware_timings_emitted_on_identity_failure(
+async def test_pipeline_trace_emitted_on_identity_failure(
     verifier,
     registry,
     sample_keypair,
     sign_request,
 ) -> None:
-    """AuthMiddleware timing entry has verdict='reject' when IdentityFailure raised."""
-    from sox_protocol.core.middleware.context import MiddlewareContext as _Ctx
-    from sox_protocol.core.middleware.errors import ShortCircuitResponse
-
+    """Pipeline emits verdict='rejected' when IdentityFailure is raised (unknown agent)."""
     private_seed, public_key = sample_keypair
     # Do NOT register — triggers UnknownAgentError.
     req = sign_request(agent_id="ghost", method="recv")
 
-    ctx = _Ctx(operation="recv", input={}, connection_id="c", metadata={"_connection_credential": req})
+    async def _terminal(ctx: MiddlewareContext) -> dict[str, object]:  # pragma: no cover
+        raise AssertionError("should not reach terminal")
+
     auth_mw = AuthMiddleware(verifier)
+    pipeline = Pipeline([auth_mw], _terminal)
 
-    async def _never_called(ctx: _Ctx) -> dict[str, object]:  # pragma: no cover
-        raise AssertionError("should not reach call_next")
+    result = await pipeline.dispatch(
+        "recv",
+        {},
+        connection_id="conn-c",
+        metadata={"_connection_credential": req},
+    )
 
-    with pytest.raises(ShortCircuitResponse):
-        await auth_mw(ctx, _never_called)
-
-    timings = ctx._meta.get("middleware_timings", [])
-    assert timings[0]["verdict"] == "reject"
+    assert result.get("error_code") == "identity_failure"
+    trace = result.get("metadata", {}).get("pipeline_trace", [])  # type: ignore[union-attr]
+    assert len(trace) == 1
+    assert trace[0]["verdict"] == "rejected"
+    assert trace[0]["error_code"] == "identity_failure"
 
 
 # ---------------------------------------------------------------------------

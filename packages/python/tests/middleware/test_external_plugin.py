@@ -73,7 +73,8 @@ async def test_external_plugin_registers_via_module_api() -> None:
     pipeline = Pipeline(chain, _terminal)
     result = await pipeline.dispatch("send", {}, connection_id="c")
 
-    assert result == {"ok": True}
+    # Pipeline injects metadata; verify the payload key only.
+    assert result.get("ok") is True
     assert ran_external == [True]
     assert plugin_instance.call_count == 1
 
@@ -94,4 +95,5 @@ async def test_external_plugin_no_core_modification_required() -> None:
 
     pipeline = Pipeline(chain, _terminal)
     result = await pipeline.dispatch("send", {}, connection_id="c")
-    assert result == {"proof": True}
+    # Pipeline injects metadata; verify the payload key only.
+    assert result.get("proof") is True

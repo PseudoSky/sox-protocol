@@ -41,6 +41,7 @@ class StoreDispatchMiddleware:
     """
 
     name: str = "store_dispatch"
+    kind: str = "store"
     must_run_before: tuple[str, ...] = ()
     must_run_after: tuple[str, ...] = ()
 

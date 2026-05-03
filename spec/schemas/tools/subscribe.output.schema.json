@@ -14,6 +14,21 @@
         "minLength": 1
       },
       "description": "List of channel names that currently exist in the backing store and match the registered pattern. An empty array means the pattern was registered successfully but no matching channels exist yet; future messages on matching channels will still be delivered."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Pipeline observability metadata. Always present in dispatched responses; populated by the middleware Pipeline base. Includes pipeline_trace (per-plugin execution trace) and correlation_id (request correlation). Tools and clients MAY ignore metadata; backwards-compatible.",
+      "properties": {
+        "pipeline_trace": {
+          "type": "array",
+          "description": "Per-plugin execution trace. Each entry: {plugin_id, kind, started_at, finished_at, verdict, error_code?, correlation_id}. Verdict ∈ {passed, rejected, errored, skipped}.",
+          "items": { "type": "object" }
+        },
+        "correlation_id": {
+          "type": "string",
+          "description": "Request correlation identifier. Echoed from MiddlewareContext.correlation_id (frozen field). UUID4 hex if not provided in input."
+        }
+      }
     }
   },
   "examples": [

@@ -22,15 +22,12 @@ also accept ``signed_request`` present directly in ``ctx.input``, but a
 deprecation warning is logged and the input field is stripped before
 forwarding.  This fallback will be removed in a future minor version.
 
-``middleware_timings`` (spec ab1c954)
---------------------------------------
-On every invocation :class:`AuthMiddleware` appends an entry to
-``ctx._meta["middleware_timings"]``::
-
-    {"middleware": "auth", "duration_ms": <int>, "verdict": "ok" | "reject"}
-
-Downstream pipeline stages may include ``ctx._meta`` in the response
-``_meta`` block.
+``pipeline_trace`` (analysis §7.5 risk #7)
+------------------------------------------
+Tracing is emitted by the Pipeline base, NOT by :class:`AuthMiddleware`
+directly.  Every plugin in the chain is traced automatically; per-plugin
+``_record_timing`` methods have been removed.  See
+:mod:`sox_protocol.core.middleware.pipeline` for the trace shape.
 
 Migration note
 --------------
@@ -45,7 +42,6 @@ Spec reference: ``spec/ports/middleware.md §4 (auth)``; ``spec/ports/identity.m
 from __future__ import annotations
 
 import logging
-import time as _time_module
 
 from sox_protocol.core.identity.envelope import SignedRequest
 from sox_protocol.core.identity.errors import IdentityFailure
@@ -150,6 +146,7 @@ class AuthMiddleware:
     """
 
     name: str = "auth"
+    kind: str = "auth"
     must_run_after: tuple[str, ...] = ("namespace_resolver",)
     must_run_before: tuple[str, ...] = (
         "rate_limit",
@@ -160,30 +157,6 @@ class AuthMiddleware:
 
     def __init__(self, verifier: IdentityVerifier) -> None:
         self._verifier = verifier
-
-    def _record_timing(
-        self,
-        ctx: MiddlewareContext,
-        verdict: str,
-        duration_ms: int,
-    ) -> None:
-        """Append a middleware_timings entry to ``ctx._meta``.
-
-        Args:
-            ctx: The per-call context whose ``_meta`` dict is updated.
-            verdict: ``"ok"`` on success or ``"reject"`` on identity failure.
-            duration_ms: Wall-clock duration of the auth check in milliseconds.
-        """
-        timings = ctx._meta.setdefault("middleware_timings", [])
-        if not isinstance(timings, list):  # pragma: no cover — defensive guard only
-            return
-        timings.append(
-            {
-                "middleware": "auth",
-                "duration_ms": duration_ms,
-                "verdict": verdict,
-            }
-        )
 
     async def __call__(
         self,
@@ -196,6 +169,9 @@ class AuthMiddleware:
         (``ctx.metadata["_connection_credential"]``), NOT from the tool-call
         input dict (spec §6).
 
+        Timing and verdict are recorded by the Pipeline base via
+        ``pipeline_trace``; this method does not call ``_record_timing``.
+
         Args:
             ctx: The per-call context.
             call_next: Next pipeline stage.
@@ -204,7 +180,6 @@ class AuthMiddleware:
             Response from *call_next*, or a sox-error dict on rejection.
         """
         operation = ctx.operation
-        t_start = _time_module.monotonic()
 
         # Non-enforced operations pass through without credential check.
         if operation not in _IDENTITY_ENFORCED_OPERATIONS:
@@ -212,8 +187,6 @@ class AuthMiddleware:
 
         signed_request = _resolve_credential(ctx)
         if signed_request is None:
-            duration_ms = int((_time_module.monotonic() - t_start) * 1000)
-            self._record_timing(ctx, "reject", duration_ms)
             raise ShortCircuitResponse(
                 _make_identity_error(
                     "Identity verification required: credential missing. "
@@ -240,12 +213,8 @@ class AuthMiddleware:
                 ctx.agent_id = identity.agent_id
 
         except IdentityFailure as exc:
-            duration_ms = int((_time_module.monotonic() - t_start) * 1000)
-            self._record_timing(ctx, "reject", duration_ms)
             raise ShortCircuitResponse(_make_identity_error(exc.reason)) from exc
 
-        duration_ms = int((_time_module.monotonic() - t_start) * 1000)
-        self._record_timing(ctx, "ok", duration_ms)
         return await call_next(ctx)
 
 
