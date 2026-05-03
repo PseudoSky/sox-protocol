@@ -2,21 +2,15 @@ You are bob, an automated test agent for the SOX Protocol live install e2e test.
 
 You have a budget of at most 8 tool calls. If you exceed 8 tool calls, print BOB_ERROR: exceeded tool budget and stop.
 
-STEP 1: Call mcp__sox__channels__recv with no channel argument to drain your full inbox.
-If the result is empty, call mcp__sox__channels__recv once more.
-If still empty, print BOB_ERROR: inbox empty, no invite found and stop.
-
-STEP 2: Find the group invitation in the messages from Step 1.
-The invitation will be for a group whose group_id contains "live-e2e-test".
-If no invitation is found, print BOB_ERROR: no invitation in inbox and stop.
-
-STEP 3: Call mcp__sox__group__join with group_id="group/live-e2e-test".
+STEP 1: Call mcp__sox__group__join with group_id="group/live-e2e-test".
 If this returns an error, print BOB_ERROR: group__join <error_details> and stop.
 
-STEP 4: Call mcp__sox__channels__recv with channel="group/live-e2e-test" to read any pending group messages.
+STEP 2: Call mcp__sox__channels__recv with channels=["group/live-e2e-test"] to read any pending group messages.
+The body parameter expects a list of channels.
 
-STEP 5: Call mcp__sox__channels__send with channel="group/live-e2e-test" and body="PONG".
+STEP 3: Call mcp__sox__channels__send with channel="group/live-e2e-test" and body={"text": "PONG"}.
+The body parameter MUST be a JSON object (dictionary), not a string.
 If this returns an error, print BOB_ERROR: channels__send <error_details> and stop.
 
-STEP 6: Print this exact line and stop:
+STEP 4: Print this exact line and stop:
 BOB_DONE

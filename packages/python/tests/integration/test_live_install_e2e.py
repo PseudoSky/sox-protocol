@@ -53,12 +53,37 @@ import pytest
 _API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _HAS_CLAUDE = shutil.which("claude") is not None
 
+
+def _probe_oauth() -> bool:
+    """Return True if `claude auth status` reports loggedIn=true."""
+    if not _HAS_CLAUDE:
+        return False
+    try:
+        result = subprocess.run(
+            ["claude", "auth", "status"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return False
+        return '"loggedIn": true' in result.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+_OAUTH_OK = _probe_oauth() if not _API_KEY else False
+_AUTH_OK = bool(_API_KEY) or _OAUTH_OK
+
 # The live marker is what gates default pytest runs; skipif is belt-and-suspenders.
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
-        not _API_KEY,
-        reason="ANTHROPIC_API_KEY not set — live test skipped",
+        not _AUTH_OK,
+        reason=(
+            "neither ANTHROPIC_API_KEY set nor `claude auth status` OK — "
+            "live test skipped"
+        ),
     ),
     pytest.mark.skipif(
         not _HAS_CLAUDE,
@@ -265,26 +290,50 @@ def _run_claude(
     home_dir = tmp_dir / "home" / agent_name
     home_dir.mkdir(parents=True, exist_ok=True)
 
-    env = {
-        **os.environ,
-        "ANTHROPIC_API_KEY": _API_KEY,
-        "CLAUDE_CONFIG_DIR": str(claude_state),
-        "HOME": str(home_dir),
-        # Disable any project-level hooks that might interfere with test isolation.
-        "SOX_HOOKS_DISABLED": "1",
-    }
+    if _API_KEY:
+        # CI-style: ANTHROPIC_API_KEY-only auth via --bare. Full state isolation:
+        # override HOME + CLAUDE_CONFIG_DIR so the test doesn't touch the
+        # developer's real Claude session.
+        env = {
+            **os.environ,
+            "ANTHROPIC_API_KEY": _API_KEY,
+            "CLAUDE_CONFIG_DIR": str(claude_state),
+            "HOME": str(home_dir),
+            "SOX_HOOKS_DISABLED": "1",
+            # Identity per-agent. The .mcp.json sets SOX_AGENT_ID_SOURCE=
+            # claude_code_agent_name; that source falls back to SOX_AGENT_ID
+            # when CLAUDE_AGENT_NAME is unset (which it is in --print mode).
+            "SOX_AGENT_ID": agent_name,
+        }
+        bare_flag = ["--bare"]
+    else:
+        # OAuth-style (Max subscription): keychain auth requires the developer's
+        # real HOME. State isolation impossible — accept that the test will
+        # touch the developer's Claude session.
+        env = {
+            **os.environ,
+            "SOX_HOOKS_DISABLED": "1",
+            "SOX_AGENT_ID": agent_name,
+        }
+        # Strip any inherited empty ANTHROPIC_API_KEY that would force --bare
+        # behavior to fail.
+        env.pop("ANTHROPIC_API_KEY", None)
+        bare_flag = []
     if extra_env:
         env.update(extra_env)
 
     cmd = [
         "claude",
-        "--bare",
+        *bare_flag,
         "--dangerously-skip-permissions",
         "--print",
+        "--output-format",
+        "stream-json",
+        "--verbose",
         "--model",
         "claude-sonnet-4-5",
         "--max-budget-usd",
-        "0.10",
+        "1.00",
         prompt,
     ]
 
@@ -395,15 +444,16 @@ def _assert_sentinel(transcript: str, sentinel: str, agent_name: str) -> None:
 
 
 def _assert_cost_logged(transcript: str, agent_name: str) -> None:
-    """Assert that claude --print logged a cost line (token-budget guard).
+    """Assert that claude logged a cost in the stream-json result event.
 
-    Claude prints 'Total cost: $X.XX' in --print mode.  Asserting its presence
-    verifies the agent actually ran (didn't short-circuit) and documents the
-    actual spend per run.
+    Claude emits ``"total_cost_usd": <float>`` in the ``type: "result"`` event
+    when invoked with ``--output-format stream-json --verbose``. Asserting its
+    presence verifies the agent actually ran (didn't short-circuit) and
+    documents the actual spend per run.
     """
-    assert "Total cost:" in transcript, (
-        f"Expected 'Total cost:' in {agent_name}'s transcript. "
-        f"Either claude did not run or output format changed. "
+    assert "total_cost_usd" in transcript, (
+        f"Expected 'total_cost_usd' in {agent_name}'s transcript. "
+        f"Either claude did not emit a result event or output format changed. "
         f"Transcript (first 500 chars): {transcript[:500]}"
     )
 
@@ -414,7 +464,7 @@ def _assert_cost_logged(transcript: str, agent_name: str) -> None:
 
 
 @pytest.mark.live
-@pytest.mark.skipif(not _API_KEY, reason="ANTHROPIC_API_KEY not set")
+@pytest.mark.skipif(not _AUTH_OK, reason="no ANTHROPIC_API_KEY and no OAuth")
 @pytest.mark.skipif(not _HAS_CLAUDE, reason="claude CLI not on PATH")
 def test_live_install_happy_path(live_project: Path, tmp_path: Path) -> None:
     """Full install → alice creates group + sends PING → bob joins + sends PONG.
@@ -518,7 +568,7 @@ def test_live_install_happy_path(live_project: Path, tmp_path: Path) -> None:
 
 
 @pytest.mark.live
-@pytest.mark.skipif(not _API_KEY, reason="ANTHROPIC_API_KEY not set")
+@pytest.mark.skipif(not _AUTH_OK, reason="no ANTHROPIC_API_KEY and no OAuth")
 @pytest.mark.skipif(not _HAS_CLAUDE, reason="claude CLI not on PATH")
 def test_live_install_negative_broken_mcp_name(
     live_project: Path, tmp_path: Path
@@ -598,7 +648,7 @@ def test_live_install_negative_broken_mcp_name(
 
 
 @pytest.mark.live
-@pytest.mark.skipif(not _API_KEY, reason="ANTHROPIC_API_KEY not set")
+@pytest.mark.skipif(not _AUTH_OK, reason="no ANTHROPIC_API_KEY and no OAuth")
 @pytest.mark.skipif(not _HAS_CLAUDE, reason="claude CLI not on PATH")
 def test_live_install_negative_missing_skill(
     live_project: Path, tmp_path: Path

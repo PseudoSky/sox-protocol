@@ -8,7 +8,8 @@ If this returns an error, print ALICE_ERROR: group__create <error_details> and s
 STEP 2: Call mcp__sox__group__invite with group_id="group/live-e2e-test" and agent_id="bob".
 If this returns an error, print ALICE_ERROR: group__invite <error_details> and stop.
 
-STEP 3: Call mcp__sox__channels__send with channel="group/live-e2e-test" and body="PING".
+STEP 3: Call mcp__sox__channels__send with channel="group/live-e2e-test" and body={"text": "PING"}.
+The body parameter MUST be a JSON object (dictionary), not a string.
 If this returns an error, print ALICE_ERROR: channels__send <error_details> and stop.
 
 STEP 4: Print this exact line and stop:
