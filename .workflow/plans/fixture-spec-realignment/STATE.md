@@ -17,8 +17,8 @@ priority: HIGH — these are spec-declared v1 MUST features that are silently br
 |---|---|---|---|---|---|
 | 01-plan | Inspect each of the 9 failures; for each, decide fix-spec-or-fix-impl; produce per-fixture plan with file paths and root-cause analysis | `DONE` | sox-cto-system:planner | 1 | 2026-05-03T00:00:00Z |
 | 02-fix-reply-to | Plumb `reply_to` through `StoreDispatchMiddleware` → `BackingStore.send` signature → memory + sqlite store persistence → recv echo. Closes 3 fixtures (`threading/01-reply-to-link`, `threading/02-deep-thread`, `threading/03-thread-depth-zero`). Delete the `tools/conformance_runner.py:918` monkeypatch that simulates `reply_to`. | `DONE` | python-pro+orchestrator | 2 | 2026-05-03T00:00:00Z |
-| 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `READY` | python-pro | 0 | 2026-05-03T00:00:00Z |
-| 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
+| 03-fix-replay-since | Investigate why `replay/01-replay-since-seq` and `replay/02-replay-empty-future-cursor` return 0 messages where harness simulation returns 2. Likely: `BackingStore.replay` impl doesn't honor `since` cursor end-to-end. Audit and fix; delete any harness simulation. | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
+| 04-fix-unsubscribe-discard | Per V1-SCOPE.md `unsubscribe` row ("Discards queued-but-unread messages"): unsubscribe must purge the listener's pending queue for matching channels. Closes `subscription-patterns/02-unsubscribe-discards-queue`. Audit `MemoryStore.unsubscribe` and `SqliteStore.unsubscribe`; both must implement the discard. | `READY` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 05-fix-presence-namespace | Closes 2 fixtures: `presence/01-heartbeat-updates-presence-channel` (heartbeat tool must emit on `sox/presence` channel per V1-SCOPE.md heartbeat row) and `namespace-isolation/02-version-block` (list_channels must return the `_sox_protocol` version-negotiation block per V1-SCOPE.md). Likely small individually but related to wire-protocol completeness. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 06-fix-group-invite-output | Resolve spec/impl mismatch: `spec/operations/group_invite.output.schema.json` says `{invited, agent_id}` but impl emits `{group_id, invited_agent}`. Decide which is canonical (spec normally wins; check ADR / git history for original intent). Update the loser. Delete the `tools/conformance_runner.py:1108` client-side remap that masks this on stdio. Closes `groups/01-create-invite-join`. | `BLOCKED` | python-pro | 0 | 2026-05-04T00:00:00Z |
 | 07-review | Code review covering all 6 fixes + verification that no new harness simulations were introduced. HTTP conformance MUST reach 33/0/34 (parity with stdio). Closes engagement. | `BLOCKED` | code-reviewer | 0 | 2026-05-04T00:00:00Z |
@@ -92,13 +92,30 @@ The python-pro agent (worktree-isolated) truncated mid-edit ("Now update MemoryS
 
 Phase 02 marked DONE. Phase 03 ready (the fix-replay-since gap is now visible on stdio if the simulator were removed; the natural progression is for phase 03 to fix the impl, then delete that simulator branch).
 
-## Currently next action (phase 02 closed)
+## Currently next action (phase 03 closed)
 
-Dispatch **phase 03-fix-replay-since** (python-pro, worktree-isolated). Inputs:
-- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (replay tasks + DAG)
-- `tools/conformance_runner.py:1076-1095` — the simulator branch the orchestrator restored. Phase 03 must delete this branch (re-introducing the call to `store.replay()`) AS PART OF the fix.
-- `BackingStore.replay` impl in MemoryStore + SqliteStore — the planner hypothesized `since` is not honored end-to-end. Verify and fix.
-- Spec ambiguity Q2 from phase 01: where does the version-block get injected? (relevant when phase 05 lands).
+Dispatch **phase 04-fix-unsubscribe-discard** (python-pro, worktree-isolated). Inputs:
+- `.workflow/plans/fixture-spec-realignment/implementation-plan.json` (tsk_unsubscribe_discard)
+- `spec/conformance/subscription-patterns/02-unsubscribe-discards-queue.yaml` — the failing fixture
+- `packages/python/src/sox_protocol/adapters/backing_stores/memory/store.py` — MemoryStore.unsubscribe (planner says correct; verify)
+- `packages/python/src/sox_protocol/adapters/backing_stores/sqlite/store.py` — SqliteStore.unsubscribe (planner suspects missing pending_cleared)
+- `tools/conformance_runner.py:976-994` — the simulator unsubscribe branch to delete once impl is confirmed correct
 
-**Lesson for phase 03:** keep the simulator-deletion in lock-step with the impl fix. Do not delete a simulator branch unless the underlying impl already passes the affected fixtures on BOTH stdio and HTTP. Run conformance on both transports as a cross-check.
+### 2026-05-03 — phase 03 attempt 1 (SUCCESS)
+
+**Root cause confirmed:** Wire-protocol field-name mismatch. Both fixtures used `since_seq` in their input blocks, but `spec/operations/replay.input.schema.json` requires `since`. The HTTP pipeline's schema-strict plugin rejected the request (400 with `error_code`) because `limit` was also required and missing. `StoreDispatchMiddleware.replay` reads `inp.get("since", 0)` — so both the wrong field name AND the missing required field caused the failures. The simulator at conformance_runner.py:1076-1095 masked this on stdio by reading `args.get("since_seq", 0)` directly.
+
+**Canonical field-name decision:** `since` wins (spec authority). Fixtures updated from `since_seq` → `since`, and `limit: 100` added (required by spec schema). The simulator branch deleted and replaced with a real `store.replay()` call.
+
+**Changes:**
+- `spec/conformance/replay/01-replay-since-seq.yaml`: `since_seq: 3` → `since: 3`, added `limit: 100`
+- `spec/conformance/replay/02-replay-empty-future-cursor.yaml`: `since_seq: 999` → `since: 999`, added `limit: 100`
+- `tools/conformance_runner.py:1076-1095`: deleted simulator branch, replaced with real `store.replay()` call
+- `packages/python/tests/adapters/backing_stores/test_port_contract.py`: added `TestReplaySince` class (12 tests across 3 stores)
+
+**Invariants:**
+- mypy --strict: Success, 81 source files
+- pytest: 1250 passed, 0 failed
+- stdio conformance: 33 passed, 0 failed, 34 skipped
+- HTTP conformance: 29 passed, 4 failed, 34 skipped (+2 replay fixtures now pass)
 
