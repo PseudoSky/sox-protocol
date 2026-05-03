@@ -27,9 +27,18 @@ from __future__ import annotations
 
 import logging
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
-from sox_protocol.core.middleware.errors import ChainConfigurationError
+from sox_protocol.core.middleware.errors import (
+    ChainConfigurationError,
+    PluginCapabilityConflict,
+    PluginManifestInvalid,
+    PluginNotAllowed,
+    PluginNotFound,
+    PluginOrderingCycle,
+    PluginProtocolVersionMismatch,
+    PluginRequirementUnmet,
+)
 from sox_protocol.core.middleware.protocol import Middleware
 
 _log = logging.getLogger(__name__)
@@ -93,6 +102,73 @@ def _topological_sort(
     return result
 
 
+def _toposort_plugins(
+    manifests: Mapping[str, object],
+) -> list[str]:
+    """Stable Kahn topological sort over plugin manifests with lex tie-break.
+
+    Builds a DAG from ``must_run_before`` / ``must_run_after`` constraints and
+    returns a deterministic ordering.  Cycles produce
+    :class:`PluginOrderingCycle` naming all cycle members.
+
+    Args:
+        manifests: Dict mapping plugin id → :class:`~sox_protocol.core.middleware.plugin_loader.Manifest`.
+
+    Returns:
+        Ordered list of plugin ids.
+
+    Raises:
+        PluginOrderingCycle: When a cycle is detected.
+    """
+    # Import here to avoid a circular-import at module level.
+    from sox_protocol.core.middleware.plugin_loader import Manifest as _Manifest
+
+    ids = list(manifests.keys())
+    id_set = set(ids)
+
+    in_degree: dict[str, int] = {pid: 0 for pid in ids}
+    successors: dict[str, list[str]] = {pid: [] for pid in ids}
+
+    for pid in ids:
+        m = manifests[pid]
+        assert isinstance(m, _Manifest)
+        # must_run_before: self → target  (self must precede target)
+        for target in m.must_run_before:
+            if target in id_set:
+                successors[pid].append(target)
+                in_degree[target] += 1
+        # must_run_after: source → self  (self must follow source)
+        for source in m.must_run_after:
+            if source in id_set:
+                successors[source].append(pid)
+                in_degree[pid] += 1
+
+    # Kahn's BFS with lex tie-break (§4 normative sort).
+    queue = sorted(pid for pid in ids if in_degree[pid] == 0)
+    result: list[str] = []
+
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        newly_zero: list[str] = []
+        for succ in successors[node]:
+            in_degree[succ] -= 1
+            if in_degree[succ] == 0:
+                newly_zero.append(succ)
+        # Insert newly-zero nodes in lex order (merge into sorted queue).
+        for nz in sorted(newly_zero):
+            # Insert in sorted position to maintain lex ordering.
+            import bisect
+
+            bisect.insort(queue, nz)
+
+    if len(result) != len(ids):
+        cycle_members = sorted(pid for pid in ids if pid not in set(result))
+        raise PluginOrderingCycle(cycle_members)
+
+    return result
+
+
 class MiddlewareRegistry:
     """Registry that maps middleware names to factory callables.
 
@@ -110,6 +186,11 @@ class MiddlewareRegistry:
 
     def __init__(self) -> None:
         self._factories: dict[str, Callable[[], Middleware]] = {}
+        # Plugin discovery state (populated by load_plugins).
+        from sox_protocol.core.middleware.plugin_loader import Manifest
+
+        self._loaded_manifests: dict[str, Manifest] = {}
+        self._resolved_order: tuple[str, ...] | None = None
 
     def register(self, name: str, factory: Callable[[], Middleware]) -> None:
         """Register a named middleware factory.
@@ -173,6 +254,194 @@ class MiddlewareRegistry:
         sorted_names = _topological_sort(present, instances)
 
         return [instances[n] for n in sorted_names]
+
+    @property
+    def resolved_order(self) -> tuple[str, ...]:
+        """Return the plugin load order determined by ``load_plugins()``.
+
+        Returns an empty tuple if ``load_plugins()`` has not been called yet.
+
+        Returns:
+            Tuple of plugin ids in pipeline execution order.
+        """
+        return self._resolved_order if self._resolved_order is not None else ()
+
+    def load_plugins(
+        self,
+        *,
+        allowlist: list[str] | None = None,
+        env: str = "dev",
+        host_protocol_version: str = "1.0.0",
+        no_discovery: bool = False,
+        group: str = "sox_protocol.plugins",
+    ) -> None:
+        """Discover, validate, order, and register out-of-tree plugins.
+
+        Orchestrates the seven-step plugin boot sequence:
+
+        0. ``no_discovery`` short-circuit: if *True*, log and return immediately
+           with ``resolved_order = ()``. Takes precedence over allowlist
+           evaluation (R4 precedence rule).
+        1. Scan ``importlib.metadata.entry_points(group=group)``.
+        2. In production mode with empty allowlist: refuse startup.
+        3. For each entry-point: read manifest → validate schema →
+           check protocol_version → assert capability orthogonality.
+        4. Allowlist filter.
+        5. Stable Kahn topological sort with lex tie-break; cycle → error.
+        6. ``requires`` resolution against loaded capability strings.
+        7. Factory invocation + ``register()``.
+
+        The computed order is cached in ``self._resolved_order``.
+
+        Args:
+            allowlist: Plugin ids that are permitted to load.  ``None`` means
+                "no explicit allowlist provided" (dev: load all; production:
+                refuse all).
+            env: Runtime environment string.  ``"production"`` activates strict
+                allowlist enforcement.  Any other value is treated as
+                development mode.
+            host_protocol_version: The host's single protocol version string
+                used for compatibility checks.
+            no_discovery: When ``True``, skip all discovery and return with an
+                empty resolved order.  Allowlist contents are NOT validated.
+            group: Entry-point group to scan.  Defaults to
+                ``"sox_protocol.plugins"``.
+
+        Raises:
+            PluginNotAllowed: In production mode with an empty allowlist (no
+                plugins permitted).
+            PluginNotFound: An allowlisted id has no corresponding entry-point.
+            PluginManifestInvalid: A manifest fails schema validation.
+            PluginProtocolVersionMismatch: Host version outside plugin's range.
+            PluginCapabilityConflict: ``observe_only`` + ``may_short_circuit``.
+            PluginOrderingCycle: Ordering constraints form a cycle.
+            PluginRequirementUnmet: A ``requires`` capability is unresolvable.
+        """
+        # Step 0: no_discovery short-circuit (R4 — wins over allowlist).
+        if no_discovery:
+            _log.info("plugin discovery disabled (--no-discovery)")
+            self._resolved_order = ()
+            return
+
+        from importlib.metadata import entry_points
+
+        from sox_protocol.core.middleware.plugin_loader import (
+            Manifest,
+            assert_capability_orthogonality,
+            check_protocol_version,
+            read_manifest_for_entry_point,
+            validate_manifest,
+        )
+
+        # Step 1: scan entry-points.
+        eps = {ep.name: ep for ep in entry_points(group=group)}
+
+        # Step 2: production + empty allowlist → refuse startup.
+        is_production = env == "production"
+        if is_production and not allowlist:
+            raise PluginNotAllowed(
+                plugin_id="*",
+                message=(
+                    "SOX_ENV=production requires an explicit --allow-plugins allowlist. "
+                    "Set SOX_ALLOWED_PLUGINS or pass --allow-plugins to enable plugins, "
+                    "or set --no-discovery to disable plugin loading entirely."
+                ),
+            )
+
+        # Step 3: validate each discovered entry-point.
+        from importlib.metadata import EntryPoint
+
+        manifests: dict[str, Manifest] = {}
+        ep_map: dict[str, EntryPoint] = {}
+        for ep_name, ep in eps.items():
+            try:
+                raw = read_manifest_for_entry_point(ep)
+                manifest = validate_manifest(raw)
+                check_protocol_version(manifest, host_protocol_version)
+                assert_capability_orthogonality(manifest)
+                manifests[manifest.id] = manifest
+                ep_map[manifest.id] = ep
+            except (
+                PluginManifestInvalid,
+                PluginProtocolVersionMismatch,
+                PluginCapabilityConflict,
+            ):
+                raise
+
+        # Step 4: allowlist filter.
+        if allowlist is not None:
+            allowlist_set = set(allowlist)
+            # Check for allowlisted ids with no matching manifest.
+            for wanted_id in allowlist_set:
+                if wanted_id and wanted_id not in manifests:
+                    raise PluginNotFound(wanted_id)
+
+        to_load: dict[str, Manifest] = {}
+        for plugin_id, manifest in manifests.items():
+            if allowlist is None:
+                to_load[plugin_id] = manifest
+            elif plugin_id in allowlist:
+                to_load[plugin_id] = manifest
+            elif is_production:
+                # Production: silently skip unallowlisted plugins.
+                _log.debug(
+                    "Plugin %r not in allowlist; skipping (production mode).", plugin_id
+                )
+            else:
+                # Dev: load with a warning.
+                import sys
+
+                print(
+                    f"[sox] WARNING: plugin {plugin_id!r} is not in --allow-plugins "
+                    "allowlist but will be loaded in dev mode.",
+                    file=sys.stderr,
+                )
+                to_load[plugin_id] = manifest
+
+        # Step 5: stable Kahn topological sort over to_load.
+        sorted_ids = _toposort_plugins(to_load)
+
+        # Step 6: requires resolution.
+        # Build a set of all provided capability keys across loaded plugins.
+        provided_caps: set[str] = set()
+        for manifest in to_load.values():
+            for cap in manifest.plugin_capabilities:
+                for k in cap:
+                    if k not in ("observe_only", "may_short_circuit"):
+                        provided_caps.add(k)
+            # Also treat plugin id itself as a "provided" token.
+            provided_caps.add(manifest.id)
+
+        for plugin_id in sorted_ids:
+            manifest = to_load[plugin_id]
+            for req in manifest.requires:
+                if req not in provided_caps:
+                    raise PluginRequirementUnmet(
+                        plugin_id=plugin_id,
+                        capability=req,
+                    )
+
+        # Step 7: factory invocation + register.
+        for plugin_id in sorted_ids:
+            ep = ep_map[plugin_id]
+            factory: Callable[[], Middleware] = ep.load()
+            try:
+                self.register(plugin_id, factory)
+            except ValueError as exc:
+                # Name collision: convert to PluginManifestInvalid per R6.
+                raise PluginManifestInvalid(
+                    plugin_id=plugin_id,
+                    reason=str(exc),
+                ) from exc
+
+        self._loaded_manifests = dict(to_load)
+        self._resolved_order = tuple(sorted_ids)
+
+        _log.info(
+            "[sox] plugin registry frozen: %d plugin%s loaded",
+            len(sorted_ids),
+            "" if len(sorted_ids) == 1 else "s",
+        )
 
     def load_entry_points(self, group: str = "sox_protocol.middleware") -> None:
         """Discover and register middleware factories from Python entry points.

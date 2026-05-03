@@ -62,10 +62,19 @@ from sox_protocol.core.middleware.default_chain import DEFAULT_ORDER, build_defa
 from sox_protocol.core.middleware.errors import (
     ChainConfigurationError,
     MiddlewareError,
+    PluginCapabilityConflict,
+    PluginManifestInvalid,
+    PluginNotAllowed,
+    PluginNotFound,
+    PluginOrderingCycle,
+    PluginProtocolVersionMismatch,
+    PluginRequirementUnmet,
+    PluginStartupError,
     ShortCircuitResponse,
 )
 from sox_protocol.core.middleware.hooks import Hook, HookDecision, HookDispatcher
 from sox_protocol.core.middleware.pipeline import Pipeline, PipelineBuilder
+from sox_protocol.core.middleware.plugin_loader import Manifest
 from sox_protocol.core.middleware.protocol import CallNext, Middleware
 from sox_protocol.core.middleware.registry import MiddlewareRegistry, register_middleware
 
@@ -95,4 +104,15 @@ __all__ = [
     "MiddlewareError",
     "ChainConfigurationError",
     "ShortCircuitResponse",
+    # Plugin startup errors
+    "PluginStartupError",
+    "PluginNotAllowed",
+    "PluginNotFound",
+    "PluginManifestInvalid",
+    "PluginProtocolVersionMismatch",
+    "PluginCapabilityConflict",
+    "PluginOrderingCycle",
+    "PluginRequirementUnmet",
+    # Plugin manifest type
+    "Manifest",
 ]
