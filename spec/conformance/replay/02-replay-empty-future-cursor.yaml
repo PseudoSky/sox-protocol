@@ -42,7 +42,8 @@ sequence:
     operation: replay
     input:
       channel: "test:replay-empty"
-      since_seq: 999
+      since: 999
+      limit: 100
     expected_output:
       messages: []
       has_more: false

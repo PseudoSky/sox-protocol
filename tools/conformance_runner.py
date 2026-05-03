@@ -1074,25 +1074,13 @@ class SharedMemoryTarget:
             return {"recorded_at": time.time(), "status": args.get("status", "online")}
 
         if operation == "replay":
-            # NOTE: simulator path. Phase 03-fix-replay-since will replace this
-            # with a real store.replay() call once the impl honors `since`
-            # end-to-end and the corresponding HTTP fixtures pass.
             channel = args["channel"]
-            since_seq = int(args.get("since_seq", 0))
-            limit = int(args.get("limit", 100))
-            async with store._lock:
-                msgs_out = []
-                for sm in store._messages:
-                    if sm.channel == channel:
-                        sm_seq = getattr(sm, "seq", 0)
-                        if sm_seq >= since_seq:
-                            wire = sm.to_wire()
-                            wire["seq"] = sm_seq
-                            wire["reply_to"] = getattr(sm, "reply_to", None)
-                            msgs_out.append(wire)
-                        if len(msgs_out) >= limit:
-                            break
-            return {"messages": msgs_out, "has_more": False}
+            since: int = int(args.get("since", 0))
+            until_raw = args.get("until")
+            until: int | None = int(until_raw) if isinstance(until_raw, (int, float)) else None
+            limit: int = int(args.get("limit", 100))
+            replay_msgs, has_more = await store.replay(channel, since, until, limit)
+            return {"messages": replay_msgs, "has_more": has_more}
 
         if operation == "list_agents":
             import time as _time_la

@@ -60,7 +60,8 @@ sequence:
     operation: replay
     input:
       channel: "test:replay"
-      since_seq: 3
+      since: 3
+      limit: 100
     expected_output:
       messages: "{{any_array}}"
       has_more: false

@@ -617,3 +617,56 @@ class TestListAgents:
         ids = [a["agent_id"] for a in agents]
         assert "filter-a" in ids
         assert "filter-b" in ids
+
+
+@pytest.mark.asyncio
+class TestReplaySince:
+    """Unit tests verifying BackingStore.replay honors the `since` cursor.
+
+    These tests close fixtures replay/01-replay-since-seq and
+    replay/02-replay-empty-future-cursor.  They are intentionally thin
+    wrappers around the store — the conformance runner exercises the full
+    HTTP + middleware stack.
+    """
+
+    async def _send_n(self, store: BackingStore, channel: str, n: int) -> None:
+        """Helper: send n messages to channel, ignore output."""
+        for i in range(1, n + 1):
+            await store.send(channel, "agent-test", {"n": i})
+
+    async def test_since_zero_returns_all(self, store: BackingStore) -> None:
+        """replay(since=0) returns all messages on the channel."""
+        channel = "replay-contract-all"
+        await store.subscribe("agent-test", channel)
+        await self._send_n(store, channel, 4)
+        msgs, has_more = await store.replay(channel, since=0)
+        assert len(msgs) == 4
+        assert has_more is False
+
+    async def test_since_mid_returns_tail(self, store: BackingStore) -> None:
+        """replay(since=3) returns only messages with seq >= 3 (fixture 01)."""
+        channel = "replay-contract-since"
+        await store.subscribe("agent-test", channel)
+        await self._send_n(store, channel, 4)
+        msgs, has_more = await store.replay(channel, since=3)
+        seqs = [int(m["seq"]) for m in msgs]
+        assert seqs == [3, 4], f"expected [3, 4], got {seqs}"
+        assert has_more is False
+
+    async def test_since_past_last_seq_returns_empty(self, store: BackingStore) -> None:
+        """replay(since=999) on a 2-message channel returns [] (fixture 02)."""
+        channel = "replay-contract-empty"
+        await store.subscribe("agent-test", channel)
+        await self._send_n(store, channel, 2)
+        msgs, has_more = await store.replay(channel, since=999)
+        assert msgs == []
+        assert has_more is False
+
+    async def test_messages_ordered_by_seq(self, store: BackingStore) -> None:
+        """Messages returned by replay are in ascending seq order."""
+        channel = "replay-contract-order"
+        await store.subscribe("agent-test", channel)
+        await self._send_n(store, channel, 5)
+        msgs, _ = await store.replay(channel, since=0)
+        seqs = [int(m["seq"]) for m in msgs]
+        assert seqs == sorted(seqs), f"messages not in seq order: {seqs}"
