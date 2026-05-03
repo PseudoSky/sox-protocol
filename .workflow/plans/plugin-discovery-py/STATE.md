@@ -2,13 +2,15 @@
 slug: plugin-discovery-py
 target: Wire MiddlewareRegistry.load_plugins() into server startup with manifest validation. Out-of-tree plugins discoverable via Python entry-points. sox-plugin.yaml validated against schema before registration. `--allow-plugins` allowlist mandatory for production (risk #1). `--no-discovery` flag for testing/security audits.
 created: 2026-05-01
-last_event: 2026-05-01T23:00:00Z
+last_event: 2026-05-01T23:30:00Z
 orchestrator_protocol: v1
 parent_plan: plugin-architecture
 prereqs: [plugin-contract-freeze]
 ---
 
 # plugin-discovery-py — engagement state
+
+**Engagement closed 2026-05-01 — see [REVIEW.md](./REVIEW.md)**
 
 ## Status
 
@@ -19,12 +21,12 @@ prereqs: [plugin-contract-freeze]
 | 03-allowlist | Implement `--allow-plugins ID,...` CLI flag + `SOX_ALLOWED_PLUGINS` env var. Default-deny in production mode; default-allow in dev mode (with explicit warning) | `DONE` | python-pro | 1 | 2026-05-03T00:00:00Z |
 | 04-bootstrap-integration | `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins()` after `build_default_pipeline` | `DONE` | python-pro | 1 | 2026-05-04T00:00:00Z |
 | 05-test | Install stub plugin into temp venv; assert discovered + invoked. Test allowlist denial. Test version-mismatch refusal envelope shape | `DONE` | test-automator | 1 | 2026-05-01T23:00:00Z |
-| 06-review | Code review including security audit of the discovery boundary | `READY` | code-reviewer | 0 | 2026-05-01T23:00:00Z |
+| 06-review | Code review including security audit of the discovery boundary | `DONE` | code-reviewer | 1 | 2026-05-01T23:30:00Z |
 
 ## Currently next action
 
-Dispatch **phase 06-review**: code review of the full plugin discovery system
-including security audit of the discovery boundary.
+Engagement closed. See REVIEW.md for full findings. Next: dispatch P5 (reference-plugins)
+once P1 is complete, per RESUME.md punch list priority 2.
 
 ## Transition log
 
@@ -132,7 +134,7 @@ values from `add_serve_subcommand`); the getattr defends only ad-hoc tests.
 
 ## Termination targets
 
-- [ ] All 6 phases DONE (5/6 complete; phase 06-review pending)
+- [x] All 6 phases DONE
 - [x] `core/middleware/plugin_loader.py` reads sox-plugin.yaml, validates against schema, validates protocol_version range, instantiates via declared entry
 - [x] `MiddlewareRegistry.load_plugins(allowlist=...)` calls load_entry_points + validates + filters by allowlist + registers
 - [x] `mcp_server/server.py` and `transports/http/app.py` invoke `registry.load_plugins(...)` after `build_default_pipeline`
@@ -294,6 +296,33 @@ install fixtures install each stub once per pytest session. Dev venv is untouche
 - HTTP conformance: 24 passed, 9 failed, 34 skipped (no regression)
 
 **No production source changes.** Phase 05 adds only test + fixture files.
+
+### 2026-05-01 — phase 06-review: DONE
+
+**Agent:** code-reviewer
+**Verdict:** APPROVED-WITH-FOLLOWUPS
+**Review document:** [`REVIEW.md`](./REVIEW.md)
+
+**Acceptance gates at review:**
+
+- `mypy --strict`: Success, 81 source files, 0 errors
+- `pytest`: 1221 passed, 2 failed (pre-existing group_invite — unchanged)
+- stdio conformance: 33 passed, 0 failed, 34 skipped (no regression)
+- HTTP conformance: 24 passed, 9 failed, 34 skipped (pre-existing baseline)
+
+**Security audit summary:** 0 critical, 0 high, 2 medium, 3 low findings.
+All findings are either documented v1 limitations or minor behavioral
+deviations that do not weaken the production security posture. No blockers.
+
+**Follow-up items (non-blocking):**
+- `Manifest` dataclass should be `frozen=True` → defer to minor-cleanup
+- `_HOST_PROTOCOL_VERSION` duplicated in 2 files; `host_protocol_version_range`
+  not published per §3.3 → defer to minor-cleanup engagement
+- Signature verification → plugin-supply-chain-v2
+- Double `StoreDispatchMiddleware` in extended pipeline → P1 follow-on
+- `extend_pipeline_with_registry` unit test → nice-to-have
+- CLI integration test for `--allow-plugins` env var write → nice-to-have
+- Kind-flag mismatch warning (SHOULD, not MUST) → nice-to-have
 
 ## Reference
 
