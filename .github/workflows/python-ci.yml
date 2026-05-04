@@ -51,7 +51,12 @@ jobs:
         run: python -m mypy --strict src/sox_protocol/core/
 
       - name: import-linter — core must not import adapters
-        run: python -m lint-imports
+        # The `import-linter` package ships a console script named
+        # `lint-imports`. `python -m lint-imports` fails (hyphens aren't
+        # valid module names); `python -m importlinter` fails (the
+        # package has no __main__.py). The bin form is the documented
+        # invocation.
+        run: lint-imports
 
       - name: pytest with coverage (100% on decide.py)
         run: |
