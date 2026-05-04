@@ -216,8 +216,14 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-core/
+          # Idempotent re-runs: if the version is already on PyPI (e.g. an
+          # earlier run published it before its sibling step failed), skip
+          # rather than 400. Lets us recover from partial-publish failures
+          # without bumping versions.
+          skip-existing: true
 
       - name: Publish sox-plugin-schema-strict to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist-plugin/
+          skip-existing: true
