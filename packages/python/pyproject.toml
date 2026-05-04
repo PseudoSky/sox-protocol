@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sox-protocol"
-version = "0.0.1"
+version = "0.1.0"
 description = "SOX Protocol — reference Python implementation of the inter-agent channels protocol."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,19 +36,22 @@ dev = [
 sox-mcp-server = "sox_protocol.core.mcp_server.server:main"
 sox-protocol = "sox_protocol.cli:main"
 
+# Bundle spec/discipline/ + spec/VERSION into the wheel under sox_protocol/spec/
+# via the in-tree symlink at packages/python/src/sox_protocol/spec → ../../../spec.
+# Hatchling follows the symlink and packages the dereferenced files. This avoids
+# the older [tool.hatch.build.targets.wheel.sources] approach (silently no-ops
+# when the source path is outside the project root) AND the force-include
+# approach (fails when the build runs in an isolated environment, since `../../`
+# escapes the build root).
 [tool.hatch.build.targets.wheel]
 packages = ["src/sox_protocol"]
-
-[tool.hatch.build.targets.wheel.sources]
-# Bundle spec/discipline/ into the wheel under sox_protocol/spec/
-"../../spec" = "sox_protocol/spec"
+include-symlinks = true
 
 [tool.hatch.build.targets.sdist]
 include = [
     "src/",
-    "../../spec/discipline/",
-    "../../spec/VERSION",
 ]
+include-symlinks = true
 
 # ---------------------------------------------------------------------------
 # pytest

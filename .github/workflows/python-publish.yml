@@ -1,0 +1,193 @@
+# Publish sox-protocol + sox-plugin-schema-strict to PyPI / TestPyPI.
+#
+# Triggers
+# --------
+# - push of a tag matching `python-v*` (e.g. python-v0.1.0):
+#   build → publish to TestPyPI → manual gate → publish to PyPI.
+# - workflow_dispatch with `target=testpypi`:
+#   build → publish to TestPyPI only. No tag required. Useful for dry runs.
+# - workflow_dispatch with `target=pypi`:
+#   build → publish to PyPI only (requires the tag's TestPyPI publish to have
+#   succeeded earlier). Use this to promote after smoke-testing TestPyPI.
+#
+# Auth
+# ----
+# Trusted publishing via OIDC. No API tokens stored in GitHub secrets.
+# Configure publishers at https://pypi.org/manage/account/publishing/ and
+# https://test.pypi.org/manage/account/publishing/. The Environment names
+# (`testpypi`, `pypi`) must match GitHub Environments configured under the
+# repository settings — set required-reviewer protection on the `pypi`
+# environment so promotion requires explicit approval.
+#
+# Pre-flight
+# ----------
+# Before tagging, see docs/development/publishing.md for the operational
+# checklist (version bumps, CHANGELOG, smoke install, name reservation).
+
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'python-v*'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Where to publish'
+        required: true
+        default: 'testpypi'
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+jobs:
+  build:
+    name: Build wheels + sdists
+    runs-on: ubuntu-latest
+    outputs:
+      core-version: ${{ steps.metadata.outputs.core-version }}
+      plugin-version: ${{ steps.metadata.outputs.plugin-version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Read package metadata
+        id: metadata
+        run: |
+          core_version=$(python -c "import tomllib; print(tomllib.load(open('packages/python/pyproject.toml','rb'))['project']['version'])")
+          plugin_version=$(python -c "import tomllib; print(tomllib.load(open('plugins/sox-plugin-schema-strict/pyproject.toml','rb'))['project']['version'])")
+          echo "core-version=${core_version}" >> "$GITHUB_OUTPUT"
+          echo "plugin-version=${plugin_version}" >> "$GITHUB_OUTPUT"
+          echo "Core version:   ${core_version}"
+          echo "Plugin version: ${plugin_version}"
+
+      - name: Verify tag matches core version
+        if: startsWith(github.ref, 'refs/tags/python-v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#python-v}"
+          core_version="${{ steps.metadata.outputs.core-version }}"
+          if [ "$tag_version" != "$core_version" ]; then
+            echo "::error::Tag version (${tag_version}) does not match packages/python/pyproject.toml version (${core_version})"
+            exit 1
+          fi
+
+      - name: Build sox-protocol (core)
+        run: python -m build --wheel --sdist packages/python/
+
+      - name: Build sox-plugin-schema-strict
+        run: python -m build --wheel --sdist plugins/sox-plugin-schema-strict/
+
+      - name: Verify core wheel bundles spec/discipline/
+        run: |
+          wheel=$(ls packages/python/dist/*.whl)
+          if ! unzip -l "$wheel" | grep -q 'sox_protocol/spec/discipline/discipline.md'; then
+            echo "::error::Core wheel is missing sox_protocol/spec/discipline/discipline.md — installer would fail"
+            unzip -l "$wheel"
+            exit 1
+          fi
+
+      - name: Verify plugin wheel bundles sox-plugin.yaml
+        run: |
+          wheel=$(ls plugins/sox-plugin-schema-strict/dist/*.whl)
+          if ! unzip -l "$wheel" | grep -q 'sox_plugin_schema_strict/sox-plugin.yaml'; then
+            echo "::error::Plugin wheel is missing sox-plugin.yaml — MCP server would fail plugin discovery"
+            unzip -l "$wheel"
+            exit 1
+          fi
+
+      - name: twine check (metadata sanity)
+        run: |
+          twine check packages/python/dist/*
+          twine check plugins/sox-plugin-schema-strict/dist/*
+
+      - name: Upload core artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sox-protocol-dist
+          path: packages/python/dist/*
+
+      - name: Upload plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sox-plugin-schema-strict-dist
+          path: plugins/sox-plugin-schema-strict/dist/*
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    if: github.event_name == 'push' || github.event.inputs.target == 'testpypi'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/sox-protocol/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download core artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sox-protocol-dist
+          path: dist-core/
+
+      - name: Download plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sox-plugin-schema-strict-dist
+          path: dist-plugin/
+
+      - name: Publish sox-protocol to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-core/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Publish sox-plugin-schema-strict to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-plugin/
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: github.event_name == 'push' || github.event.inputs.target == 'pypi'
+    needs: [build, publish-testpypi]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/sox-protocol/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download core artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sox-protocol-dist
+          path: dist-core/
+
+      - name: Download plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sox-plugin-schema-strict-dist
+          path: dist-plugin/
+
+      - name: Publish sox-protocol to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-core/
+
+      - name: Publish sox-plugin-schema-strict to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-plugin/

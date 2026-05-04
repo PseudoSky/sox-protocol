@@ -167,3 +167,65 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 ## Unreleased
 
 (No unreleased changes yet.)
+
+---
+
+## [0.1.0] — 2026-05-04 — first PyPI release; v1.0-conformant on both transports
+
+This is the first release intended for PyPI. The reference Python implementation now passes 33/33 v1.0 conformance fixtures on **both** stdio and HTTP transports, with end-to-end live verification against the real `claude` CLI.
+
+### Added
+
+**Plugin architecture (post-v0 sub-engagements P1–P6)**
+- New plugin contract for SOX middleware. Reference plugin `sox-plugin-schema-strict` ships separately on PyPI; SOX core discovers it via the `sox_protocol.plugins` entry-point group.
+- Pipeline middleware infrastructure: schema-strict body validation, identity verification, store dispatch, observability tracing.
+- Plugin-discovery loader with manifest validation, allowlist (`SOX_ALLOWED_PLUGINS` / `--allow-plugins`), and discovery-disable switch (`SOX_NO_DISCOVERY` / `--no-discovery`).
+- `BackingStore.send` gained a keyword-only `reply_to: str | None = None` parameter for threading; `MemoryStore`, `SqliteStore`, and `FilesystemStore` all persist + return it.
+- SQLite schema migration v1.1 → v1.2 adds `reply_to` column. Migration is idempotent and additive — existing v1.0 / v1.1 databases upgrade in place with zero downtime.
+- HTTP transport: pipeline integration with auth middleware, server-side error envelope normalization, async nonce-prune lock.
+- Reference plugin `sox-plugin-schema-strict` (1.0.0) — proves the plugin contract end-to-end, validates send/recv/group/replay/heartbeat bodies against `spec/operations/*.input.schema.json`.
+
+**Live end-to-end test infrastructure**
+- New `tests/integration/test_live_install_e2e.py` (3 tests: 1 happy-path + 2 negative): builds a fresh tmp venv, pip-installs SOX, runs the installer against a tmp Claude Code project, spawns 2 real `claude` CLI subprocesses (alice + bob), exercises group-create/invite/join/send/recv/ack, asserts on the SQLite state.
+- New `live` pytest marker (gated on `ANTHROPIC_API_KEY` or OAuth keychain). Default `pytest` runs deselect it; opt in with `-m live`.
+- New CI workflow `python-live-e2e.yml` — runs on push-to-main + workflow_dispatch + weekly cron, gated on `secrets.ANTHROPIC_API_KEY`.
+- Verified locally on Max subscription: 3/3 tests pass in 138s, ~$0.10–0.20 per agent.
+
+**`sox chat` interactive TUI**
+- New Textual-based TUI shipped as a CLI subcommand. Three-pane layout: channels (left) · messages (center) · agents (right). Spawns its own MCP server on stdio by default; `--no-spawn` to attach to an existing one.
+
+**Documentation**
+- New `docs/INSTALL.md` — practical install + first-run walkthrough based on a real e2e debug pass. Includes the seven gotchas surfaced during live testing.
+- New `docs/development/sox-chat.md` — TUI usage guide, all flags, spawn/attach connection model, two practical patterns.
+- New `docs/development/live-tests.md` — live e2e test ops manual.
+- New `docs/development/publishing.md` — PyPI publish operational checklist.
+
+### Changed
+
+**BREAKING — CLI bin renamed**
+- The `sox` console script is **renamed to `sox-protocol`** to avoid conflict with the [SoX audio toolkit](http://sox.sourceforge.net/), which ships under the same name on most Unix systems.
+- Migration: `sox chat …` → `sox-protocol chat …`. Module form `python -m sox_protocol.cli` is unaffected.
+- The `sox-mcp-server` bin name is unchanged.
+- The MCP server name `sox` inside `.mcp.json` (server-registry identifier, not a CLI bin) is unchanged.
+
+**Conformance harness realignment**
+- 9 HTTP conformance fixtures that previously passed via stdio simulator masking now pass via the real wire on both transports. Fixture field-name changes:
+  - `replay`: `since_seq` → `since` (matches `spec/operations/replay.input.schema.json`).
+  - `unsubscribe`: `patterns` → `channels` (matches `spec/operations/unsubscribe.input.schema.json`).
+  - `group_invite` output: `{group_id, invited_agent}` → `{invited, agent_id}` (matches `spec/operations/group_invite.output.schema.json`, canonical post-2fb72ac).
+- 7 simulator branches removed from `tools/conformance_runner.py` (the harness no longer hand-implements `reply_to`, `since`, `unsubscribe-discard`, `heartbeat-presence-emit`, `list_channels-version-block`, `replay`, or `group_invite-output-remap`).
+- Stdio + HTTP both reach **33 passed / 0 failed / 34 skipped** at v1.0 conformance.
+
+### Fixed
+
+- **PyPI wheel was missing `spec/discipline/`.** The hatch `[tool.hatch.build.targets.wheel.sources]` mapping with a `../../spec` source path silently no-opped because the source was outside the project root. Switched to `[tool.hatch.build.targets.wheel.force-include]` which is the documented mechanism for files outside the package. The wheel now bundles `spec/discipline/discipline.md`, the worked-example markdown files, and `spec/VERSION` — without these, `python -m sox_protocol.adapters.runtimes.claude_code install` would fail at install time on a published wheel.
+- **Identity-middleware nonce race.** `IdentityVerifier` now wraps nonce prune+check+insert in an `asyncio.Lock` (P1 phase 05).
+- **Pipeline observability gap.** Every dispatch now emits a structured `pipeline_trace` with `correlation_id` (P1 phase 04).
+- **Conformance harness identity substitution.** Server-side rejection fixture proves `AuthMiddleware` is exercised by the real wire, not synthesized client-side (P1 phases 06 + 07).
+
+### Migration from 0.0.1
+
+- **Update CLI invocations:** `sox chat` → `sox-protocol chat`, `sox serve` → `sox-protocol serve`. Module form unchanged.
+- **Reinstall:** `pip install --upgrade sox-protocol` followed by `python -m sox_protocol.adapters.runtimes.claude_code install` to refresh `.mcp.json` and `.claude/settings.json` in your project.
+- **SQLite databases auto-upgrade.** The v1.1 → v1.2 migration runs on first connect. The migration is additive (`ALTER TABLE messages ADD COLUMN reply_to TEXT DEFAULT NULL`) and rolls forward with no data loss. There is no rollback path; back up `.sox/messages.db` before upgrading if rollback matters to your deployment.
+- **Plugin install:** The `sox-plugin-schema-strict` reference plugin is now part of the recommended install. **Install it non-editable** (no `-e`) — editable install does not expose the plugin's `sox-plugin.yaml` manifest, so the MCP server fails plugin discovery at boot. See `docs/INSTALL.md` for details.
