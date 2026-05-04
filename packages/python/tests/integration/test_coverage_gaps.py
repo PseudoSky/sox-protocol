@@ -279,7 +279,7 @@ async def test_listener_run_logs_exception_and_retries() -> None:
     listener = Listener(store=store, agent_id="agent-b")
 
     with patch.object(store, "watch", side_effect=_failing_watch):
-        task = listener.start()
+        listener.start()
         # Give the task a moment to run and hit the exception path
         await asyncio.sleep(0.05)
         await listener.stop()

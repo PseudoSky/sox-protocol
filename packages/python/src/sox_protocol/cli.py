@@ -193,7 +193,6 @@ def _check_tools(project_dir: Path) -> bool:
     content = skill_path.read_text(encoding="utf-8")
     all_ok = True
     for tool in _REQUIRED_TOOLS:
-        claude_name = f"mcp__sox__{tool}"
         # tools appear as mcp__sox__channels__send etc.
         mcp_name = f"mcp__sox__{tool}"
         if mcp_name in content or tool in content:

@@ -12,9 +12,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from fastmcp import Client, FastMCP
-
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastmcp import Client, FastMCP
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry

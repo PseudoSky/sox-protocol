@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
-from collections.abc import Callable
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,7 +33,6 @@ from sox_protocol.core.middleware.errors import (
     PluginNotFound,
 )
 from sox_protocol.core.middleware.registry import MiddlewareRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers: build fake entry-points and manifests without site-packages writes

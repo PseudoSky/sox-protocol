@@ -24,7 +24,6 @@ from sox_protocol.core.middleware.context import MiddlewareContext
 from sox_protocol.core.middleware.default_chain import _StoreTerminal
 from sox_protocol.core.middleware.plugins.store_dispatch import StoreDispatchMiddleware
 
-
 # ---------------------------------------------------------------------------
 # adapter list_agents presence-state branches
 # ---------------------------------------------------------------------------

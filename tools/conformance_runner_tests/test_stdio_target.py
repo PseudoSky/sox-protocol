@@ -141,9 +141,14 @@ class TestSharedMemoryTargetDispatch:
             assert r["seq"] == i + 1
 
     def test_list_channels_returns_protocol_version(self) -> None:
+        # Spec-canonical: list_channels returns a `_sox_protocol` block
+        # (per V1-SCOPE.md `list_channels` row + namespace-isolation/02-version-block
+        # fixture). The legacy flat `protocol_version` key was retired in 0.1.0.
         result = self.target.call_tool("agent-dispatch", "list_channels", {})
-        assert "protocol_version" in result
-        assert result["protocol_version"] == "1.0"
+        assert "_sox_protocol" in result
+        block = result["_sox_protocol"]
+        assert block["server_version"] == "1.0"
+        assert "1.0" in block["supported_versions"]
 
     def test_channels_ack_returns_acked_at(self) -> None:
         result = self.target.call_tool("agent-dispatch", "channels_ack", {
@@ -159,6 +164,9 @@ class TestSharedMemoryTargetDispatch:
         assert any(m["channel"] == "sox/presence" for m in recv["messages"])
 
     def test_replay_returns_messages_since_seq(self) -> None:
+        # Spec-canonical input field is `since` (matches
+        # spec/operations/replay.input.schema.json). The legacy `since_seq`
+        # name was retired in 0.1.0 fixture-spec-realignment phase 03.
         for i in range(4):
             self.target.call_tool("agent-replay", "send", {
                 "channel": "test:replay-dispatch",
@@ -166,7 +174,8 @@ class TestSharedMemoryTargetDispatch:
             })
         result = self.target.call_tool("agent-replay", "replay", {
             "channel": "test:replay-dispatch",
-            "since_seq": 3,
+            "since": 3,
+            "limit": 100,
         })
         assert "messages" in result
         assert len(result["messages"]) == 2
@@ -178,7 +187,8 @@ class TestSharedMemoryTargetDispatch:
         })
         result = self.target.call_tool("agent-replay", "replay", {
             "channel": "test:replay-beyond",
-            "since_seq": 999,
+            "since": 999,
+            "limit": 100,
         })
         assert result["messages"] == []
         assert result["has_more"] is False
@@ -202,7 +212,12 @@ class TestSharedMemoryTargetDispatch:
             "group_id": "group/grp-dispatch",
             "agent_id": "agent-member",
         })
-        assert invite["invited_agent"] == "agent-member"
+        # Spec-canonical output shape: `{invited: bool, agent_id: str, invited_at: float}`
+        # (per spec/operations/group_invite.output.schema.json). The legacy
+        # `invited_agent` key was retired in 0.1.0 fixture-spec-realignment
+        # phase 06.
+        assert invite["invited"] is True
+        assert invite["agent_id"] == "agent-member"
 
         join = self.target.call_tool("agent-member", "group_join", {
             "group_id": "group/grp-dispatch",

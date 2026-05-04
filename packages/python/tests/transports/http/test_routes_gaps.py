@@ -333,7 +333,6 @@ class TestSseGeneratorSentinel:
         await store.initialize()
 
         # Create a mock request that is always disconnected after first check
-        disconnect_call_count = 0
 
         async def _is_disconnected() -> bool:
             return False

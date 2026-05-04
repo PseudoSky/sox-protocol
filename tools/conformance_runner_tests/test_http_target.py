@@ -66,6 +66,10 @@ class TestHttpTargetCallTool:
     def mock_session(self) -> MagicMock:
         session = MagicMock()
         mock_resp = MagicMock()
+        # status_code MUST be a real int — HttpTarget.call_tool branches on
+        # `resp.status_code >= 400` for the sox-error envelope path. A bare
+        # MagicMock can't be compared with `>=` and raises TypeError.
+        mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "drained_at": 1234567890.0,
             "messages": [],

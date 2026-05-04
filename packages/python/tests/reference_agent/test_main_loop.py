@@ -11,11 +11,9 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastmcp import Client
@@ -24,9 +22,12 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
-from agent import ReferenceAgent, ACK_RECEIVED, ACK_PROCESSING, ACK_DONE, ACK_NACK
-from tests.reference_agent.helpers import build_server
+import contextlib
+
+from agent import ACK_DONE, ACK_NACK, ReferenceAgent
+
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 
 @pytest.mark.asyncio
@@ -72,10 +73,8 @@ async def test_main_loop_processes_and_acks_message(tmp_state_dir: Path) -> None
         stop_task = _asyncio.create_task(_stop_after_one_recv())
         await agent.main_loop()
         stop_task.cancel()
-        try:
+        with contextlib.suppress(_asyncio.CancelledError):
             await stop_task
-        except _asyncio.CancelledError:
-            pass
 
         # Verify the ACK record was written for the message.
         assert len(store._ack_records) >= 1
@@ -117,10 +116,8 @@ async def test_main_loop_seq_state_advances(tmp_state_dir: Path) -> None:
         stop_task = _asyncio.create_task(_stop())
         await agent.main_loop()
         stop_task.cancel()
-        try:
+        with contextlib.suppress(_asyncio.CancelledError):
             await stop_task
-        except _asyncio.CancelledError:
-            pass
 
         # The seq state file should now have ticket:seq-test with seq >= 1.
         saved = agent._seq_state.load()
@@ -155,13 +152,11 @@ async def test_main_loop_unknown_type_acks_done(tmp_state_dir: Path) -> None:
         stop_task = _asyncio.create_task(_stop())
         await agent.main_loop()
         stop_task.cancel()
-        try:
+        with contextlib.suppress(_asyncio.CancelledError):
             await stop_task
-        except _asyncio.CancelledError:
-            pass
 
         # Should have at least one ACK record and all terminal.
-        for mid, rec in store._ack_records.items():
+        for _mid, rec in store._ack_records.items():
             assert rec["status"] in (ACK_DONE, ACK_NACK)
 
 
@@ -183,7 +178,6 @@ async def test_main_loop_nacks_on_exception(tmp_state_dir: Path) -> None:
         await agent.bootstrap()
 
         # Make handle_message raise after ACK(processing).
-        original_handle = agent.handle_message
 
         async def _exploding_handle(envelope: dict[str, Any]) -> None:
             raise RuntimeError("deliberate test error")
@@ -201,10 +195,8 @@ async def test_main_loop_nacks_on_exception(tmp_state_dir: Path) -> None:
         stop_task = _asyncio.create_task(_stop())
         await agent.main_loop()
         stop_task.cancel()
-        try:
+        with contextlib.suppress(_asyncio.CancelledError):
             await stop_task
-        except _asyncio.CancelledError:
-            pass
 
         # At least one nack record should exist.
         nack_records = [

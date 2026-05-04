@@ -24,6 +24,7 @@ Spec coverage
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import pathlib
 from collections.abc import AsyncIterator, Callable, Coroutine
 from typing import Any
@@ -91,10 +92,8 @@ async def _collect_watch(
             if len(collected) >= expected_count:
                 return
 
-    try:
+    with contextlib.suppress(TimeoutError):
         await asyncio.wait_for(_drain(), timeout=timeout)
-    except TimeoutError:
-        pass
     return collected
 
 

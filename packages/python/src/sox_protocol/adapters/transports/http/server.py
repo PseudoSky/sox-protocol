@@ -44,7 +44,11 @@ from sox_protocol.adapters.transports.http.sse import build_sse_router
 from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry
 from sox_protocol.core.identity.keys import generate_keypair
 from sox_protocol.core.identity.verifier import IdentityVerifier
-from sox_protocol.core.middleware import Pipeline, build_default_pipeline, extend_pipeline_with_registry
+from sox_protocol.core.middleware import (
+    Pipeline,
+    build_default_pipeline,
+    extend_pipeline_with_registry,
+)
 from sox_protocol.core.middleware.errors import PluginStartupError
 from sox_protocol.core.middleware.registry import register_middleware
 from sox_protocol.core.ports.backing_store import BackingStore
@@ -167,8 +171,8 @@ def create_app(
             no_discovery=_resolved_no_discovery,
         )
     except PluginStartupError as _exc:
-        import sys as _sys  # noqa: PLC0415
         import logging as _logging  # noqa: PLC0415
+        import sys as _sys  # noqa: PLC0415
         _plog = _logging.getLogger(__name__)
         _envelope = _exc.to_envelope()
         _plog.error(
@@ -183,11 +187,12 @@ def create_app(
         raise
 
     if register_middleware.resolved_order:
+        import logging as _logging2  # noqa: PLC0415
+
         from sox_protocol.core.middleware.default_chain import _StoreTerminal  # noqa: PLC0415
         from sox_protocol.core.middleware.plugins.store_dispatch import (  # noqa: PLC0415
             StoreDispatchMiddleware,
         )
-        import logging as _logging2  # noqa: PLC0415
         _plog2 = _logging2.getLogger(__name__)
         _store_terminal = _StoreTerminal(StoreDispatchMiddleware(store))
         built_pipeline = extend_pipeline_with_registry(

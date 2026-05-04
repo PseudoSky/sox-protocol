@@ -27,7 +27,6 @@ from sox_protocol.tui.app import SoxChatApp, run
 from sox_protocol.tui.mcp_client import McpStdioClient
 from sox_protocol.tui.state import ChatStore
 
-
 # ---------------------------------------------------------------------------
 # CLI subcommand wiring
 # ---------------------------------------------------------------------------

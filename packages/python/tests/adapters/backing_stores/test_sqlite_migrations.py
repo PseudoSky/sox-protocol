@@ -23,7 +23,6 @@ from sox_protocol.adapters.backing_stores.sqlite.migration_runner import (
 )
 from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
 
-
 # ---------------------------------------------------------------------------
 # v1.0 fixture: a database file in the pre-migration shape
 # ---------------------------------------------------------------------------

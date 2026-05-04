@@ -11,12 +11,12 @@ Covers:
 
 from __future__ import annotations
 
+import io
 import sys
 import tokenize
-import io
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastmcp import Client
@@ -26,10 +26,10 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
-from agent import ReferenceAgent, SUPPORTED_PROTOCOL_VERSION
-from tests.reference_agent.helpers import build_server
-from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from agent import ReferenceAgent
 
+from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 # ---------------------------------------------------------------------------
 # Annotation density test
@@ -61,7 +61,7 @@ def test_annotation_density_agent_py() -> None:
 
     # Count physical lines that are not blank and not pure comments.
     source_lines = source.splitlines()
-    for i, line in enumerate(source_lines, start=1):
+    for _i, line in enumerate(source_lines, start=1):
         stripped = line.strip()
         if not stripped:
             continue  # blank lines don't count

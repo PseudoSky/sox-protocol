@@ -6,7 +6,7 @@ from __future__ import annotations
 from .middleware import VersionMismatchMiddleware
 
 
-def make_middleware() -> "VersionMismatchMiddleware":
+def make_middleware() -> VersionMismatchMiddleware:
     return VersionMismatchMiddleware()
 
 

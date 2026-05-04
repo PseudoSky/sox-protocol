@@ -404,9 +404,7 @@ class MiddlewareRegistry:
 
         to_load: dict[str, Manifest] = {}
         for plugin_id, manifest in manifests.items():
-            if allowlist is None:
-                to_load[plugin_id] = manifest
-            elif plugin_id in allowlist:
+            if allowlist is None or plugin_id in allowlist:
                 to_load[plugin_id] = manifest
             elif is_production:
                 # Production: silently skip unallowlisted plugins.

@@ -24,6 +24,7 @@ enforced).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -92,10 +93,8 @@ class Listener:
         """Cancel the background task and wait for it to finish cleanly."""
         if self._task is not None and not self._task.done():
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         self._task = None
 
     # ------------------------------------------------------------------

@@ -74,7 +74,7 @@ def test_cli_serve_stdio_delegates() -> None:
 
     from sox_protocol.cli.serve import serve_command
 
-    args = argparse.Namespace(transport="stdio", host=None, port=None, func=serve_command)
+    argparse.Namespace(transport="stdio", host=None, port=None, func=serve_command)
     # We can't easily run the MCP server in a unit test, but we verify
     # the function exists and accepts the args shape without crashing on import.
     assert callable(serve_command)

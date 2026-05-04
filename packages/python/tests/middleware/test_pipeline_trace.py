@@ -25,7 +25,6 @@ from sox_protocol.core.middleware.pipeline import Pipeline, _get_kind
 from sox_protocol.core.middleware.plugins.auth import AuthMiddleware
 from sox_protocol.core.middleware.plugins.store_dispatch import StoreDispatchMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Helpers / stubs
 # ---------------------------------------------------------------------------
@@ -298,8 +297,8 @@ async def test_all_default_order_plugins_traced(
     rate_limit, schema_validator, idempotency, audit_log) are absent from this
     test but would appear if registered.
     """
-    from sox_protocol.core.middleware.default_chain import build_default_pipeline
     from sox_protocol.core.identity.verifier import IdentityVerifier
+    from sox_protocol.core.middleware.default_chain import build_default_pipeline
     from sox_protocol.core.ports.backing_store import BackingStore
 
     assert isinstance(verifier, IdentityVerifier)
@@ -330,8 +329,8 @@ async def test_auth_short_circuit_marks_store_dispatch_skipped(
     stub_store: object,
 ) -> None:
     """Auth rejection on enforced op → store_dispatch gets verdict='skipped'."""
-    from sox_protocol.core.middleware.default_chain import build_default_pipeline
     from sox_protocol.core.identity.verifier import IdentityVerifier
+    from sox_protocol.core.middleware.default_chain import build_default_pipeline
     from sox_protocol.core.ports.backing_store import BackingStore
 
     assert isinstance(verifier, IdentityVerifier)

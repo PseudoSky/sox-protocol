@@ -13,13 +13,12 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
 from sox_protocol.tui.pump import RecvPump
 from sox_protocol.tui.state import ChatStore
-
 
 # ---------------------------------------------------------------------------
 # Fake client helpers

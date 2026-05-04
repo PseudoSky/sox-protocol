@@ -119,9 +119,8 @@ async def _make_server_with_store(
     import contextlib
     from collections.abc import AsyncIterator
 
-    from fastmcp import FastMCP
-
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from fastmcp import FastMCP
 
     from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry
     from sox_protocol.core.identity.keys import generate_keypair

@@ -78,7 +78,7 @@ class StubBackingStore(BackingStore):
 
     async def watch(self, agent_id: str) -> AsyncIterator[dict[str, object]]:
         return
-        yield  # make it an async generator  # noqa: unreachable
+        yield  # make it an async generator (unreachable; satisfies AsyncIterator type)
 
     async def unsubscribe(self, agent_id: str, patterns: list[str]) -> tuple[list[str], int]:
         existing = self._subscriptions.get(agent_id, [])

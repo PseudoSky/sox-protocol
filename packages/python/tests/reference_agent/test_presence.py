@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastmcp import Client
@@ -23,9 +22,12 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
+import contextlib
+
 from agent import ReferenceAgent
-from tests.reference_agent.helpers import build_server
+
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 
 @pytest.mark.asyncio
@@ -188,10 +190,8 @@ async def test_presence_flips_busy_during_message_processing(tmp_state_dir: Path
         stop_task = asyncio.create_task(_stop())
         await agent.main_loop()
         stop_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await stop_task
-        except asyncio.CancelledError:
-            pass
 
         # Should have seen busy then online during the message batch.
         assert "busy" in recorded_statuses

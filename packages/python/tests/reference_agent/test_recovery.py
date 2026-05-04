@@ -12,9 +12,7 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +24,10 @@ if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
 from agent import ReferenceAgent
-from tests.reference_agent.helpers import build_server
-from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from state import SeqState
 
+from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 # ---------------------------------------------------------------------------
 # SeqState unit tests (state.py)
@@ -134,7 +132,7 @@ async def test_recovery_replays_missed_messages(tmp_state_dir: Path) -> None:
         assert 2 in processed_seqs, f"seq=2 not replayed; got {processed_seqs}"
         assert 3 in processed_seqs, f"seq=3 not replayed; got {processed_seqs}"
         # Should NOT have replayed seq=1 (already processed before restart).
-        assert 1 not in processed_seqs, f"seq=1 was re-replayed (duplicate!)"
+        assert 1 not in processed_seqs, "seq=1 was re-replayed (duplicate!)"
 
 
 @pytest.mark.asyncio

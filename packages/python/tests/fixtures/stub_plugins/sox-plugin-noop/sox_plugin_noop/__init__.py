@@ -14,7 +14,7 @@ from __future__ import annotations
 from .middleware import NoopMiddleware
 
 
-def make_noop_middleware() -> "NoopMiddleware":
+def make_noop_middleware() -> NoopMiddleware:
     """Factory function declared as the entry-point.
 
     Returns:

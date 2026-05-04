@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -33,7 +34,7 @@ async def test_sse_generator_yields_message_from_watch() -> None:
     await store.subscribe("gen-agent", "gen-ch")
 
     # Build the router and extract the generator function via the ASGI app
-    app = create_app(store=store)
+    create_app(store=store)
 
     # We test the SSE generator by directly calling the store.watch() loop
     # that the generator uses, confirming the watch path works end-to-end.
@@ -175,7 +176,7 @@ async def test_sse_last_event_id_invalid_value() -> None:
     # Subscribe agent so watch() has subscriptions
     await store.subscribe("last-id-agent", "last-id-ch")
 
-    app = create_app(store=store)
+    create_app(store=store)
 
     # We test the SSE endpoint with invalid Last-Event-ID by directly calling
     # the route through ASGI — but we cancel immediately to avoid hanging.
@@ -286,7 +287,6 @@ async def test_sse_generator_keepalive_path() -> None:
     # Test keepalive logic directly: if queue.get() times out, yield keepalive
     queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
 
-    keepalive_text = ": keepalive\n\n"
     try:
         await asyncio.wait_for(queue.get(), timeout=0.01)
     except TimeoutError:
@@ -321,10 +321,8 @@ async def test_sse_watch_task_cancelled_on_disconnect() -> None:
     task = asyncio.create_task(fake_watch_task())
     await asyncio.sleep(0)  # Let task start
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
     assert cancelled
 

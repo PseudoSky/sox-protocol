@@ -11,6 +11,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from pathlib import Path
 
@@ -20,7 +21,6 @@ import pytest_asyncio
 from sox_protocol.adapters.backing_stores.filesystem.store import FilesystemStore
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
-
 
 # ---------------------------------------------------------------------------
 # Filesystem store — lines 414-415: delivered-set branch
@@ -71,10 +71,8 @@ async def test_filesystem_watch_skips_delivered_mid_iteration(
     # Send the new message before starting watch so the event fires
     await store2.send("ch/test", "sender", {"new_msg": True})
 
-    try:
+    with contextlib.suppress(TimeoutError):
         await asyncio.wait_for(_watch_once(), timeout=1.0)
-    except (asyncio.TimeoutError, TimeoutError):
-        pass
 
     # Only the new (non-delivered) message should appear
     for msg in collected:

@@ -43,9 +43,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastmcp import Client, FastMCP
-
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from fastmcp import Client, FastMCP
 
 from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
 from sox_protocol.core.identity import AuditLogWriter, InMemoryCredentialRegistry

@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, Self
+from typing import Self
 
 from sox_protocol.core.middleware.context import MiddlewareContext
 from sox_protocol.core.middleware.errors import ShortCircuitResponse, make_internal_error

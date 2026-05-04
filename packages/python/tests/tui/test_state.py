@@ -18,10 +18,7 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from sox_protocol.tui.state import AgentState, ChannelState, ChatStore, MessageState
-
 
 # ---------------------------------------------------------------------------
 # Helpers

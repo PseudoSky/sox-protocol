@@ -16,7 +16,6 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastmcp import Client
@@ -25,9 +24,12 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
+import contextlib
+
 from agent import ReferenceAgent
-from tests.reference_agent.helpers import build_server
+
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 
 @pytest.mark.asyncio
@@ -104,10 +106,8 @@ async def test_run_normal_starts_heartbeat_task(tmp_state_dir: Path) -> None:
         stop_task = asyncio.create_task(_stop_soon())
         await asyncio.wait_for(agent.run(once=False), timeout=5.0)
         stop_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await stop_task
-        except asyncio.CancelledError:
-            pass
 
         # The heartbeat should have fired at least once during the run.
         liveness = store._liveness.get("run-hb-agent")

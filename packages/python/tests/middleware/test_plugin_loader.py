@@ -32,7 +32,6 @@ from sox_protocol.core.middleware.plugin_loader import (
     validate_manifest,
 )
 
-
 # ---------------------------------------------------------------------------
 # Shared fixture helpers
 # ---------------------------------------------------------------------------

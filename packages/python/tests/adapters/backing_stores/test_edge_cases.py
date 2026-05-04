@@ -6,6 +6,7 @@ and sqlite/store.py.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -185,10 +186,8 @@ class TestFilesystemWatchSkipsNonMatching:
                 collected.append(msg)
                 break
 
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(_collect(), timeout=0.5)
-        except TimeoutError:
-            pass
 
         # Should only see ch/1, not other/1
         channels = [m["channel"] for m in collected]
@@ -225,10 +224,8 @@ class TestFilesystemWatchAlreadyDelivered:
                 if len(collected) >= 1:
                     break
 
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(_collect(), timeout=0.5)
-        except TimeoutError:
-            pass
 
         # Should only get the second message (first was in delivered)
         assert any(m.get("body", {}).get("n") == 2 for m in collected)
@@ -264,10 +261,8 @@ class TestFilesystemWatchCorruptFile:
                 collected.append(msg)
                 break
 
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(_collect(), timeout=0.5)
-        except TimeoutError:
-            pass
 
         # Should get the valid message despite the corrupt file
         valid_msgs = [m for m in collected if isinstance(m.get("body"), dict)]

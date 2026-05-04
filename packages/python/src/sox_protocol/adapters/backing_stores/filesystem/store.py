@@ -41,6 +41,7 @@ Spec reference: ``spec/ports/backing-store.md``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import json
 import os
@@ -77,10 +78,8 @@ def _atomic_write(path: Path, data: str) -> None:
             f.write(data)
         os.replace(tmp_path, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp_path)
-        except OSError:
-            pass
         raise
 
 

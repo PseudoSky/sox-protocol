@@ -494,7 +494,7 @@ def test_cli_main_module_no_func_returns_0() -> None:
 
 def test_cli_main_module_with_serve_returns_func() -> None:
     """cli/__main__.main() with 'serve' subcommand calls func."""
-    with patch("sox_protocol.cli.serve.serve_command", return_value=0) as mock_func:
+    with patch("sox_protocol.cli.serve.serve_command", return_value=0):
         result = cli_main_module.main(["serve", "--transport", "stdio"])
     # Should have called serve_command
     assert isinstance(result, int)

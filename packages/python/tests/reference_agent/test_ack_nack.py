@@ -22,9 +22,10 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
-from agent import ReferenceAgent, ACK_DONE, ACK_NACK, ACK_PROCESSING, ACK_RECEIVED
-from tests.reference_agent.helpers import build_server
+from agent import ACK_DONE, ACK_NACK, ACK_PROCESSING, ACK_RECEIVED, ReferenceAgent
+
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 
 @pytest.mark.asyncio

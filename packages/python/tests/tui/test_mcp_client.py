@@ -10,6 +10,7 @@ JSON-RPC framing, error response handling, and timeout on dead pipe.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -18,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from sox_protocol.tui.mcp_client import McpStdioClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers — fake bidirectional pipe
@@ -95,7 +95,7 @@ async def _stub_server(
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -182,10 +182,8 @@ async def pipe_client() -> AsyncIterator[tuple[McpStdioClient, asyncio.Task[None
         stop_event.set()
         await client.stop()
         server_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await server_task
-        except asyncio.CancelledError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +350,7 @@ async def test_error_response_raises_runtime_error() -> None:
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -392,10 +390,8 @@ async def test_error_response_raises_runtime_error() -> None:
         stop_event.set()
         await client.stop()
         server_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await server_task
-        except asyncio.CancelledError:
-            pass
 
 
 @pytest.mark.asyncio
@@ -411,7 +407,7 @@ async def test_malformed_json_ignored() -> None:
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -445,10 +441,8 @@ async def test_malformed_json_ignored() -> None:
     stop_event.set()
     await client.stop()
     server_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server_task
-    except asyncio.CancelledError:
-        pass
 
 
 @pytest.mark.asyncio
@@ -464,7 +458,7 @@ async def test_result_without_content_block() -> None:
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -504,10 +498,8 @@ async def test_result_without_content_block() -> None:
     stop_event.set()
     await client.stop()
     server_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server_task
-    except asyncio.CancelledError:
-        pass
 
 
 @pytest.mark.asyncio
@@ -525,7 +517,7 @@ async def test_read_loop_skips_invalid_json_lines() -> None:
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -574,10 +566,8 @@ async def test_read_loop_skips_invalid_json_lines() -> None:
     stop_event.set()
     await client.stop()
     server_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server_task
-    except asyncio.CancelledError:
-        pass
 
 
 @pytest.mark.asyncio
@@ -593,7 +583,7 @@ async def test_non_json_text_content_block_returns_raw() -> None:
         while not stop_event.is_set():
             try:
                 line = await asyncio.wait_for(reader.readline(), timeout=0.5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if not line:
                 break
@@ -637,10 +627,8 @@ async def test_non_json_text_content_block_returns_raw() -> None:
     stop_event.set()
     await client.stop()
     server_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server_task
-    except asyncio.CancelledError:
-        pass
 
 
 @pytest.mark.asyncio
@@ -670,7 +658,5 @@ async def test_client_with_process_mock() -> None:
     await client.stop()
     mock_process.terminate.assert_awaited_once()
     server_task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await server_task
-    except asyncio.CancelledError:
-        pass

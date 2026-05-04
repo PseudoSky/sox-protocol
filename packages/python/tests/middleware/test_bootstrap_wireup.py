@@ -21,17 +21,14 @@ Spec references:
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
-from sox_protocol.core.middleware.errors import PluginNotAllowed, PluginStartupError
+from sox_protocol.core.middleware.errors import PluginNotAllowed
 from sox_protocol.core.middleware.registry import MiddlewareRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -171,7 +168,7 @@ class TestHttpCreateAppProductionEmptyAllowlist:
         # Inject a fake plugin so discovery doesn't short-circuit on "0 plugins found"
         ep = _make_fake_ep("io.sox.test-plugin")
         manifest = _make_manifest_doc()
-        fresh_registry = _patch_discovery(
+        _patch_discovery(
             monkeypatch,
             [ep],
             {"io.sox.test-plugin": manifest},

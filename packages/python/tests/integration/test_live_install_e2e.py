@@ -38,7 +38,6 @@ import os
 import shutil
 import sqlite3
 import subprocess
-import sys
 import time
 import venv
 from pathlib import Path
@@ -349,7 +348,6 @@ def _run_claude(
     except subprocess.TimeoutExpired as exc:
         # Write whatever was captured so far for debugging.
         stdout_so_far = exc.stdout or b""
-        stderr_so_far = exc.stderr or b""
         (artifacts_dir / f"{agent_name}_timeout_stdout.txt").write_bytes(
             stdout_so_far if isinstance(stdout_so_far, bytes) else stdout_so_far.encode()
         )
@@ -675,14 +673,13 @@ def test_live_install_negative_missing_skill(
         encoding="utf-8"
     ).strip()
 
-    alice_result = _run_claude(
+    _run_claude(
         prompt=alice_prompt,
         project_dir=live_project,
         tmp_dir=tmp_path,
         agent_name="alice_no_skill",
     )
 
-    alice_tx = alice_result.stdout
 
     # Check whether alice sent a PING despite the missing skill.
     db_has_messages = (

@@ -259,22 +259,20 @@ class TestPipelineIntegration:
         schema_strict_install_dir: Path,
     ) -> None:
         """After extend_pipeline_with_registry, pipeline.order contains schema_strict."""
-        import asyncio
 
         _activate(monkeypatch, schema_strict_install_dir)
 
         from sox_protocol.adapters.backing_stores.memory import MemoryStore
-        from sox_protocol.core.middleware import (
-            build_default_pipeline,
-            extend_pipeline_with_registry,
-        )
-        from sox_protocol.core.middleware.plugins.store_dispatch import StoreDispatchMiddleware
-
         from sox_protocol.core.identity import (  # type: ignore[import]
             AuditLogWriter,
             InMemoryCredentialRegistry,
         )
         from sox_protocol.core.identity.verifier import IdentityVerifier
+        from sox_protocol.core.middleware import (
+            build_default_pipeline,
+            extend_pipeline_with_registry,
+        )
+        from sox_protocol.core.middleware.plugins.store_dispatch import StoreDispatchMiddleware
 
         store = MemoryStore()
         store_mw = StoreDispatchMiddleware(store)
@@ -292,7 +290,9 @@ class TestPipelineIntegration:
         )
 
         # Reconstruct terminal the same way build_default_pipeline does.
-        from sox_protocol.core.middleware.default_chain import _StoreTerminal  # type: ignore[attr-defined]
+        from sox_protocol.core.middleware.default_chain import (
+            _StoreTerminal,  # type: ignore[attr-defined]
+        )
 
         terminal = _StoreTerminal(store_mw)
         extended = extend_pipeline_with_registry(base_pipeline, registry, terminal)
@@ -312,7 +312,6 @@ class TestPipelineIntegration:
         from sox_plugin_schema_strict.middleware import SchemaStrictMiddleware
 
         from sox_protocol.adapters.backing_stores.memory import MemoryStore
-        from sox_protocol.core.middleware import build_default_pipeline
         from sox_protocol.core.middleware.pipeline import Pipeline
         from sox_protocol.core.middleware.plugins.store_dispatch import StoreDispatchMiddleware
 

@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -45,7 +43,7 @@ async def test_demo_script_runs_to_completion() -> None:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=60.0
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.communicate()
         pytest.fail("demo.py did not complete within 60 seconds")

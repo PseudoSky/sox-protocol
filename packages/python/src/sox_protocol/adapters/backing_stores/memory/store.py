@@ -223,7 +223,7 @@ class MemoryStore(BackingStore):
                 if msg.sent_at >= cutoff:
                     channels.add(msg.channel)
             # Include exact-match patterns that name a channel explicitly.
-            for agent_id, patterns in self._subscriptions.items():
+            for _agent_id, patterns in self._subscriptions.items():
                 for p in patterns:
                     if "*" not in p and "?" not in p and "[" not in p:
                         channels.add(p)

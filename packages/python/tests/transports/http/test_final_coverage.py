@@ -13,9 +13,7 @@ Covers:
 
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncGenerator
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -26,7 +24,6 @@ from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
 from sox_protocol.adapters.transports.http.config import HttpConfig
 from sox_protocol.adapters.transports.http.liveness import LivenessStore
 from sox_protocol.adapters.transports.http.server import create_app
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -231,7 +228,7 @@ async def test_op_group_create_invalid_body_returns_400(
 def test_liveness_store_list_agents_status_filter_excludes() -> None:
     """Line 139: list_agents with status_filter skips agents whose state
     doesn't match the filter."""
-    from sox_protocol.adapters.transports.http.liveness import AgentRecord, LivenessStore
+    from sox_protocol.adapters.transports.http.liveness import AgentRecord
 
     ls = LivenessStore()
 

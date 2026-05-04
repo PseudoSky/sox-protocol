@@ -19,6 +19,7 @@ port-contract parametrised suite:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import pathlib
 
@@ -222,10 +223,8 @@ class TestFsWatch:
                 if len(collected) >= 1:
                     return
 
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(watcher(), timeout=3.0)
-        except TimeoutError:
-            pass
 
         assert len(collected) == 1
         assert collected[0]["body"] == {"post": True}

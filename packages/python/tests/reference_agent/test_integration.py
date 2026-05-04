@@ -26,11 +26,11 @@ _REF_AGENT_DIR = Path(__file__).parents[4] / "examples" / "reference-agent"
 if str(_REF_AGENT_DIR) not in sys.path:
     sys.path.insert(0, str(_REF_AGENT_DIR))
 
-from agent import ReferenceAgent, ACK_DONE, ACK_NACK, ACK_RECEIVED
-from tests.reference_agent.helpers import build_server
-from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from agent import ACK_DONE, ACK_RECEIVED, ReferenceAgent
 from state import SeqState
 
+from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
+from tests.reference_agent.helpers import build_server
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,7 +95,7 @@ async def test_clarification_round_trip(tmp_path: Path) -> None:
             },
         )
         assert "message_id" in send_result.data
-        request_msg_id: str = str(send_result.data["message_id"])
+        str(send_result.data["message_id"])
 
         # Let the listener push the message to the partner.
         await asyncio.sleep(0.15)

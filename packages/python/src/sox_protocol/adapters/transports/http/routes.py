@@ -54,7 +54,6 @@ from sox_protocol.adapters.transports.http.errors import (
     sox_error_response,
 )
 from sox_protocol.core.identity import InMemoryCredentialRegistry
-from sox_protocol.core.identity.keys import generate_keypair
 from sox_protocol.core.middleware.pipeline import Pipeline
 
 _log = logging.getLogger(__name__)
@@ -164,7 +163,7 @@ async def _dispatch(
         # raw result with HTTP 200.
         if isinstance(result, dict) and "error_code" in result:
             err_code = str(result.get("error_code", "internal_error"))
-            err_msg = str(result.get("message", ""))
+            str(result.get("message", ""))
             status_map = {
                 "identity_failure": 401,
                 "missing_credential": 401,
@@ -552,9 +551,8 @@ def register_operation_routes(
                 msgs: list[dict[str, object]] = result.get("messages", [])
                 for m in msgs:
                     m_reply = m.get("reply_to") or m.get("correlation_id")
-                    if m_reply == reply_to:
-                        if status_filter is None:
-                            collected.append(m)
+                    if m_reply == reply_to and status_filter is None:
+                        collected.append(m)
                         # status_filter on body messages is advisory in degraded mode
                 if len(collected) < count:
                     await asyncio.sleep(0.05)

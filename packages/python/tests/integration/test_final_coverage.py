@@ -10,13 +10,11 @@ Covers:
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from sox_protocol.core.mcp_server import server as mcp_server
-
 
 # ---------------------------------------------------------------------------
 # server.py line 268: await close() — store has a close() method
@@ -27,7 +25,6 @@ from sox_protocol.core.mcp_server import server as mcp_server
 @pytest.mark.asyncio
 async def test_lifespan_calls_store_close_when_available() -> None:
     """Lines 268, 270: lifespan finally block calls close() and cancels task."""
-    import asyncio
 
     from fastmcp import Client
 
@@ -65,6 +62,7 @@ async def test_lifespan_cancels_task_when_not_done() -> None:
     import asyncio
 
     from fastmcp import Client
+
     from sox_protocol.adapters.backing_stores.memory.store import MemoryStore
     from sox_protocol.core.mcp_server.listener import Listener
 
@@ -146,7 +144,6 @@ async def test_store_terminal_noop_is_never_called_directly() -> None:
             ctx: MiddlewareContext,
             call_next: object,
         ) -> dict[str, object]:
-            import inspect
             # call call_next (the _noop) to cover line 58
             result = await call_next(ctx)  # type: ignore[operator]
             noop_called.append(result)

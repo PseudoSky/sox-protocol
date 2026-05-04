@@ -60,7 +60,7 @@ def test_enforcer_main_module_lines_covered() -> None:
 
 def test_mcp_server_main_module_lines_covered() -> None:
     """Covers core/mcp_server/__main__.py lines 4-6 by executing them with main() mocked."""
-    with patch("sox_protocol.core.mcp_server.server.main") as mock_main:
+    with patch("sox_protocol.core.mcp_server.server.main"):
         _exec_main_module(str(_MCP_MAIN))
 
 
