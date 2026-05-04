@@ -1,4 +1,4 @@
-# `sox chat` — interactive channels TUI
+# `sox-protocol chat` — interactive channels TUI
 
 A Textual-based terminal UI for browsing channels, watching messages arrive in real time, and chatting with agents directly. Useful for debugging multi-agent flows and for one-off "send a message into a running system" tasks.
 
@@ -8,12 +8,12 @@ A Textual-based terminal UI for browsing channels, watching messages arrive in r
 
 ## Quick start
 
-Once SOX is installed (the `sox` entry-point is on `$PATH` after `pip install sox-protocol`):
+Once SOX is installed (the `sox-protocol` entry-point is on `$PATH` after `pip install sox-protocol`):
 
 ```bash
 # Point at your project's SQLite store and pick an identity
 SOX_BACKING_STORE="sqlite:///$(pwd)/.sox/messages.db" \
-  sox chat --agent-id $(whoami) --channel "group/design-review"
+  sox-protocol chat --agent-id $(whoami) --channel "group/design-review"
 ```
 
 That's it. The TUI spawns its own SOX MCP server as a stdio subprocess — you don't need to start anything separately. Quit with `Ctrl+C`.
@@ -49,7 +49,7 @@ The screen has three panes plus an input box:
 ## Flags
 
 ```bash
-sox chat --help
+sox-protocol chat --help
 ```
 
 | Flag | Default | Use |
@@ -67,12 +67,12 @@ The TUI honors the same env vars as the MCP server itself — most importantly `
 
 ### 1. Watch a real two-agent conversation in real time
 
-Open `sox chat` against the shared channel in one terminal, then run your agents (alice/bob, planner/cto-agent, etc.) in another. Their messages appear live in the TUI as they're sent. Great for debugging multi-agent flows — you see exactly what each agent sees, in order.
+Open `sox-protocol chat` against the shared channel in one terminal, then run your agents (alice/bob, planner/cto-agent, etc.) in another. Their messages appear live in the TUI as they're sent. Great for debugging multi-agent flows — you see exactly what each agent sees, in order.
 
 ```bash
 # Terminal 1
 SOX_BACKING_STORE="sqlite:///$(pwd)/.sox/messages.db" \
-  sox chat --agent-id observer --channel "group/design-review"
+  sox-protocol chat --agent-id observer --channel "group/design-review"
 
 # Terminal 2 (or 3, 4…)
 SOX_AGENT_ID=planner claude   # interactive
@@ -82,7 +82,7 @@ SOX_AGENT_ID=cto-agent claude --print "..."   # scripted
 
 ### 2. Inject a message into a running multi-agent system
 
-If your agents are subscribed to `agent/cto-agent` (or any channel), open `sox chat --agent-id user --channel agent/cto-agent`, type a question, hit Enter. The next time the target agent calls `mcp__sox__channels__recv`, it picks up your message. Two-way conversation with bots from a normal terminal — handy for steering long-running flows or asking ad-hoc questions.
+If your agents are subscribed to `agent/cto-agent` (or any channel), open `sox-protocol chat --agent-id user --channel agent/cto-agent`, type a question, hit Enter. The next time the target agent calls `mcp__sox__channels__recv`, it picks up your message. Two-way conversation with bots from a normal terminal — handy for steering long-running flows or asking ad-hoc questions.
 
 ---
 
@@ -90,7 +90,7 @@ If your agents are subscribed to `agent/cto-agent` (or any channel), open `sox c
 
 The TUI is itself an MCP **client** — it speaks JSON-RPC to a stdio MCP server, the same way Claude Code does. Two modes:
 
-- **Spawn mode (default).** The TUI launches its own `sox-mcp-server` subprocess on stdio. Each `sox chat` invocation gets its own server; multiple TUI windows pointing at the same `SOX_BACKING_STORE` see the same SQLite database, so messages flow between them. This is the simplest setup and what you want most of the time.
+- **Spawn mode (default).** The TUI launches its own `sox-mcp-server` subprocess on stdio. Each `sox-protocol chat` invocation gets its own server; multiple TUI windows pointing at the same `SOX_BACKING_STORE` see the same SQLite database, so messages flow between them. This is the simplest setup and what you want most of the time.
 - **Attach mode (`--no-spawn`).** The TUI expects to find a SOX server already running on stdio (e.g. spawned by another supervisor process). Useful when you want a single long-lived server with multiple ephemeral TUI clients.
 
 For the design rationale and trade-offs, see [docs/decisions/tui-connection-model.md](../decisions/tui-connection-model.md).

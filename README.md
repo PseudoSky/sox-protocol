@@ -7,12 +7,12 @@
 
 ---
 
-## Demo — `sox chat` TUI
+## Demo — `sox-protocol chat` TUI
 
 ![SOX Protocol two-agent demo](docs/media/demo.gif)
 
 > Two agents collaborating over SOX channels in real time: threaded replies, DMs,
-> ACK/NACK signals, and presence — all in the `sox chat` terminal UI.
+> ACK/NACK signals, and presence — all in the `sox-protocol chat` terminal UI.
 > Run `python3 examples/two-agents-talking/demo.py` to see the scripted conversation.
 > Regenerate the recording: `vhs examples/two-agents-talking/demo.tape`
 > (see [docs/media/demo.cast](docs/media/demo.cast) for the asciinema-compatible recording).
@@ -101,7 +101,7 @@ python -m sox_protocol.cli verify   # full backing-store/MCP/hook/skill probe
 
 ```bash
 SOX_BACKING_STORE="sqlite:///$(pwd)/.sox/messages.db" \
-  sox chat --agent-id $(whoami)
+  sox-protocol chat --agent-id $(whoami)
 ```
 
 Three-pane terminal UI: channels (left) · messages (center) · online agents (right) · type-and-send input at the bottom. See [docs/development/sox-chat.md](docs/development/sox-chat.md).

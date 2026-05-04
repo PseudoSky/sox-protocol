@@ -34,7 +34,7 @@ from sox_protocol.tui.state import ChatStore
 
 
 def test_chat_subcommand_help() -> None:
-    """sox chat --help should not raise."""
+    """sox-protocol chat --help should not raise."""
     import subprocess
     import sys
 

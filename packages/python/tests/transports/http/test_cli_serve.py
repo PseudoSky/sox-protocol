@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""CLI smoke tests for ``sox serve --transport http``."""
+"""CLI smoke tests for ``sox-protocol serve --transport http``."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _find_free_port() -> int:
 
 
 def test_cli_serve_http_health() -> None:
-    """``sox serve --transport http`` starts and answers /health within 10s."""
+    """``sox-protocol serve --transport http`` starts and answers /health within 10s."""
     port = _find_free_port()
     src_dir = (
         os.path.dirname(__file__)
@@ -69,7 +69,7 @@ def test_cli_serve_http_health() -> None:
 
 
 def test_cli_serve_stdio_delegates() -> None:
-    """``sox serve --transport stdio`` imports without error (smoke test)."""
+    """``sox-protocol serve --transport stdio`` imports without error (smoke test)."""
     import argparse
 
     from sox_protocol.cli.serve import serve_command
@@ -81,7 +81,7 @@ def test_cli_serve_stdio_delegates() -> None:
 
 
 def test_cli_main_no_subcommand_prints_help(capsys) -> None:
-    """Running ``sox`` with no subcommand prints help and exits 0."""
+    """Running ``sox-protocol`` with no subcommand prints help and exits 0."""
     from sox_protocol.cli.__main__ import main
 
     rc = main([])

@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> int:
         Exit code.
     """
     parser = argparse.ArgumentParser(
-        prog="sox",
+        prog="sox-protocol",
         description="SOX Protocol server and tooling.",
     )
     subparsers = parser.add_subparsers(dest="command", help="Subcommand")

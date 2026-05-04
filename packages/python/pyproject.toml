@@ -34,7 +34,7 @@ dev = [
 
 [project.scripts]
 sox-mcp-server = "sox_protocol.core.mcp_server.server:main"
-sox = "sox_protocol.cli:main"
+sox-protocol = "sox_protocol.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sox_protocol"]

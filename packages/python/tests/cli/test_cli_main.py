@@ -482,7 +482,7 @@ def test_cli_py_main_install_delegates(tmp_path: Path) -> None:
 
 
 # ===========================================================================
-# cli/__main__.py — the sox serve entrypoint (lines 37-45)
+# cli/__main__.py — the sox-protocol serve entrypoint (lines 37-45)
 # ===========================================================================
 
 

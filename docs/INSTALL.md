@@ -75,13 +75,15 @@ claude mcp list
 
 If you see `✗ Failed to connect`, the plugin probably wasn't installed correctly — see the gotcha in step 1.
 
-The `sox` CLI is installed alongside as an entry-point script. Find it with:
+The `sox-protocol` CLI is installed alongside as an entry-point script. Find it with:
 
 ```bash
-which sox
-# usually .venv/bin/sox after a venv install,
-# ~/.local/bin/sox for --user installs.
+which sox-protocol
+# usually .venv/bin/sox-protocol after a venv install,
+# ~/.local/bin/sox-protocol for --user installs.
 ```
+
+> The bin is named `sox-protocol` (not `sox`) to avoid conflict with the long-established [SoX audio toolkit](http://sox.sourceforge.net/). The MCP server name in `.mcp.json` is still `sox` — that's a separate identifier and doesn't conflict with anything.
 
 ---
 
@@ -186,7 +188,7 @@ watch -n 1 'sqlite3 .sox/messages.db "
 
 # Browse interactively (channels list + message scroll + agents pane)
 SOX_BACKING_STORE="sqlite:///$(pwd)/.sox/messages.db" \
-  sox chat --agent-id $(whoami) --channel "group/design-review"
+  sox-protocol chat --agent-id $(whoami) --channel "group/design-review"
 
 # Check who's subscribed
 sqlite3 .sox/messages.db "SELECT * FROM subscriptions;"
