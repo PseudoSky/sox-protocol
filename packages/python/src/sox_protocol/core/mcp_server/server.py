@@ -76,12 +76,50 @@ _HOST_PROTOCOL_VERSION = "1.0.0"
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Spec schema root (relative to this file: packages/python/src/.../server.py
-# → climb 8 levels to sox-protocol/, then spec/schemas/tools/).
+# Spec schema root.  Two resolution paths:
+#
+#  1. Installed wheel: ``spec/`` is bundled inside the ``sox_protocol``
+#     package via the symlink at ``packages/python/src/sox_protocol/spec ->
+#     ../../../spec`` followed by hatchling at build time. We resolve
+#     ``spec/schemas/tools/`` inside the installed package via
+#     ``importlib.resources``.
+#
+#  2. Editable / source checkout: ``spec/`` lives at the repo root. Walk up
+#     from this file until we find a directory containing ``spec/schemas/tools``.
+#
+# The previous implementation (``Path(__file__).resolve().parents[6]``) only
+# worked in source checkouts because in an installed wheel ``parents[6]`` lands
+# at the Python prefix (e.g. ``/opt/homebrew/Caskroom/miniconda/base/``)
+# instead of the package root, producing a path like
+# ``<prefix>/spec/schemas/tools`` that has never existed. Reproduced as a
+# BrokenPipe at the TUI client because the server crashed at module import.
 # ---------------------------------------------------------------------------
-_SPEC_SCHEMAS_DIR: Path = (
-    Path(__file__).resolve().parents[6] / "spec" / "schemas" / "tools"
-)
+
+
+def _resolve_spec_schemas_dir() -> Path:
+    """Return the absolute path to ``spec/schemas/tools/`` for both install modes."""
+    # 1. Installed wheel: bundled at sox_protocol/spec/schemas/tools/
+    try:
+        pkg_ref = importlib.resources.files("sox_protocol")
+        candidate = Path(str(pkg_ref)) / "spec" / "schemas" / "tools"
+        if candidate.is_dir():
+            return candidate
+    except (FileNotFoundError, TypeError, ModuleNotFoundError):  # pragma: no cover
+        pass
+
+    # 2. Source checkout: walk up to find the repo's spec/ directory.
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / "spec" / "schemas" / "tools"
+        if candidate.is_dir():
+            return candidate
+
+    # 3. Fallback — return the (broken) path so the downstream is_dir check
+    #    fires its existing error message rather than a confusing exception.
+    return here.parents[6] / "spec" / "schemas" / "tools"
+
+
+_SPEC_SCHEMAS_DIR: Path = _resolve_spec_schemas_dir()
 
 # ---------------------------------------------------------------------------
 # Canonical sample outputs used to smoke-test schema loading.

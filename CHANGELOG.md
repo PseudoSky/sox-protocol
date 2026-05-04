@@ -170,6 +170,33 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.2] — 2026-05-04 — fix `sox-protocol chat` crash on installed wheels (schema-path resolution)
+
+### Fixed
+
+- **`sox-mcp-server` exited immediately on installed wheels** with the error:
+
+  ```
+  ERROR spec/schemas/tools/ not found at <python-prefix>/spec/schemas/tools — is the repo checkout complete?
+  ```
+
+  This caused **`sox-protocol chat` (and any direct MCP client) to hang on the JSON-RPC `initialize` handshake** — the server crashed at module import before responding, so the client got `BrokenPipeError` and timed out. Reproduced by a user as a 10s+ timeout on `sox-protocol chat --agent-id $(whoami)`.
+
+  Root cause: `_SPEC_SCHEMAS_DIR` was computed as `Path(__file__).resolve().parents[6] / "spec" / "schemas" / "tools"`. In a source checkout, `parents[6]` is the repo root and the path resolves correctly. In an installed wheel, `parents[6]` lands at the Python prefix (`/opt/homebrew/Caskroom/miniconda/base/` in the user's case), producing the bogus path above.
+
+  Fix: introduce `_resolve_spec_schemas_dir()` which:
+  1. Tries `importlib.resources.files("sox_protocol") / "spec" / "schemas" / "tools"` first (the bundled location for installed wheels — the wheel ships these files correctly via the in-tree symlink at `packages/python/src/sox_protocol/spec → ../../../spec`).
+  2. Walks up from `__file__` looking for a `spec/schemas/tools` ancestor (source-checkout fallback).
+  3. Returns the previous (broken) path as a final fallback so the existing `is_dir()` check fires its descriptive error message instead of an exception.
+
+  Verified end-to-end via a Textual `Pilot` headless driver that boots `SoxChatApp`, confirms all 4 widgets compose, the MCP client connects to the spawned server, the channel list populates, and the widget-id sanitization (added in 0.1.1) handles `#general` correctly.
+
+### Migration
+
+- No action required. `pip install --upgrade sox-protocol` picks up the fix.
+
+---
+
 ## [0.1.1] — 2026-05-04 — TUI widget-id fix + CI green-up
 
 ### Fixed
