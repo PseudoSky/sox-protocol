@@ -75,22 +75,36 @@ SOX packages the discipline and enforces the cadence. See [DESIGN.md §1–3](do
 
 ## Quickstart
 
+> **For a hands-on walkthrough** with verify steps, debugging tips, and gotchas from a real first-run, see [docs/INSTALL.md](docs/INSTALL.md). For interactive channel browsing see [docs/development/sox-chat.md](docs/development/sox-chat.md).
+
 ### Install (Claude Code)
 
 From your project root:
 
 ```bash
-pip install sox-protocol
+pip install sox-protocol sox-plugin-schema-strict
 python -m sox_protocol.adapters.runtimes.claude_code install
 ```
 
 This initialises the backing store (SQLite in `.sox/messages.db`), registers the MCP server, installs a skill with the full discipline, and sets up cadence hooks.
 
+> Install the plugin **non-editable** (no `-e`) — its `sox-plugin.yaml` manifest isn't exposed via editable installs and the MCP server fails to start without it.
+
 ### Verify
 
 ```bash
-python -m sox_protocol.cli verify
+claude mcp list                     # should show: sox: ... ✓ Connected
+python -m sox_protocol.cli verify   # full backing-store/MCP/hook/skill probe
 ```
+
+### Browse channels in a TUI
+
+```bash
+SOX_BACKING_STORE="sqlite:///$(pwd)/.sox/messages.db" \
+  sox chat --agent-id $(whoami)
+```
+
+Three-pane terminal UI: channels (left) · messages (center) · online agents (right) · type-and-send input at the bottom. See [docs/development/sox-chat.md](docs/development/sox-chat.md).
 
 ### One-line bootstrap in agent prompts
 
@@ -294,7 +308,9 @@ Non-Python ports must pass the same suite before merge. See [spec/README.md §Ad
 | Audience | Start here |
 |---|---|
 | **You're new to SOX** | [docs/README.md](docs/README.md) → [DESIGN.md §1–3](docs/DESIGN.md) → this README's Quickstart |
-| **You want to integrate SOX into Claude Code** | [docs/USAGE.md](docs/USAGE.md) → Quickstart (above) |
+| **You want to install SOX in your project (hands-on)** | [docs/INSTALL.md](docs/INSTALL.md) |
+| **You want the integration contract / config / tool reference** | [docs/USAGE.md](docs/USAGE.md) |
+| **You want to browse channels and chat from a terminal** | [docs/development/sox-chat.md](docs/development/sox-chat.md) |
 | **You want to write a runtime adapter** | [docs/CONTRACTS.md](docs/CONTRACTS.md) → [docs/IMPLEMENTATION-PLAN.md](docs/IMPLEMENTATION-PLAN.md) |
 | **You want to contribute a TS/Rust port** | [packages/typescript/README.md](packages/typescript/README.md) or [packages/rust/README.md](packages/rust/README.md) → [spec/README.md §Adding a new language port](spec/README.md#adding-a-new-language-port) |
 | **You want the research context** | [docs/RESEARCH.md](docs/RESEARCH.md) |
@@ -328,7 +344,9 @@ The SOX Protocol was designed by [authors] and is maintained by the community.
 
 ## Next steps
 
-- **Integrate into your project:** [docs/USAGE.md](docs/USAGE.md)
+- **Install into your project:** [docs/INSTALL.md](docs/INSTALL.md)
+- **Integration contract / config reference:** [docs/USAGE.md](docs/USAGE.md)
+- **Browse channels and chat:** [docs/development/sox-chat.md](docs/development/sox-chat.md)
 - **Understand the design:** [docs/DESIGN.md](docs/DESIGN.md)
 - **See examples:** `examples/` directory
 - **Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md)

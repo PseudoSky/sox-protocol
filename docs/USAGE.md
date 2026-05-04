@@ -2,7 +2,9 @@
 
 This document is the consuming-end guide: how to integrate SOX Protocol into a Claude Code project, the configuration reference, worked use cases, anti-patterns, and troubleshooting.
 
-> **v0 status note:** this document describes the *intended* usage shape. The reference implementation is pre-implementation as of v0. Anything labelled "example" reflects the design contract; runnable code lands at [Milestone 5/6](./IMPLEMENTATION-PLAN.md#milestone-5--claude-code-adapter).
+> **Looking for a hands-on walkthrough?** See [INSTALL.md](./INSTALL.md) for a copy-paste install + verify guide based on a real run, and [development/sox-chat.md](./development/sox-chat.md) for the interactive TUI.
+
+The Python reference implementation under `packages/python/` is SOX v1.0-compliant (33/33 conformance fixtures pass on both stdio and HTTP transports). `packages/typescript/` and `packages/rust/` remain placeholder directories — see [the README](../README.md) for the conformance bar.
 
 ---
 
@@ -10,14 +12,14 @@ This document is the consuming-end guide: how to integrate SOX Protocol into a C
 
 ### 1.1 Install
 
-The v0 reference implementation is `packages/python/` in the SOX monorepo, published to PyPI as `sox-protocol`. Other-language packages (`packages/typescript/`, `packages/rust/`) are placeholder directories at v0 — see [the README](./README.md#packages) for the conformance bar.
-
 From your project root:
 
 ```bash
-pip install sox-protocol
+pip install sox-protocol sox-plugin-schema-strict
 python -m sox_protocol.adapters.runtimes.claude_code install
 ```
+
+> **Gotcha:** install `sox-plugin-schema-strict` **non-editable** (no `-e`). The plugin's `sox-plugin.yaml` manifest is not exposed via editable installs, and the MCP server fails its plugin-discovery handshake without it. If `claude mcp list` reports `✗ Failed to connect`, this is almost always the cause.
 
 This:
 
