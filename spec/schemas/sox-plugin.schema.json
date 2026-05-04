@@ -1,8 +1,8 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sox-protocol.dev/spec/schemas/sox-plugin.schema.json",
   "title": "SOX Plugin Manifest",
-  "description": "JSON Schema (draft-07) for the sox-plugin.yaml language-neutral plugin manifest. Adopted from the Backstage catalog-info envelope (apiVersion/kind/metadata/spec). Authoritative reference: docs/adr/0004-plugin-architecture.md. Entry-point hints are intentionally absent from this document — they live in language-specific package metadata (Python pyproject.toml [project.entry-points.'sox_protocol.plugins'], Node package.json#sox). These two layers are deliberately decoupled so the manifest remains language-neutral.",
+  "description": "JSON Schema (2020-12) for the sox-plugin.yaml language-neutral plugin manifest. Adopted from the Backstage catalog-info envelope (apiVersion/kind/metadata/spec). Authoritative reference: docs/adr/0004-plugin-architecture.md. Entry-point hints are intentionally absent from this document — they live in language-specific package metadata (Python pyproject.toml [project.entry-points.'sox_protocol.plugins'], Node package.json#sox). These two layers are deliberately decoupled so the manifest remains language-neutral.",
   "type": "object",
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "additionalProperties": false,
