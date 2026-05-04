@@ -7,7 +7,7 @@ name = "sox-protocol"
 version = "0.1.0"
 description = "SOX Protocol — reference Python implementation of the inter-agent channels protocol."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = [
     "aiosqlite>=0.20.0",

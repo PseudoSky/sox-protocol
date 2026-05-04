@@ -45,7 +45,7 @@ For each of the four targets:
   - Workflow: `python-publish.yml`
   - Environment: `pypi`
 
-- https://test.pypi.org/manage/account/publishing/ → same shape, environment `testpypi`.
+- https://test.pypi.org/manage/account/publishing/ → same shape, environment `testpypi`. **Optional** — only needed if you want TestPyPI dry-runs. The default tag-push release path skips TestPyPI.
 
 PyPI mints a short-lived OIDC token at publish time; no tokens stored in GitHub.
 
@@ -55,10 +55,12 @@ GitHub repo → Settings → Environments → New environment:
 
 | Environment | Required reviewers | Wait timer | Purpose |
 |---|---|---|---|
-| `testpypi` | none | none | Auto-publishes on tag push or `target=testpypi` dispatch |
-| `pypi` | **at least one maintainer** | none | Promotes only after manual approval — gates real PyPI publish |
+| `testpypi` | none | none | Optional — only used by `workflow_dispatch` with `target=testpypi`. Skip if you're not running TestPyPI dry-runs. |
+| `pypi` | **at least one maintainer** | none | Tag pushes pause here for manual approval before publishing to real PyPI |
 
 The environment names must match the `environment.name` values in the workflow.
+
+> **TestPyPI is optional.** Tag pushes go straight to PyPI (gated on the `pypi` Environment). TestPyPI is only visited when you explicitly trigger `workflow_dispatch` with `target=testpypi`. Reasoning: TestPyPI's trusted-publisher setup is decoupled from PyPI's, and TestPyPI outages or unconfigured publishers must not block real releases. If you do want TestPyPI dry-runs, configure the `testpypi` Environment + the trusted publisher on https://test.pypi.org separately.
 
 ---
 
@@ -131,33 +133,23 @@ The environment names must match the `environment.name` values in the workflow.
 
    The workflow:
    - Builds both wheels + sdists.
-   - Verifies critical data files are bundled.
+   - Verifies critical data files are bundled (spec/discipline/ in core, sox-plugin.yaml in plugin).
    - Runs `twine check`.
    - Verifies the tag's version matches `packages/python/pyproject.toml` (fails the build if they drift).
-   - Publishes to TestPyPI.
    - **Pauses at the `pypi` environment for manual approval.**
 
-9. **Smoke-test from TestPyPI** in a fresh venv:
-   ```bash
-   T=$(mktemp -d); python3 -m venv $T/v
-   $T/v/bin/pip install \
-     --index-url https://test.pypi.org/simple/ \
-     --extra-index-url https://pypi.org/simple/ \
-     "sox-protocol==X.Y.Z" "sox-plugin-schema-strict==A.B.C"
-   $T/v/bin/sox-protocol --help
-   ```
+   TestPyPI is NOT visited on tag push. Run a TestPyPI dry-run separately via `workflow_dispatch` if you want one.
 
-   The `--extra-index-url` is needed because TestPyPI doesn't mirror runtime dependencies (aiosqlite, fastmcp, etc.) — pip pulls those from real PyPI.
+9. **Approve the `pypi` environment** in the GitHub Actions run UI. The workflow promotes both packages to real PyPI.
 
-10. **Approve the `pypi` environment** in the GitHub Actions run UI. The workflow promotes both packages to real PyPI.
-
-11. **Verify the public install:**
+10. **Verify the public install:**
     ```bash
     T=$(mktemp -d); python3 -m venv $T/v
     $T/v/bin/pip install "sox-protocol==X.Y.Z" "sox-plugin-schema-strict==A.B.C"
+    $T/v/bin/sox-protocol --help
     ```
 
-12. **Create a GitHub release** at `python-vX.Y.Z`, paste the CHANGELOG section, mark it as the latest release.
+11. **Create a GitHub release** at `python-vX.Y.Z`, paste the CHANGELOG section, mark it as the latest release.
 
 ---
 
@@ -165,8 +157,8 @@ The environment names must match the `environment.name` values in the workflow.
 
 The workflow accepts `workflow_dispatch` with a `target` input — useful when you want to:
 
-- **Dry-run TestPyPI without tagging:** `target=testpypi`, builds + publishes to TestPyPI from whatever HEAD is on the chosen branch. No tag created. Catches version drift, packaging bugs, etc., before committing to a tag.
-- **Re-promote after fixing TestPyPI metadata:** `target=pypi`, skips TestPyPI and goes straight to PyPI promotion. Use only if TestPyPI succeeded earlier on this version.
+- **Dry-run on TestPyPI:** `target=testpypi`, builds + publishes to TestPyPI from whatever HEAD is on the chosen branch. No tag created. Catches version drift, packaging bugs, etc. **Requires** the `testpypi` Environment + a TestPyPI trusted publisher to be configured for both packages — skip if you haven't set them up.
+- **Publish to PyPI without tagging:** `target=pypi`, builds + publishes directly to PyPI. Functionally identical to a tag push, minus the version-tag verification. Useful for hotfix releases when re-tagging is undesirable.
 
 Trigger from the GitHub Actions UI (Actions → Publish to PyPI → Run workflow → pick target).
 
@@ -179,7 +171,8 @@ Trigger from the GitHub Actions UI (Actions → Publish to PyPI → Run workflow
 | Build fails the "wheel bundles spec/discipline/" verify step | The hatch `force-include` config in `packages/python/pyproject.toml` is wrong or got reverted. Fix and rebuild. |
 | Build fails the "plugin wheel bundles sox-plugin.yaml" verify step | The plugin's `[tool.setuptools.package-data]` is missing or wrong. Fix and rebuild. |
 | `twine check` fails with `RST` or `Markdown` parse error | Usually a malformed `readme = ...` reference, or a code fence without a language. Fix the `README.md` in the package root. |
-| TestPyPI publish succeeds but real PyPI publish fails on "version already exists" | The version is already on PyPI from a prior release attempt. Bump the patch version and re-tag. |
+| Real PyPI publish fails with "version already exists" | The version is already on PyPI from a prior release. Bump the patch version, re-commit, re-tag. |
+| `target=testpypi` dispatch fails for one package only | TestPyPI's trusted publisher likely isn't configured for that package yet (or is blocked by an outage). TestPyPI is optional — proceed with the real PyPI publish via tag push or `target=pypi` dispatch; circle back to TestPyPI later. |
 | Trusted publishing rejects the OIDC token | Check the GitHub Environment name matches the publisher config on PyPI exactly (`testpypi` vs `pypi`, case-sensitive). |
 | `pip install sox-protocol` works but `sox-protocol install` crashes with "Cannot locate spec/discipline/discipline.md" | The wheel did not bundle the spec data. The `[tool.hatch.build.targets.wheel.force-include]` block is the source of truth — if it's missing or the source path is wrong, the wheel ships without `sox_protocol/spec/`. Fix and re-release. |
 
