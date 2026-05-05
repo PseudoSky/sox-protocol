@@ -149,8 +149,94 @@ def _substitute_placeholders(text: str) -> str:
     return text
 
 
-def render_skill_md() -> str:
+def _render_activation_section(
+    auto_subscribe: bool,
+    default_channels: list[str] | None,
+) -> str:
+    """Render the optional auto-subscribe section appended to SKILL.md.
+
+    When ``auto_subscribe`` is False, returns an empty string — the skill
+    is purely descriptive (loads the discipline + tool reference, doesn't
+    take action on load).
+
+    When ``auto_subscribe`` is True, returns a Markdown block that
+    instructs the LLM to subscribe + drain on first use.  Includes any
+    extra channels in *default_channels* alongside the agent's personal
+    inbox (``agent/<your-id>``).
+
+    Args:
+        auto_subscribe: Toggles the activation block on/off.
+        default_channels: Optional list of channel patterns to subscribe to
+            in addition to the personal inbox.  Empty / None ⇒ inbox only.
+
+    Returns:
+        Empty string or a Markdown block.  No leading newline (the template
+        ends with one already).
+    """
+    if not auto_subscribe:
+        return ""
+
+    extras = list(default_channels or [])
+    inbox_line = (
+        '   `mcp__sox__channels__subscribe(channels=["agent/<your-agent-id>"])`'
+    )
+    if extras:
+        # Render channels list as a JSON-style array for the example call.
+        all_channels = ['"agent/<your-agent-id>"'] + [f'"{c}"' for c in extras]
+        inbox_line = (
+            "   `mcp__sox__channels__subscribe(channels=["
+            + ", ".join(all_channels)
+            + "])`"
+        )
+
+    return f"""
+
+## Activation (auto-subscribe)
+
+This skill was installed with **auto-subscribe** enabled.  When this skill is
+loaded into your context, your first actions in this session MUST be:
+
+1. **Subscribe to your inbox** so other agents can DM you and reach you on
+   shared channels.  Call:
+
+{inbox_line}
+
+   Replace ``<your-agent-id>`` with the value of your ``SOX_AGENT_ID`` env
+   var (or your subagent name from the parent orchestrator).  The MCP server
+   already knows your identity — pass it explicitly for clarity.
+
+2. **Drain any pending messages** once before continuing with your task:
+
+   `mcp__sox__channels__recv(channels=null, max_messages=50)`
+
+   ``channels=null`` drains every channel you're subscribed to; iterate
+   through the messages, ack/nack as appropriate, then proceed.
+
+3. **Heartbeat once** so other agents see you as online:
+
+   `mcp__sox__channels__heartbeat(status="online")`
+
+After activation, follow the polling-cadence rules above for ongoing
+participation.  Do NOT auto-subscribe to other channels without an
+explicit instruction in your task — the auto-subscribe is one-shot, not
+a license to listen on every channel forever.
+"""
+
+
+def render_skill_md(
+    *,
+    auto_subscribe: bool = False,
+    default_channels: list[str] | None = None,
+) -> str:
     """Render the full SKILL.md content ready for writing to disk.
+
+    Args:
+        auto_subscribe: When True, append an activation block telling the
+            LLM to subscribe + drain on first skill load.  Default False
+            keeps the skill purely descriptive (the historical behavior).
+        default_channels: Extra channels to include in the auto-subscribe
+            instruction alongside the personal inbox.  Ignored when
+            ``auto_subscribe`` is False.
 
     Returns:
         The rendered Markdown string with frontmatter and substituted body.
@@ -159,6 +245,8 @@ def render_skill_md() -> str:
     discipline_body = _bundled_discipline()
     substituted_body = _substitute_placeholders(discipline_body)
     skill_md = template.replace("{{discipline_body}}", substituted_body)
+    activation = _render_activation_section(auto_subscribe, default_channels)
+    skill_md = skill_md.replace("{{activation_section}}", activation)
     return skill_md
 
 
@@ -167,12 +255,31 @@ def render_skill_md() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _write_skill(project_dir: Path, *, dry_run: bool = False) -> bool:
-    """Write SKILL.md. Returns True if the file was written (new or changed)."""
+def _write_skill(
+    project_dir: Path,
+    *,
+    dry_run: bool = False,
+    auto_subscribe: bool = False,
+    default_channels: list[str] | None = None,
+) -> bool:
+    """Write SKILL.md. Returns True if the file was written (new or changed).
+
+    Args:
+        project_dir: Project root.
+        dry_run: When True, compute idempotency-equality without writing.
+        auto_subscribe: When True, the rendered SKILL.md includes an
+            activation block that tells the LLM to subscribe + drain on
+            first load.  See ``_render_activation_section``.
+        default_channels: Extra channels to include in the activation
+            block alongside the agent's personal inbox.
+    """
     skill_dir = _skills_dir(project_dir)
     skill_file = skill_dir / "SKILL.md"
 
-    content = render_skill_md()
+    content = render_skill_md(
+        auto_subscribe=auto_subscribe,
+        default_channels=default_channels,
+    )
 
     if skill_file.exists() and skill_file.read_text(encoding="utf-8") == content:
         return False  # already up-to-date
@@ -372,7 +479,13 @@ def _insert_bootstrap(project_dir: Path, *, dry_run: bool = False) -> list[Path]
 # ---------------------------------------------------------------------------
 
 
-def install(project_dir: Path | None = None, *, verbose: bool = True) -> None:
+def install(
+    project_dir: Path | None = None,
+    *,
+    verbose: bool = True,
+    auto_subscribe: bool = False,
+    default_channels: list[str] | None = None,
+) -> None:
     """Install the SOX Claude Code adapter into *project_dir*.
 
     Idempotent: safe to call multiple times.  Only writes files when content
@@ -382,6 +495,13 @@ def install(project_dir: Path | None = None, *, verbose: bool = True) -> None:
         project_dir: Root of the target Claude Code project.  Defaults to
             ``Path.cwd()``.
         verbose: When ``True``, print a summary of actions taken to stdout.
+        auto_subscribe: When ``True``, append an "Activation" section to
+            ``SKILL.md`` that tells the LLM to subscribe to its personal
+            inbox + drain pending messages on first skill load.  Default
+            ``False`` keeps the historical purely-descriptive skill.
+        default_channels: Extra channels to include in the auto-subscribe
+            instruction (in addition to ``agent/<your-id>``).  Ignored when
+            ``auto_subscribe`` is False.
     """
     if project_dir is None:
         project_dir = Path.cwd()
@@ -390,7 +510,11 @@ def install(project_dir: Path | None = None, *, verbose: bool = True) -> None:
     actions: list[str] = []
 
     # 1. Skill
-    if _write_skill(project_dir):
+    if _write_skill(
+        project_dir,
+        auto_subscribe=auto_subscribe,
+        default_channels=default_channels,
+    ):
         actions.append(f"  Wrote SKILL.md → {_skills_dir(project_dir) / 'SKILL.md'}")
     else:
         actions.append("  SKILL.md already up-to-date")
@@ -454,11 +578,31 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Suppress output.",
     )
+    install_parser.add_argument(
+        "--auto-subscribe",
+        action="store_true",
+        help="Append an auto-subscribe Activation block to SKILL.md.",
+    )
+    install_parser.add_argument(
+        "--channel",
+        action="append",
+        dest="default_channels",
+        metavar="CHANNEL",
+        help=(
+            "Extra channel for the auto-subscribe block. Repeat for "
+            "multiple channels. Ignored without --auto-subscribe."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
     if args.command == "install":
-        install(project_dir=args.project_dir, verbose=not args.quiet)
+        install(
+            project_dir=args.project_dir,
+            verbose=not args.quiet,
+            auto_subscribe=getattr(args, "auto_subscribe", False),
+            default_channels=getattr(args, "default_channels", None),
+        )
     else:
         parser.print_help()
         sys.exit(1)

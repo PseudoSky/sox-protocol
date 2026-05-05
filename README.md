@@ -88,6 +88,17 @@ sox-protocol install
 
 This initialises the backing store (SQLite in `.sox/messages.db`), registers the MCP server, installs a skill with the full discipline, and sets up cadence hooks. Equivalent long-form: `python -m sox_protocol.adapters.runtimes.claude_code install`.
 
+#### Optional: auto-subscribe on skill load
+
+By default the installed `SKILL.md` is descriptive — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make `/skill inter-agent-channels` *active*:
+
+```bash
+sox-protocol install --auto-subscribe \
+  --channel team/eng --channel broadcast/announcements
+```
+
+Now whenever an agent loads the skill, it immediately subscribes to its personal inbox (`agent/<your-id>`) plus the channels you passed, drains pending messages once, and emits a single heartbeat — instead of needing a follow-up "subscribe to X" prompt. See [docs/INSTALL.md § Auto-subscribe](docs/INSTALL.md#auto-subscribe-on-skill-load-optional).
+
 > Install the plugin **non-editable** (no `-e`) — its `sox-plugin.yaml` manifest isn't exposed via editable installs and the MCP server fails to start without it.
 
 ### Verify

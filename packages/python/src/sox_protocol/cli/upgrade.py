@@ -302,6 +302,25 @@ def add_upgrade_subcommand(
             "No pip changes, no file writes, no migration."
         ),
     )
+    parser.add_argument(
+        "--auto-subscribe",
+        action="store_true",
+        help=(
+            "Re-render SKILL.md with the auto-subscribe activation block. "
+            "See `sox-protocol install --auto-subscribe`.  Default "
+            "preserves whatever shape the existing SKILL.md has."
+        ),
+    )
+    parser.add_argument(
+        "--channel",
+        action="append",
+        dest="default_channels",
+        metavar="CHANNEL",
+        help=(
+            "Extra channel for the auto-subscribe block.  Repeat for "
+            "multiple channels.  Ignored without --auto-subscribe."
+        ),
+    )
     parser.set_defaults(func=upgrade_command)
 
 
@@ -375,7 +394,12 @@ def upgrade_command(args: argparse.Namespace) -> int:
     # ── Step 2/3: file refresh via the existing installer (idempotent) ─────
     if not quiet:
         print("Step 2/3: refreshing installed files…")
-    install(project_dir=project_dir, verbose=not quiet)
+    install(
+        project_dir=project_dir,
+        verbose=not quiet,
+        auto_subscribe=getattr(args, "auto_subscribe", False),
+        default_channels=getattr(args, "default_channels", None),
+    )
     if not quiet:
         print()
 

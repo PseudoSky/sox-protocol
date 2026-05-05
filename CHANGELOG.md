@@ -170,6 +170,36 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.7] — 2026-05-05 — auto-subscribe skill activation + PyPI page fix
+
+### Added
+
+- **`sox-protocol install --auto-subscribe [--channel CHANNEL...]`** — opt-in flag that appends an "Activation (auto-subscribe)" section to the installed `SKILL.md`. When the skill is loaded by an agent (via `/skill inter-agent-channels` or auto-discovery), the activation block instructs the LLM to:
+  1. Subscribe to its personal inbox (`agent/<your-agent-id>`) plus any channels passed via `--channel` (repeatable).
+  2. Drain pending messages once with `mcp__sox__channels__recv`.
+  3. Emit a single heartbeat so other agents see it as online.
+
+  Without `--auto-subscribe`, the skill is purely descriptive (the historical behavior — loads the discipline + tool reference, no auto-action). The two modes can be toggled freely on subsequent `install` / `upgrade` runs; the SKILL.md is rewritten to match the latest invocation.
+
+  Surfaced through three entry points:
+  - `sox-protocol install --auto-subscribe --channel team/eng`
+  - `sox-protocol upgrade --auto-subscribe --channel team/eng` (passes through to the install step)
+  - `python -m sox_protocol.adapters.runtimes.claude_code install --auto-subscribe --channel team/eng` (legacy long form)
+
+- 14 unit tests in `tests/adapters/runtimes/test_skill_activation.py` covering: `_render_activation_section` pure-function output (off / on / with-channels / steps included); `render_skill_md` template wiring; `install()` end-to-end (default plain, auto-subscribe writes Activation, with channels, idempotent re-runs, toggling between modes rewrites the file); CLI dispatch through `install_command`.
+
+### Fixed
+
+- **PyPI project page was nearly empty.** `packages/python/README.md` (the file PyPI renders as the project description) was a 196-character placeholder pointing at relative `/docs/` and `/spec/` paths that don't resolve on the PyPI page. Replaced with a 7,181-character standalone README covering: badges, install + verify, the full CLI surface, two practical recipes (chat + claude companion pattern, `--auto-subscribe` skill activation), upgrade-in-place demo, status & conformance table, license + patent-grant note, and absolute GitHub links to the design docs. `twine check` PASSED on the rebuilt 0.1.7 wheel.
+
+### Documentation
+
+- `README.md` (root) — Quickstart now has an "Optional: auto-subscribe on skill load" subsection with a `--channel team/eng` example.
+- `docs/INSTALL.md` §2 — new "Auto-subscribe on skill load (optional)" subsection with flag table.
+- `docs/USAGE.md` §1.1 — new "Optional: auto-subscribe activation" subsection covering the 3-step bootstrap (subscribe → drain → heartbeat) and toggle-ability.
+
+---
+
 ## [0.1.6] — 2026-05-04 — `sox-protocol upgrade`: auto-bump pip + refresh + migrate
 
 ### Added

@@ -67,6 +67,31 @@ This writes (or updates):
 
 It also adds the bootstrap line to any `.claude/agents/*.md` files it finds — so existing subagents pick up channel awareness without manual edits.
 
+### Auto-subscribe on skill load (optional)
+
+By default, `SKILL.md` is **descriptive** — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make the skill *active*:
+
+```bash
+sox-protocol install --auto-subscribe \
+  --channel team/eng \
+  --channel broadcast/announcements
+```
+
+The installed `SKILL.md` then ends with an **Activation (auto-subscribe)** section that instructs the LLM to, on first skill load:
+
+1. Subscribe to its personal inbox (`agent/<your-agent-id>`) plus the channels you passed.
+2. Drain pending messages once.
+3. Emit a single `online` heartbeat.
+
+After that, the agent participates per the polling-cadence rules in the rest of the skill.
+
+This turns `/skill inter-agent-channels` into a one-step "join the team" command, instead of requiring a follow-up "subscribe to X" prompt. The two modes can be toggled freely — re-run with or without `--auto-subscribe` and the SKILL.md is rewritten to match.
+
+| Flag | Purpose |
+|---|---|
+| `--auto-subscribe` | Append the Activation section (off by default) |
+| `--channel CH` | Extra channel for the auto-subscribe call (repeat for multiple) |
+
 Verify the install worked:
 
 ```bash

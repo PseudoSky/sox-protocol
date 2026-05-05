@@ -29,6 +29,26 @@ This:
 - Updates `.claude/settings.json` with the MCP server registration and hook bindings.
 - Initialises the SQLite backing store at `.sox/messages.db`.
 
+#### Optional: auto-subscribe activation
+
+By default `SKILL.md` is **descriptive** — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make the skill *active*:
+
+```bash
+sox-protocol install --auto-subscribe \
+  --channel team/eng \
+  --channel broadcast/announcements
+```
+
+The installed `SKILL.md` then ends with an **Activation (auto-subscribe)** section that instructs the LLM to, on first skill load:
+
+1. Subscribe to its personal inbox (`agent/<your-agent-id>`) plus any channels you passed via `--channel`.
+2. Drain pending messages once with `mcp__sox__channels__recv`.
+3. Emit a single `online` heartbeat.
+
+After activation, the agent participates per the polling-cadence rules in §1.4 below. This turns `/skill inter-agent-channels` into a one-step "join the team" command — no follow-up "subscribe to X" prompt needed.
+
+The two modes (descriptive / auto-subscribe) toggle freely: re-run `sox-protocol install` (or `sox-protocol upgrade`) with or without the flag and the SKILL.md is rewritten to match.
+
 ### 1.2 Configure
 
 The default configuration is sensible for single-machine multi-subagent use. To override, set environment variables (or add to `.env`):

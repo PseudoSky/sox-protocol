@@ -46,6 +46,28 @@ def add_install_subcommand(
         action="store_true",
         help="Suppress the per-file write log.",
     )
+    parser.add_argument(
+        "--auto-subscribe",
+        action="store_true",
+        help=(
+            "Append an Activation section to the installed SKILL.md that "
+            "tells the LLM to subscribe to its personal inbox "
+            "(`agent/<your-id>`), drain pending messages, and emit one "
+            "heartbeat on first skill load.  Without this flag the skill "
+            "is purely descriptive (no auto-action)."
+        ),
+    )
+    parser.add_argument(
+        "--channel",
+        action="append",
+        dest="default_channels",
+        metavar="CHANNEL",
+        help=(
+            "Extra channel pattern to include in the auto-subscribe "
+            "instruction (in addition to `agent/<your-id>`).  Repeat for "
+            "multiple channels.  Ignored without --auto-subscribe."
+        ),
+    )
     parser.set_defaults(func=install_command)
 
 
@@ -53,10 +75,16 @@ def install_command(args: argparse.Namespace) -> int:
     """Execute the ``install`` subcommand.
 
     Args:
-        args: Parsed namespace with ``project_dir`` and ``quiet``.
+        args: Parsed namespace with ``project_dir``, ``quiet``,
+            ``auto_subscribe``, ``default_channels``.
 
     Returns:
         Exit code (0 on success).
     """
-    install(project_dir=args.project_dir, verbose=not args.quiet)
+    install(
+        project_dir=args.project_dir,
+        verbose=not args.quiet,
+        auto_subscribe=getattr(args, "auto_subscribe", False),
+        default_channels=getattr(args, "default_channels", None),
+    )
     return 0
