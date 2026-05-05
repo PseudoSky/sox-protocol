@@ -8,7 +8,7 @@ This fixture is the skeleton project used by the SOX Protocol live end-to-end te
 The test proves the full install-to-messaging path works with real Claude agents:
 
 1. `pip install -e packages/python` + `pip install plugins/sox-plugin-schema-strict` into a fresh tmp venv.
-2. `python -m sox_protocol.adapters.runtimes.claude_code install --project-dir <tmp_copy>` against a copy of this directory.
+2. `sox-protocol install --project-dir <tmp_copy>` against a copy of this directory (long form: `python -m sox_protocol.adapters.runtimes.claude_code install`).
 3. Spawn `claude --print` as alice (from the tmp project dir), running `prompts/alice_prompt.txt`.
 4. Alice calls `mcp__sox__group__create`, `mcp__sox__group__invite`, `mcp__sox__channels__send`.
 5. Spawn `claude --print` as bob, running `prompts/bob_prompt.txt`.

@@ -14,7 +14,8 @@ This project skeleton exists to:
 The phase 03 test driver runs the SOX installer against a copy of this directory:
 
 ```
-python -m sox_protocol.adapters.runtimes.claude_code install --project-dir <tmp_copy>
+sox-protocol install --project-dir <tmp_copy>
+# (legacy long form: python -m sox_protocol.adapters.runtimes.claude_code install)
 ```
 
 That install step writes:

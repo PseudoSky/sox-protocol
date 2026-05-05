@@ -82,7 +82,7 @@ This keeps the discipline text portable across MCP namespacings and across non-M
 A SOX-conformant discipline document passes the linter:
 
 ```bash
-python -m sox_protocol.cli lint-discipline core/discipline/discipline.md
+sox-protocol lint-discipline core/discipline/discipline.md
 ```
 
 The linter checks: required headings present, in order, with no level-1 collisions, and no concrete tool names appearing outside placeholders.

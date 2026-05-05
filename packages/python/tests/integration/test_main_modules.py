@@ -45,12 +45,6 @@ _CLI_MAIN = (
     / "src" / "sox_protocol" / "cli" / "__main__.py"
 )
 
-_CLI_PY = (
-    Path(__file__).resolve().parents[2]
-    / "src" / "sox_protocol" / "cli.py"
-)
-
-
 def test_enforcer_main_module_lines_covered() -> None:
     """Covers enforcer/__main__.py lines 4-6 by executing them with main() mocked."""
     with patch("sox_protocol.enforcer.cli.main") as mock_main:
@@ -73,11 +67,3 @@ def test_cli_main_module_line_45_covered() -> None:
     assert exc_info.value.code == 0
 
 
-def test_cli_py_line_356_covered() -> None:
-    """Covers cli.py line 356 (if __name__ == '__main__': main()) by executing it."""
-    # When executed as __main__, cli.py calls main() which calls sys.exit().
-    # We pass --help to get a clean exit.
-    with patch.object(sys, "argv", ["sox", "--help"]), pytest.raises(SystemExit) as exc_info:
-        _exec_main_module(str(_CLI_PY))
-    # --help exits 0
-    assert exc_info.value.code == 0

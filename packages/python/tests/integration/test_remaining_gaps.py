@@ -2,16 +2,14 @@
 """Tests covering final remaining coverage gaps:
 - server.py lines 181, 268, 270, 319
 - install.py lines 123, 217, 376, 457
-- cli.py line 102
+- cli/verify.py relative-sqlite-path branch (migrated from cli.py in 0.1.5)
 - enforcer/cli.py line 108
 - routes.py many lines
 """
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -140,34 +138,22 @@ def test_install_if_name_main_block() -> None:
 
 
 # ===========================================================================
-# cli.py line 102 — relative sqlite path joined with project_dir
-# (already in test_cli_gaps.py but this adds another variant)
+# cli/verify.py — relative sqlite path joined with project_dir
+# (post-0.1.5: migrated from cli.py; importlib trickery removed)
 # ===========================================================================
 
 
 def test_cli_check_backing_store_relative_sqlite_path() -> None:
-    """Line 102: db_path.is_absolute() is False → joined with project_dir."""
-    _CLI_PY_PATH = (
-        Path(__file__).resolve().parents[2]
-        / "src" / "sox_protocol" / "cli.py"
-    )
-    _MODULE_NAME = "sox_protocol.cli_verify2"
-    if _MODULE_NAME not in sys.modules:
-        _spec = importlib.util.spec_from_file_location(_MODULE_NAME, _CLI_PY_PATH)
-        assert _spec is not None
-        _mod = importlib.util.module_from_spec(_spec)
-        sys.modules[_MODULE_NAME] = _mod
-        assert _spec.loader is not None
-        _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-    else:
-        _mod = sys.modules[_MODULE_NAME]
-
+    """Relative sqlite path branch: db_path.is_absolute() is False → joined with project_dir."""
     import tempfile
+
+    from sox_protocol.cli.verify import _check_backing_store
+
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
-        # Use a relative path (no leading slash after sqlite://)
+        # Relative path (no leading slash after sqlite://)
         with patch.dict(os.environ, {"SOX_BACKING_STORE": "sqlite://relative/test.db"}):
-            result = _mod._check_backing_store(project_dir)  # type: ignore[attr-defined]
+            result = _check_backing_store(project_dir)
         assert result is True
 
 

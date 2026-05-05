@@ -52,7 +52,8 @@ python -c "import sox_protocol, sox_plugin_schema_strict; print('ok')"
 ## 2. Wire SOX into your Claude Code project
 
 ```bash
-python -m sox_protocol.adapters.runtimes.claude_code install --project-dir .
+sox-protocol install --project-dir .
+# or, equivalent long-form: python -m sox_protocol.adapters.runtimes.claude_code install --project-dir .
 ```
 
 This writes (or updates):

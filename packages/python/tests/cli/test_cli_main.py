@@ -1,14 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for sox_protocol/cli.py, cli/__main__.py, and cli/serve.py.
+"""Tests for the sox-protocol CLI: cli/__main__.py + the subcommand modules.
 
-Note: sox_protocol has both a cli.py module AND a cli/ package.
-Python's import system prefers the package, so cli.py must be loaded
-directly via importlib.
+History note: prior to 0.1.5 the verify/install/lint-discipline subcommands
+lived in a standalone ``sox_protocol/cli.py`` file that was shadowed by the
+``sox_protocol/cli/`` package (Python's import resolution prefers the
+package), so the documented ``python -m sox_protocol.cli verify`` invocation
+silently routed to ``cli/__main__.py`` — which didn't have those commands —
+while ``cli.py`` itself was reachable only via importlib trickery in this
+test file. 0.1.5 migrated them into ``cli/verify.py`` and
+``cli/lint_discipline.py``, deleted ``cli.py``, and removed the importlib
+workaround.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sys
@@ -17,35 +22,13 @@ from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Load sox_protocol/cli.py (the verify/install/lint-discipline CLI) directly,
-# since `import sox_protocol.cli` resolves to the cli/ *package* instead.
-# We register it as "sox_protocol.cli_verify" in sys.modules so that
-# coverage.py tracks it under the sox_protocol namespace.
-# ---------------------------------------------------------------------------
-_CLI_PY_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "src" / "sox_protocol" / "cli.py"
-)
-_MODULE_NAME = "sox_protocol.cli_verify"
-if _MODULE_NAME not in sys.modules:
-    _spec = importlib.util.spec_from_file_location(_MODULE_NAME, _CLI_PY_PATH)
-    assert _spec is not None
-    sox_cli_module = importlib.util.module_from_spec(_spec)
-    sys.modules[_MODULE_NAME] = sox_cli_module
-    assert _spec.loader is not None
-    _spec.loader.exec_module(sox_cli_module)  # type: ignore[union-attr]
-else:
-    sox_cli_module = sys.modules[_MODULE_NAME]
-
-# Alias for shorter references
-sox_cli = sox_cli_module
-
 from sox_protocol.cli import __main__ as cli_main_module
+from sox_protocol.cli import lint_discipline as sox_lint_module
 from sox_protocol.cli import serve as cli_serve
+from sox_protocol.cli import verify as sox_cli  # alias preserves test names from pre-0.1.5
 
 # ===========================================================================
-# sox_protocol/cli.py — helper functions
+# sox_protocol/cli/verify.py — printer helpers
 # ===========================================================================
 
 
@@ -394,91 +377,113 @@ def test_verify_none_project_dir_uses_cwd(tmp_path: Path) -> None:
 
 
 def _make_valid_discipline(path: Path) -> None:
-    """Write a valid discipline file to *path*."""
-    content = "\n".join(sox_cli._REQUIRED_HEADINGS) + "\n"
+    """Write a valid discipline file to *path*.
+
+    Required-headings list lives in ``cli/lint_discipline.py`` post-0.1.5.
+    """
+    content = "\n".join(sox_lint_module._REQUIRED_HEADINGS) + "\n"
     path.write_text(content, encoding="utf-8")
 
 
 def test_lint_discipline_missing_file(tmp_path: Path) -> None:
-    rc = sox_cli.lint_discipline(tmp_path / "nonexistent.md")
+    rc = sox_lint_module.lint_discipline(tmp_path / "nonexistent.md")
     assert rc == 1
 
 
 def test_lint_discipline_valid_file_passes(tmp_path: Path) -> None:
     f = tmp_path / "discipline.md"
     _make_valid_discipline(f)
-    rc = sox_cli.lint_discipline(f)
+    rc = sox_lint_module.lint_discipline(f)
     assert rc == 0
 
 
 def test_lint_discipline_missing_heading_fails(tmp_path: Path) -> None:
     f = tmp_path / "discipline.md"
     # Write only first heading
-    f.write_text(sox_cli._REQUIRED_HEADINGS[0], encoding="utf-8")
-    rc = sox_cli.lint_discipline(f)
+    f.write_text(sox_lint_module._REQUIRED_HEADINGS[0], encoding="utf-8")
+    rc = sox_lint_module.lint_discipline(f)
     assert rc == 1
 
 
 def test_lint_discipline_out_of_order_headings_fails(tmp_path: Path) -> None:
     f = tmp_path / "discipline.md"
     # Reverse the required headings
-    content = "\n".join(reversed(sox_cli._REQUIRED_HEADINGS))
+    content = "\n".join(reversed(sox_lint_module._REQUIRED_HEADINGS))
     f.write_text(content, encoding="utf-8")
-    rc = sox_cli.lint_discipline(f)
+    rc = sox_lint_module.lint_discipline(f)
     assert rc == 1
 
 
 def test_lint_discipline_concrete_tool_name_fails(tmp_path: Path) -> None:
     f = tmp_path / "discipline.md"
-    valid_content = "\n".join(sox_cli._REQUIRED_HEADINGS) + "\n"
+    valid_content = "\n".join(sox_lint_module._REQUIRED_HEADINGS) + "\n"
     # Add a concrete tool name
     valid_content += "mcp__sox__channels__send\n"
     f.write_text(valid_content, encoding="utf-8")
-    rc = sox_cli.lint_discipline(f)
+    rc = sox_lint_module.lint_discipline(f)
     assert rc == 1
 
 
 # ===========================================================================
-# main() — argument dispatch in cli.py
+# Subcommand argument dispatch via cli/__main__.main(...).
+#
+# These cover the verify / install / lint-discipline subcommands going
+# through the unified entry point.  Pre-0.1.5 they routed through a
+# now-deleted cli.py main(); post-0.1.5 they're all wired into
+# cli/__main__.py and return ints (no SystemExit raised inside main()).
 # ===========================================================================
 
 
-def test_cli_py_main_no_command_exits(capsys) -> None:
-    """cli.py main() with no subcommand exits 1."""
-    with pytest.raises(SystemExit) as exc_info:
-        sox_cli.main([])
-    assert exc_info.value.code == 1
-
-
-def test_cli_py_main_verify_runs(tmp_path: Path) -> None:
-    """cli.py main() with verify exits with valid code."""
+def test_main_verify_runs(tmp_path: Path) -> None:
+    """sox-protocol main() with 'verify' returns int (0 on full pass, 1 on any check fail)."""
     env = {k: v for k, v in os.environ.items() if k != "SOX_BACKING_STORE"}
-    with patch.dict(os.environ, env, clear=True), pytest.raises(SystemExit) as exc_info:
-        sox_cli.main(["verify", "--project-dir", str(tmp_path)])
-    assert exc_info.value.code in (0, 1)
+    with patch.dict(os.environ, env, clear=True):
+        rc = cli_main_module.main(["verify", "--project-dir", str(tmp_path)])
+    assert rc in (0, 1)
 
 
-def test_cli_py_main_lint_discipline_missing_file(tmp_path: Path) -> None:
-    """cli.py main() lint-discipline with missing file exits 1."""
-    with pytest.raises(SystemExit) as exc_info:
-        sox_cli.main(["lint-discipline", str(tmp_path / "missing.md")])
-    assert exc_info.value.code == 1
+def test_main_lint_discipline_missing_file(tmp_path: Path) -> None:
+    """sox-protocol main() with 'lint-discipline' on a missing file returns 1."""
+    rc = cli_main_module.main(["lint-discipline", str(tmp_path / "missing.md")])
+    assert rc == 1
 
 
-def test_cli_py_main_lint_discipline_valid_file(tmp_path: Path) -> None:
-    """cli.py main() lint-discipline with valid file exits 0."""
+def test_main_lint_discipline_valid_file(tmp_path: Path) -> None:
+    """sox-protocol main() with 'lint-discipline' on a valid file returns 0."""
     f = tmp_path / "d.md"
     _make_valid_discipline(f)
-    with pytest.raises(SystemExit) as exc_info:
-        sox_cli.main(["lint-discipline", str(f)])
-    assert exc_info.value.code == 0
+    rc = cli_main_module.main(["lint-discipline", str(f)])
+    assert rc == 0
 
 
-def test_cli_py_main_install_delegates(tmp_path: Path) -> None:
-    """cli.py main() install delegates to the adapter installer."""
-    with patch("sox_protocol.adapters.runtimes.claude_code.install.install") as mock_install:
-        sox_cli.main(["install", "--project-dir", str(tmp_path), "--quiet"])
+def test_main_install_delegates(tmp_path: Path) -> None:
+    """sox-protocol main() with 'install' delegates to the adapter installer."""
+    with patch("sox_protocol.cli.install.install") as mock_install:
+        rc = cli_main_module.main(
+            ["install", "--project-dir", str(tmp_path), "--quiet"]
+        )
         mock_install.assert_called_once()
+    assert rc == 0
+
+
+def test_main_version_flag_prints_and_exits(capsys) -> None:
+    """sox-protocol --version prints the version and exits 0 (argparse action='version')."""
+    with pytest.raises(SystemExit) as exc_info:
+        cli_main_module.main(["--version"])
+    assert exc_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "sox-protocol" in out
+
+
+def test_main_version_subcommand_returns_0(capsys) -> None:
+    """sox-protocol version subcommand prints the version and returns 0."""
+    rc = cli_main_module.main(["version"])
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    # Loose check: the subcommand prints just the version (e.g. "0.1.5"),
+    # not "sox-protocol 0.1.5", so we just assert it's non-empty + dotted.
+    assert out
+    assert "." in out
 
 
 # ===========================================================================
@@ -521,18 +526,6 @@ def test_cli_main_module_as_main_subprocess() -> None:
     # --help exits 0
     assert result.returncode == 0
     assert "sox" in result.stdout.lower() or "serve" in result.stdout.lower()
-
-
-def test_cli_py_main_as_main_subprocess() -> None:
-    """Running cli.py directly as __main__ executes the if __name__ == '__main__' block."""
-    import subprocess
-    result = subprocess.run(
-        [sys.executable, str(_CLI_PY_PATH), "--help"],
-        capture_output=True,
-        text=True,
-    )
-    # --help exits 0
-    assert result.returncode == 0
 
 
 # ===========================================================================

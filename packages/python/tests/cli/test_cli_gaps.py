@@ -1,43 +1,24 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests covering remaining gaps in cli.py (line 102) and install.py.
+"""Tests covering coverage gaps in cli/verify.py, install.py, enforcer/cli.py.
 
-Note: sox_protocol has both a cli.py module AND a cli/ package.
-Python's import system prefers the package, so cli.py must be loaded
-directly via importlib. See test_cli_main.py for the same pattern.
+Pre-0.1.5 these tests loaded ``sox_protocol/cli.py`` directly via importlib
+because Python's import resolver preferred the ``cli/`` package and shadowed
+the file. 0.1.5 deleted ``cli.py`` and migrated its content into the
+``cli/verify.py`` and ``cli/lint_discipline.py`` modules — these tests now
+import normally.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Load sox_protocol/cli.py directly (same pattern as test_cli_main.py)
-# ---------------------------------------------------------------------------
-_CLI_PY_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "src" / "sox_protocol" / "cli.py"
-)
-_MODULE_NAME = "sox_protocol.cli_verify"
-if _MODULE_NAME not in sys.modules:
-    _spec = importlib.util.spec_from_file_location(_MODULE_NAME, _CLI_PY_PATH)
-    assert _spec is not None
-    _sox_cli_module = importlib.util.module_from_spec(_spec)
-    sys.modules[_MODULE_NAME] = _sox_cli_module
-    assert _spec.loader is not None
-    _spec.loader.exec_module(_sox_cli_module)  # type: ignore[union-attr]
-else:
-    _sox_cli_module = sys.modules[_MODULE_NAME]
-
-sox_cli = _sox_cli_module
-
+from sox_protocol.cli import verify as sox_cli  # alias preserves test names
 
 # ===========================================================================
-# cli.py — line 102: relative sqlite path joined with project_dir
+# cli/verify.py — relative sqlite path joined with project_dir
 # ===========================================================================
 
 

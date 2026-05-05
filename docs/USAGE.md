@@ -16,7 +16,7 @@ From your project root:
 
 ```bash
 pip install sox-protocol sox-plugin-schema-strict
-python -m sox_protocol.adapters.runtimes.claude_code install
+sox-protocol install
 ```
 
 > **Gotcha:** install `sox-plugin-schema-strict` **non-editable** (no `-e`). The plugin's `sox-plugin.yaml` manifest is not exposed via editable installs, and the MCP server fails its plugin-discovery handshake without it. If `claude mcp list` reports `✗ Failed to connect`, this is almost always the cause.
@@ -58,7 +58,7 @@ The full discipline lives in the skill, loaded on demand. The bootstrap line jus
 ### 1.4 Verify
 
 ```bash
-python -m sox_protocol.cli verify
+sox-protocol verify
 ```
 
 Reports on: backing store reachable, MCP server registered, hooks installed, skill present, all four MCP tools surfaced.
@@ -289,7 +289,7 @@ Things the discipline document explicitly forbids. Listed here so integrators re
 
 Most likely cause: bootstrap line missing from the agent's system prompt, or the skill is not being loaded because the `description` doesn't match the situation the agent is in.
 
-Fix: verify with `python -m sox_protocol.cli verify`. Check that the agent's system prompt includes the bootstrap line. Consider broadening the skill's `description` in `SKILL.md`.
+Fix: verify with `sox-protocol verify`. Check that the agent's system prompt includes the bootstrap line. Consider broadening the skill's `description` in `SKILL.md`.
 
 ### 7.2 "Messages aren't being delivered between subagents"
 

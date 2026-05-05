@@ -83,18 +83,19 @@ From your project root:
 
 ```bash
 pip install sox-protocol sox-plugin-schema-strict
-python -m sox_protocol.adapters.runtimes.claude_code install
+sox-protocol install
 ```
 
-This initialises the backing store (SQLite in `.sox/messages.db`), registers the MCP server, installs a skill with the full discipline, and sets up cadence hooks.
+This initialises the backing store (SQLite in `.sox/messages.db`), registers the MCP server, installs a skill with the full discipline, and sets up cadence hooks. Equivalent long-form: `python -m sox_protocol.adapters.runtimes.claude_code install`.
 
 > Install the plugin **non-editable** (no `-e`) — its `sox-plugin.yaml` manifest isn't exposed via editable installs and the MCP server fails to start without it.
 
 ### Verify
 
 ```bash
-claude mcp list                     # should show: sox: ... ✓ Connected
-python -m sox_protocol.cli verify   # full backing-store/MCP/hook/skill probe
+claude mcp list          # should show: sox: ... ✓ Connected
+sox-protocol verify      # full backing-store/MCP/hook/skill probe
+sox-protocol --version   # confirm the installed version
 ```
 
 ### Browse channels in a TUI
@@ -131,7 +132,7 @@ reads a different half of your codebase and they coordinate findings
 via SOX channels — you watch the messages arrive in each terminal.
 
 **Prerequisites:** SOX installed in your project (`pip install sox-protocol &&
-python -m sox_protocol.adapters.runtimes.claude_code install`), then restart
+sox-protocol install`), then restart
 Claude Code so the MCP server is picked up.
 
 **Step 1 — open two terminals, both in your project root**

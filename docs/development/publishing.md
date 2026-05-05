@@ -110,7 +110,7 @@ The environment names must match the `environment.name` values in the workflow.
 
    # Installer smoke
    mkdir $T/proj
-   $T/v/bin/python -m sox_protocol.adapters.runtimes.claude_code install --project-dir $T/proj
+   $T/v/bin/sox-protocol install --project-dir $T/proj
    ls $T/proj/.mcp.json $T/proj/.claude/settings.json $T/proj/.claude/skills/inter-agent-channels/SKILL.md
    ```
 

@@ -170,6 +170,52 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.5] — 2026-05-04 — CLI consolidation: `install`, `verify`, `lint-discipline`, `version`, `--version`
+
+### Added
+
+- **`sox-protocol install`** — wraps the existing claude_code installer.  Equivalent to `python -m sox_protocol.adapters.runtimes.claude_code install` but discoverable via `sox-protocol --help`.  Same flags (`--project-dir`, `--quiet`).
+- **`sox-protocol verify`** — config health check (backing-store reachability, MCP-server registration, hook installation, skill presence, all four MCP tools surfaced).  Exit code 0 on full pass, 1 if any check failed.  Migrated from the documented-but-shadowed `python -m sox_protocol.cli verify`.
+- **`sox-protocol lint-discipline <path>`** — spec-author tool: validates required-heading order and rejects concrete tool names that should be `{{placeholder}}` tokens.  Migrated from `python -m sox_protocol.cli lint-discipline`.
+- **`sox-protocol version`** subcommand and `sox-protocol --version` / `-V` flag.  Print the installed version (sourced from `importlib.metadata.version("sox-protocol")` so it always tracks the wheel metadata).  Help banner now reads `SOX Protocol server and tooling. (version 0.1.5)`.
+
+### Changed
+
+- **Help output now lists the full subcommand surface:**
+
+  ```
+  $ sox-protocol --help
+  usage: sox-protocol [-h] [-V] {serve,chat,install,verify,lint-discipline,version} ...
+  ```
+
+  Pre-0.1.5 only `serve` and `chat` were reachable via the bin; `install` required the awkward `python -m sox_protocol.adapters.runtimes.claude_code install`, and `verify` / `lint-discipline` had no working short-form path at all (see "Removed" below).
+
+- **Documentation updated** to recommend the short-form CLI invocations:
+  - `README.md`, `INSTALL.md`, `USAGE.md`, `CONTRACTS.md`, `docs/development/publishing.md`, `docs/development/live-tests.md`
+  - test-fixture readmes under `tests/fixtures/live_install/`
+  - The long-form `python -m sox_protocol.adapters.runtimes.claude_code install` is preserved as a fallback alongside each occurrence.
+
+### Removed
+
+- **`packages/python/src/sox_protocol/cli.py`** (the standalone module file) — deleted entirely.  Its content (verify, lint-discipline, helpers) lives in `cli/verify.py` and `cli/lint_discipline.py` now.
+
+  This file was always shadowed by the `cli/` package: Python's import resolver prefers a package over a same-named module, so `import sox_protocol.cli` and `python -m sox_protocol.cli` both resolved to the *package*'s `__main__.py` — which never had a `verify` subcommand.  The documented `python -m sox_protocol.cli verify` invocation in the v0 USAGE.md was therefore broken from day one.  Reaching the file required explicit importlib trickery, which the test suite had inherited as a workaround block (`test_cli_main.py` lines 26–39, repeated in `test_cli_gaps.py` and `test_remaining_gaps.py`).  All three workaround blocks are now removed.
+
+### Migration
+
+- **From `python -m sox_protocol.adapters.runtimes.claude_code install` → `sox-protocol install`.**  Both still work; the long form is preserved as a fallback.
+- **From `python -m sox_protocol.cli verify` → `sox-protocol verify`.**  The long form *appears* to still work (it actually always invoked the package's `__main__.py`, which now has a real `verify` subcommand) but the recommended invocation is the bin.
+- **From `python -m sox_protocol.cli lint-discipline <path>` → `sox-protocol lint-discipline <path>`.**  Same caveat as `verify`.
+- No CHANGELOG entries or other surface changes break.  `pip install --upgrade sox-protocol` is sufficient.
+
+### Internal
+
+- 84 source files now (up from 81 in 0.1.4) — three new `cli/` modules.
+- 1333 tests pass (up from 1325 in 0.1.4); 8 new tests cover the version flag, the new subcommand wiring, and `_discover_mcp_env`'s migration into the unified entry point.
+- The importlib-magic block in `tests/cli/test_cli_main.py` (~20 LOC) is gone; tests now do `from sox_protocol.cli.verify import _check_backing_store`-style imports.
+
+---
+
 ## [0.1.4] — 2026-05-04 — `sox-protocol chat` auto-discovers project `.mcp.json`
 
 ### Changed

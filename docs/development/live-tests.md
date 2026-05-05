@@ -10,7 +10,8 @@ Anthropic API key. It:
 2. `pip install -e packages/python plugins/sox-plugin-schema-strict` into it.
 3. Copies `packages/python/tests/fixtures/live_install/` into a fresh tmp
    Claude project directory.
-4. Runs `python -m sox_protocol.adapters.runtimes.claude_code install` against
+4. Runs `sox-protocol install` (long form:
+   `python -m sox_protocol.adapters.runtimes.claude_code install`) against
    that project to produce `.mcp.json`, `.claude/settings.json`, and skill files.
 5. Spawns two `claude` CLI subprocesses **serially** (alice then bob) with
    `--dangerously-skip-permissions --print --bare --model claude-sonnet-4-5
