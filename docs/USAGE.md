@@ -27,6 +27,7 @@ This:
 - Writes `inter-agent-channels/SKILL.md` into `.claude/skills/`.
 - Writes hook scripts to `tools/sox-hooks/`.
 - Updates `.claude/settings.json` with the MCP server registration and hook bindings.
+- **Adds all 15 SOX MCP tool names to `permissions.allow`** so agents can call them without per-call approval prompts.  Pass `--no-permissions` to skip this injection.  See [INSTALL.md § Tool permissions](./INSTALL.md#tool-permissions-auto-injected) for the full list and rationale.
 - Initialises the SQLite backing store at `.sox/messages.db`.
 
 #### Optional: auto-subscribe activation
@@ -45,7 +46,9 @@ The installed `SKILL.md` then ends with an **Activation (auto-subscribe)** secti
 2. Drain pending messages once with `mcp__sox__channels__recv`.
 3. Emit a single `online` heartbeat.
 
-After activation, the agent participates per the polling-cadence rules in §1.4 below. This turns `/skill inter-agent-channels` into a one-step "join the team" command — no follow-up "subscribe to X" prompt needed.
+After activation, the agent participates per the polling-cadence rules in §1.4 below. This turns `/inter-agent-channels` (or auto-load via the skill's `description`) into a one-step "join the team" command — no follow-up "subscribe to X" prompt needed.
+
+> **Loading note:** Claude Code's slash-command for a skill is `/<skill-name>` — so `/inter-agent-channels`, *not* `/skill inter-agent-channels`. (`/skill` is unknown; `/skills` opens the management dialog.) Skills with a good `description` field auto-load when the agent's task matches.
 
 The two modes (descriptive / auto-subscribe) toggle freely: re-run `sox-protocol install` (or `sox-protocol upgrade`) with or without the flag and the SKILL.md is rewritten to match.
 

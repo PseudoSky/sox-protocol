@@ -170,6 +170,47 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.8] — 2026-05-05 — auto-inject SOX MCP permissions; skill-load doc fixes; activation pre-flight
+
+### Added
+
+- **Auto-injected `permissions.allow` for the SOX MCP tools.**  By default, `sox-protocol install` (and `sox-protocol upgrade` on subsequent runs) now adds all 15 SOX MCP tool names to `.claude/settings.json` `permissions.allow`:
+
+  ```
+  mcp__sox__channels__send         mcp__sox__group__create
+  mcp__sox__channels__recv         mcp__sox__group__invite
+  mcp__sox__channels__subscribe    mcp__sox__group__join
+  mcp__sox__channels__unsubscribe  mcp__sox__group__leave
+  mcp__sox__channels__ack          mcp__sox__group__list_members
+  mcp__sox__channels__heartbeat
+  mcp__sox__channels__list_agents
+  mcp__sox__channels__list_channels
+  mcp__sox__channels__replay
+  mcp__sox__channels__collect
+  ```
+
+  This eliminates per-call approval prompts for SOX tool usage in Claude Code sessions — agents can subscribe, send, recv, etc. without "Allow this tool? [y/N]" interruptions.  Particularly important for the `--auto-subscribe` activation flow shipped in 0.1.7, which calls 3 tools on first skill load.
+
+  Additive merge: existing `permissions.allow` entries (the user's `Bash(*)` rules, third-party MCP tool allowlists, etc.) are preserved.  Idempotent: re-running `install` doesn't duplicate entries.  Pass `--no-permissions` to skip the injection entirely (for users who prefer the historical "ask on every call" UX).
+
+- 9 unit tests in `tests/adapters/runtimes/test_settings_permissions.py` covering: default injection of all 15 tools; `--no-permissions` produces no `permissions` key; merge preserves user's existing entries; idempotent re-runs don't duplicate; partial pre-existing SOX tools are deduped; `permissions` block created when missing; CLI dispatch through `install_command`; corrupted-non-list `allow` values are left alone (no crash).
+
+- **Activation pre-flight tool-availability check.**  When `--auto-subscribe` is enabled, the rendered `SKILL.md` Activation block now opens with a "Step 0 — Pre-flight: tool availability" section.  If the agent's tool surface is missing any of `mcp__sox__channels__subscribe`, `mcp__sox__channels__recv`, or `mcp__sox__channels__heartbeat`, the activation halts with a clear diagnostic ("run `sox-protocol verify` or `sox-protocol install`, then restart this session") instead of trying to call missing tools and producing a confusing error.
+
+  Reproduces the failure-mode a user reported: skill loaded fine in a Claude session whose `.mcp.json` didn't include the SOX channels server (different MCP setup), and the activation stalled trying to invoke `mcp__sox__channels__subscribe`.  Now the agent reports the missing tools + remediation path in one shot.
+
+### Fixed
+
+- **Doc bug: `/skill <name>` was wrong.**  Three docs (`README.md`, `docs/INSTALL.md` × 2 spots, `docs/USAGE.md`) instructed users to load the skill via `/skill inter-agent-channels`.  Claude Code's actual slash form is `/<skill-name>` (so `/inter-agent-channels`); `/skill` is unknown, `/skills` opens the management dialog.  Skills with a good `description` field auto-load when the agent's task matches — no slash command required.  All four occurrences updated; both INSTALL.md and USAGE.md gain a "Loading note" callout explaining the rules.
+
+### Documentation
+
+- `docs/INSTALL.md` §2 — new "Tool permissions auto-injected" subsection right after the install table; `/skill <name>` → `/<skill-name>` corrections + a Loading note; interactive demo in §3 also corrected.
+- `docs/USAGE.md` §1.1 — "Skip permissions injection" line + Loading note callout under the auto-subscribe subsection.
+- `README.md` (root) — Quickstart's verify subsection mentions the auto-allowed tools; auto-subscribe subsection uses the corrected `/<skill-name>` form.
+
+---
+
 ## [0.1.7] — 2026-05-05 — auto-subscribe skill activation + PyPI page fix
 
 ### Added

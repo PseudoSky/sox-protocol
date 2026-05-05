@@ -68,6 +68,17 @@ def add_install_subcommand(
             "multiple channels.  Ignored without --auto-subscribe."
         ),
     )
+    parser.add_argument(
+        "--no-permissions",
+        action="store_true",
+        help=(
+            "Skip injecting the SOX MCP tool names into "
+            "`.claude/settings.json` `permissions.allow`.  By default the "
+            "installer adds all 15 SOX tools so agents can call them "
+            "without per-call approval prompts.  Pass this flag to keep "
+            "the historical 'ask on every call' UX."
+        ),
+    )
     parser.set_defaults(func=install_command)
 
 
@@ -86,5 +97,6 @@ def install_command(args: argparse.Namespace) -> int:
         verbose=not args.quiet,
         auto_subscribe=getattr(args, "auto_subscribe", False),
         default_channels=getattr(args, "default_channels", None),
+        inject_permissions=not getattr(args, "no_permissions", False),
     )
     return 0

@@ -321,6 +321,15 @@ def add_upgrade_subcommand(
             "multiple channels.  Ignored without --auto-subscribe."
         ),
     )
+    parser.add_argument(
+        "--no-permissions",
+        action="store_true",
+        help=(
+            "Skip refreshing the SOX MCP tool names in "
+            "`.claude/settings.json` `permissions.allow`.  Default behavior "
+            "is to ensure all 15 SOX tools are present in the allow list."
+        ),
+    )
     parser.set_defaults(func=upgrade_command)
 
 
@@ -399,6 +408,7 @@ def upgrade_command(args: argparse.Namespace) -> int:
         verbose=not quiet,
         auto_subscribe=getattr(args, "auto_subscribe", False),
         default_channels=getattr(args, "default_channels", None),
+        inject_permissions=not getattr(args, "no_permissions", False),
     )
     if not quiet:
         print()

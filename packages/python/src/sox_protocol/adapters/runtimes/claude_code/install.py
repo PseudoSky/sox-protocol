@@ -71,6 +71,29 @@ _DEFAULT_DB_RELPATH = ".sox/messages.db"
 # Hooks registered in settings.json
 _HOOK_EVENTS = ["PostToolUse", "Stop", "SubagentStop"]
 
+# Tool names registered by the SOX MCP server, in the Claude Code namespace
+# (``mcp__<server>__<tool>``).  Used by ``_update_settings`` to inject
+# ``permissions.allow`` entries so the agent can call them without
+# per-call approval prompts.  Mirrors ``core/mcp_server/tools.py``'s
+# ``register_tools()``.
+_SOX_MCP_TOOL_NAMES: tuple[str, ...] = (
+    "mcp__sox__channels__send",
+    "mcp__sox__channels__recv",
+    "mcp__sox__channels__subscribe",
+    "mcp__sox__channels__unsubscribe",
+    "mcp__sox__channels__ack",
+    "mcp__sox__channels__heartbeat",
+    "mcp__sox__channels__list_agents",
+    "mcp__sox__channels__list_channels",
+    "mcp__sox__channels__replay",
+    "mcp__sox__channels__collect",
+    "mcp__sox__group__create",
+    "mcp__sox__group__invite",
+    "mcp__sox__group__join",
+    "mcp__sox__group__leave",
+    "mcp__sox__group__list_members",
+)
+
 
 # ---------------------------------------------------------------------------
 # Path helpers
@@ -196,30 +219,59 @@ def _render_activation_section(
 This skill was installed with **auto-subscribe** enabled.  When this skill is
 loaded into your context, your first actions in this session MUST be:
 
-1. **Subscribe to your inbox** so other agents can DM you and reach you on
-   shared channels.  Call:
+### 0. Pre-flight: tool availability
+
+Check that the required MCP tools are present in your tool surface:
+
+- ``mcp__sox__channels__subscribe``
+- ``mcp__sox__channels__recv``
+- ``mcp__sox__channels__heartbeat``
+
+If **any** of these tools are missing, the SOX MCP server is not connected to
+this session.  STOP — do **not** attempt steps 1–3.  Instead, tell the user:
+
+> "I tried to auto-activate the inter-agent-channels skill, but the
+> ``mcp__sox__channels__*`` tools aren't in my tool surface.  Run
+> ``sox-protocol verify`` in this project root to diagnose, or
+> ``sox-protocol install`` if you haven't installed SOX here yet.  Then
+> restart this session."
+
+This usually means one of:
+- This project hasn't run ``sox-protocol install``.
+- The ``.mcp.json`` exists but Claude Code didn't pick it up — restart the session.
+- The session has a different MCP setup that excludes the ``sox`` server.
+
+### 1. Subscribe to your inbox
+
+Once the tools are confirmed present, subscribe so other agents can reach you:
 
 {inbox_line}
 
-   Replace ``<your-agent-id>`` with the value of your ``SOX_AGENT_ID`` env
-   var (or your subagent name from the parent orchestrator).  The MCP server
-   already knows your identity — pass it explicitly for clarity.
+Replace ``<your-agent-id>`` with the value of your ``SOX_AGENT_ID`` env var
+(or your subagent name from the parent orchestrator).  The MCP server
+already knows your identity — pass it explicitly for clarity.
 
-2. **Drain any pending messages** once before continuing with your task:
+### 2. Drain any pending messages
 
-   `mcp__sox__channels__recv(channels=null, max_messages=50)`
+Once before continuing with your task:
 
-   ``channels=null`` drains every channel you're subscribed to; iterate
-   through the messages, ack/nack as appropriate, then proceed.
+`mcp__sox__channels__recv(channels=null, max_messages=50)`
 
-3. **Heartbeat once** so other agents see you as online:
+``channels=null`` drains every channel you're subscribed to; iterate through
+the messages, ack/nack as appropriate, then proceed.
 
-   `mcp__sox__channels__heartbeat(status="online")`
+### 3. Heartbeat once
 
-After activation, follow the polling-cadence rules above for ongoing
-participation.  Do NOT auto-subscribe to other channels without an
-explicit instruction in your task — the auto-subscribe is one-shot, not
-a license to listen on every channel forever.
+So other agents see you as online:
+
+`mcp__sox__channels__heartbeat(status="online")`
+
+### After activation
+
+Follow the polling-cadence rules above for ongoing participation.  Do NOT
+auto-subscribe to other channels without an explicit instruction in your
+task — the auto-subscribe is one-shot, not a license to listen on every
+channel forever.
 """
 
 
@@ -383,8 +435,23 @@ def _update_mcp_json(project_dir: Path, *, dry_run: bool = False) -> bool:
     return True
 
 
-def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
-    """Idempotently update .claude/settings.json. Returns True if changed."""
+def _update_settings(
+    project_dir: Path,
+    *,
+    dry_run: bool = False,
+    inject_permissions: bool = True,
+) -> bool:
+    """Idempotently update .claude/settings.json. Returns True if changed.
+
+    Args:
+        project_dir: Project root.
+        dry_run: When True, compute idempotency-equality without writing.
+        inject_permissions: When True (default), add the SOX MCP tool names
+            to ``permissions.allow`` so agents can call them without
+            per-call approval prompts.  Set False to keep the historical
+            "ask on every call" UX.  Existing entries in ``permissions.allow``
+            are preserved — we only append the SOX tools that aren't there.
+    """
     settings_path = _settings_path(project_dir)
     settings = _load_settings(settings_path)
     original = json.dumps(settings, sort_keys=True)
@@ -433,6 +500,20 @@ def _update_settings(project_dir: Path, *, dry_run: bool = False) -> bool:
     allowed: list[dict[str, Any]] = settings.setdefault("allowedMcpServers", [])
     if not any(e.get("serverName") == _MCP_SERVER_NAME for e in allowed):
         allowed.append({"serverName": _MCP_SERVER_NAME})
+
+    # --- permissions.allow ---
+    # Inject the SOX MCP tool names so agents can call them without per-call
+    # approval prompts.  Additive: existing entries (the user's, or other
+    # plugins') are preserved.
+    if inject_permissions:
+        permissions: dict[str, Any] = settings.setdefault("permissions", {})
+        allow_list_raw = permissions.setdefault("allow", [])
+        if isinstance(allow_list_raw, list):
+            existing = {entry for entry in allow_list_raw if isinstance(entry, str)}
+            for tool_name in _SOX_MCP_TOOL_NAMES:
+                if tool_name not in existing:
+                    allow_list_raw.append(tool_name)
+                    existing.add(tool_name)
 
     updated = json.dumps(settings, sort_keys=True)
     if updated == original:
@@ -485,6 +566,7 @@ def install(
     verbose: bool = True,
     auto_subscribe: bool = False,
     default_channels: list[str] | None = None,
+    inject_permissions: bool = True,
 ) -> None:
     """Install the SOX Claude Code adapter into *project_dir*.
 
@@ -502,6 +584,10 @@ def install(
         default_channels: Extra channels to include in the auto-subscribe
             instruction (in addition to ``agent/<your-id>``).  Ignored when
             ``auto_subscribe`` is False.
+        inject_permissions: When ``True`` (default), add the SOX MCP tool
+            names to ``permissions.allow`` in ``.claude/settings.json`` so
+            agents can call them without per-call approval prompts.  Set
+            ``False`` to keep the historical "ask on every call" behavior.
     """
     if project_dir is None:
         project_dir = Path.cwd()
@@ -532,7 +618,7 @@ def install(
         actions.append("  .mcp.json already up-to-date")
 
     # 4. settings.json  (hooks + allowedMcpServers)
-    if _update_settings(project_dir):
+    if _update_settings(project_dir, inject_permissions=inject_permissions):
         actions.append(f"  Updated {_settings_path(project_dir)}")
     else:
         actions.append("  settings.json already up-to-date")
@@ -593,6 +679,14 @@ def main(argv: list[str] | None = None) -> None:
             "multiple channels. Ignored without --auto-subscribe."
         ),
     )
+    install_parser.add_argument(
+        "--no-permissions",
+        action="store_true",
+        help=(
+            "Skip injecting SOX MCP tool names into "
+            ".claude/settings.json's permissions.allow."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -602,6 +696,7 @@ def main(argv: list[str] | None = None) -> None:
             verbose=not args.quiet,
             auto_subscribe=getattr(args, "auto_subscribe", False),
             default_channels=getattr(args, "default_channels", None),
+            inject_permissions=not getattr(args, "no_permissions", False),
         )
     else:
         parser.print_help()

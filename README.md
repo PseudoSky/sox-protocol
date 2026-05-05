@@ -90,7 +90,7 @@ This initialises the backing store (SQLite in `.sox/messages.db`), registers the
 
 #### Optional: auto-subscribe on skill load
 
-By default the installed `SKILL.md` is descriptive — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make `/skill inter-agent-channels` *active*:
+By default the installed `SKILL.md` is descriptive — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make `/inter-agent-channels` (or auto-loading via the skill's `description`) *active*:
 
 ```bash
 sox-protocol install --auto-subscribe \

@@ -67,6 +67,35 @@ This writes (or updates):
 
 It also adds the bootstrap line to any `.claude/agents/*.md` files it finds — so existing subagents pick up channel awareness without manual edits.
 
+### Tool permissions auto-injected
+
+`sox-protocol install` adds all 15 SOX MCP tool names to `.claude/settings.json`'s `permissions.allow` block by default:
+
+```text
+mcp__sox__channels__send         mcp__sox__group__create
+mcp__sox__channels__recv         mcp__sox__group__invite
+mcp__sox__channels__subscribe    mcp__sox__group__join
+mcp__sox__channels__unsubscribe  mcp__sox__group__leave
+mcp__sox__channels__ack          mcp__sox__group__list_members
+mcp__sox__channels__heartbeat
+mcp__sox__channels__list_agents
+mcp__sox__channels__list_channels
+mcp__sox__channels__replay
+mcp__sox__channels__collect
+```
+
+Agents can call these without per-call "Allow this tool?" prompts. Especially important for the `--auto-subscribe` flow (next subsection) which fires three tool calls on first skill load — without the permission entries, the activation would stall on the first prompt.
+
+The merge is **additive**: existing `permissions.allow` entries (your `Bash(*)` rules, third-party MCP allowlists) are preserved. **Idempotent**: re-running `install` doesn't duplicate entries.
+
+If you prefer per-call approval prompts (security-sensitive setups, debugging), pass `--no-permissions`:
+
+```bash
+sox-protocol install --no-permissions
+```
+
+The same flag works on `sox-protocol upgrade` to skip refreshing the permissions block on subsequent runs.
+
 ### Auto-subscribe on skill load (optional)
 
 By default, `SKILL.md` is **descriptive** — it teaches the protocol but doesn't take action when an agent loads it. Pass `--auto-subscribe` to make the skill *active*:
@@ -85,7 +114,9 @@ The installed `SKILL.md` then ends with an **Activation (auto-subscribe)** secti
 
 After that, the agent participates per the polling-cadence rules in the rest of the skill.
 
-This turns `/skill inter-agent-channels` into a one-step "join the team" command, instead of requiring a follow-up "subscribe to X" prompt. The two modes can be toggled freely — re-run with or without `--auto-subscribe` and the SKILL.md is rewritten to match.
+This turns `/inter-agent-channels` (or auto-load via the skill's `description`) into a one-step "join the team" command, instead of requiring a follow-up "subscribe to X" prompt. The two modes can be toggled freely — re-run with or without `--auto-subscribe` and the SKILL.md is rewritten to match.
+
+> **Loading note:** Claude Code's slash-command for a skill is `/<skill-name>` — so `/inter-agent-channels`, *not* `/skill inter-agent-channels`. (`/skill` is unknown; `/skills` opens the management dialog.) Skills with a good `description` field auto-load whenever the agent's task matches, no slash command required.
 
 | Flag | Purpose |
 |---|---|
@@ -153,10 +184,12 @@ sox-protocol upgrade --check-only
 In an interactive `claude` session inside the project:
 
 ```text
-> /skill inter-agent-channels
+> /inter-agent-channels        # loads the inter-agent-channels skill
 > Use mcp__sox__channels__list_channels to show what's currently registered.
 > Now mcp__sox__channels__send to channel "test/hello" with body {"text": "first message"}.
 ```
+
+(You can skip the `/inter-agent-channels` line entirely — the skill's `description` is matched against your prompt and the skill auto-loads when the agent decides it's relevant. The slash form is the explicit fallback.)
 
 You're talking to a real SQLite-backed message store at `.sox/messages.db`.
 
