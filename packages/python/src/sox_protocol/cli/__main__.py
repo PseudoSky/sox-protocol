@@ -18,6 +18,7 @@ from sox_protocol.cli.chat import register_subparser as add_chat_subcommand
 from sox_protocol.cli.install import add_install_subcommand
 from sox_protocol.cli.lint_discipline import add_lint_discipline_subcommand
 from sox_protocol.cli.serve import add_serve_subcommand
+from sox_protocol.cli.upgrade import add_upgrade_subcommand
 from sox_protocol.cli.verify import add_verify_subcommand
 
 
@@ -53,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     add_serve_subcommand(subparsers)
     add_chat_subcommand(subparsers)
     add_install_subcommand(subparsers)
+    add_upgrade_subcommand(subparsers)
     add_verify_subcommand(subparsers)
     add_lint_discipline_subcommand(subparsers)
 

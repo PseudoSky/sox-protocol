@@ -98,6 +98,21 @@ sox-protocol verify      # full backing-store/MCP/hook/skill probe
 sox-protocol --version   # confirm the installed version
 ```
 
+### Upgrade
+
+A single command does everything:
+
+```bash
+sox-protocol upgrade
+```
+
+Three phases:
+1. **PyPI check** — compares `sox-protocol` + `sox-plugin-schema-strict` against PyPI's latest, runs `pip install --upgrade` if newer, re-execs itself with the new code.
+2. **File refresh** — re-runs the installer (idempotent: only rewrites changed files).
+3. **SQLite migration** — runs any pending schema migrations forward.  Migrations are additive (existing data survives).
+
+Flags: `--check-only` (report drift, no changes), `--skip-pip` (offline mode), `--no-migrate` (skip the DB step), `--quiet`. See [`docs/INSTALL.md` § Upgrading](docs/INSTALL.md#upgrading-later).
+
 ### Browse channels in a TUI
 
 ```bash

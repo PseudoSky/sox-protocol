@@ -170,6 +170,28 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.6] — 2026-05-04 — `sox-protocol upgrade`: auto-bump pip + refresh + migrate
+
+### Added
+
+- **`sox-protocol upgrade`** — single command for end-to-end project upgrade after a SOX release.  Three phases:
+  1. **PyPI version check.**  Compares the locally installed versions of the tracked packages (`sox-protocol`, `sox-plugin-schema-strict`) against PyPI's latest using `importlib.metadata` + the public PyPI JSON API.  If newer is available, runs `pip install --upgrade` on the affected packages, then **re-execs itself** so the rest of the upgrade runs against the just-installed code (the current Python interpreter still has the old code in memory; `--skip-pip` is passed automatically in the re-exec to prevent looping).
+  2. **File refresh.**  Re-runs `sox-protocol install` against the project — idempotent, only writes files that actually changed: `SKILL.md` from the latest spec, hook scripts, `.mcp.json`, `.claude/settings.json`.
+  3. **SQLite migration.**  Locates the backing store from `.mcp.json` (or `$SOX_BACKING_STORE`) and runs the schema-migration chain forward to the latest version.  Migrations are additive (e.g. v1.1→v1.2 added `reply_to TEXT`), so existing data survives.
+
+  The schema migration also runs lazily on the first MCP server connection.  `upgrade` makes it explicit + visible, and lets you upgrade without launching an MCP client first.
+
+  Flags:
+  - `--project-dir DIR` — operate on a project other than cwd.
+  - `--quiet` — suppress the per-step log; still print the final summary.
+  - `--check-only` — report PyPI drift only; no pip changes, no file writes, no migration.  Useful for CI / drift detection.
+  - `--skip-pip` — skip the PyPI check + pip-upgrade phase (offline, or when you've already upgraded packages manually).  Also passed automatically by the re-exec after a successful pip upgrade.
+  - `--no-migrate` — skip the SQLite schema migration step (non-SQLite backing store, remote DB).
+
+- 21 unit tests in `tests/cli/test_upgrade.py` covering: `_discover_db_path` for every URL form (sqlite:///, sqlite://// → quad-slash collapse, memory://, sqlite://:memory:, missing .mcp.json with env fallback, malformed JSON, unknown schemes); `_run_migration` (fresh DB stamps target, idempotent re-run); `_check_packages` (correctly marks outdated rows, handles missing local/remote without crashing); the full `upgrade_command` flow with `--check-only`, `--skip-pip`, `--quiet`, `--no-migrate`, pip-upgrade with re-exec, and pip-failure-without-re-exec branches.
+
+---
+
 ## [0.1.5] — 2026-05-04 — CLI consolidation: `install`, `verify`, `lint-discipline`, `version`, `--version`
 
 ### Added

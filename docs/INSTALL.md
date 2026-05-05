@@ -86,6 +86,41 @@ which sox-protocol
 
 > The bin is named `sox-protocol` (not `sox`) to avoid conflict with the long-established [SoX audio toolkit](http://sox.sourceforge.net/). The MCP server name in `.mcp.json` is still `sox` — that's a separate identifier and doesn't conflict with anything.
 
+### Upgrading later
+
+When a new SOX release ships, run **one** command in your project root:
+
+```bash
+sox-protocol upgrade
+```
+
+Three phases run automatically:
+
+1. **PyPI check** — compares your installed `sox-protocol` + `sox-plugin-schema-strict` versions against PyPI's latest. If newer, runs `pip install --upgrade` on the affected packages and re-execs itself so the rest of the upgrade runs against the new code.
+2. **File refresh** — re-runs the installer (idempotent — only rewrites `SKILL.md`, hook scripts, `.mcp.json`, `.claude/settings.json` if they changed).
+3. **SQLite migration** — runs any pending schema migrations forward to the latest version. Migrations are additive (`ALTER TABLE … ADD COLUMN`-style), so existing message history survives.
+
+Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--project-dir DIR` | operate on a project other than cwd |
+| `--quiet` | suppress the per-step log |
+| `--check-only` | report PyPI drift only; no pip / no file changes / no migration |
+| `--skip-pip` | skip the PyPI check + pip-upgrade phase (offline, or already upgraded manually) |
+| `--no-migrate` | skip the SQLite step (non-SQLite backing store, or remote DB) |
+
+The schema migration also runs lazily on the first MCP-server connection, so `upgrade` isn't strictly required after every `pip install --upgrade` — but explicit is nicer than waiting until your next `claude` session to discover whether the migration succeeded.
+
+For CI / drift detection without changes:
+
+```bash
+sox-protocol upgrade --check-only
+# Step 1/3: checking PyPI for newer versions…
+#   sox-protocol             local=0.1.4   latest=0.1.5   → upgrade available
+#   sox-plugin-schema-strict local=1.0.0   latest=1.0.0
+```
+
 ---
 
 ## 3. Try it interactively
