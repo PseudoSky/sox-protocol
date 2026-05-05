@@ -170,6 +170,35 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.4] — 2026-05-04 — `sox-protocol chat` auto-discovers project `.mcp.json`
+
+### Changed
+
+- **`sox-protocol chat` now reads `mcpServers.sox.env` from the nearest ancestor `.mcp.json`** (the file the Claude Code installer writes at the project root). The TUI's spawned MCP server inherits the same `SOX_BACKING_STORE`, `SOX_AGENT_ID_SOURCE`, etc. that Claude Code uses, so the two automatically share the project's `.sox/messages.db`.
+
+  Before this change, running `sox-protocol chat` in a project that had been `claude_code install`'d still required setting `SOX_BACKING_STORE` manually in your shell — otherwise the TUI would silently spawn a fresh MCP server with `memory://` and never see Claude Code's messages. Common-enough gotcha to be worth eliminating.
+
+  Discovery walks parents from `cwd`, so running the TUI from any subdirectory of a SOX-installed project picks up the right config. CLI-explicit values (`--agent-id` → `SOX_AGENT_ID`) still win over file values, so different TUI sessions in the same project can have distinct identities.
+
+  After this release, the minimal "boot an agent in with me" command becomes:
+
+  ```bash
+  cd /path/to/project   # already has .mcp.json from claude_code install
+  sox-protocol chat --agent-id me
+  ```
+
+  No more `export SOX_BACKING_STORE=...`.
+
+### Added
+
+- `tests/cli/test_chat_mcp_discovery.py` — 9 unit tests covering: cwd discovery, ancestor walk-up, missing-file, malformed-JSON, missing-block, empty-block, type-coercion, nearest-wins, CLI-overrides-file. Pure-function helper, fully covered.
+
+### Migration
+
+- No action required. `pip install --upgrade sox-protocol` picks up the change.
+
+---
+
 ## [0.1.3] — 2026-05-04 — fix second schema-path bug; auto-derive `__version__`
 
 ### Fixed

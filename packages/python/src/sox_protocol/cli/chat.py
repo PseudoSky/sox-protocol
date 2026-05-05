@@ -19,9 +19,56 @@ Spec reference: ``docs/decisions/tui-connection-model.md``
 from __future__ import annotations
 
 import argparse
+import json
+import logging
+from pathlib import Path
 
 # Module-level import so tests can monkeypatch sox_protocol.cli.chat.run
 from sox_protocol.tui.app import run
+
+_log = logging.getLogger(__name__)
+
+
+def _discover_mcp_env(start: Path | None = None) -> dict[str, str]:
+    """Read ``mcpServers.sox.env`` from the nearest ``.mcp.json`` ancestor.
+
+    The Claude Code installer writes ``.mcp.json`` at the project root with
+    the SOX server's env vars (``SOX_BACKING_STORE``, ``SOX_AGENT_ID_SOURCE``)
+    baked in. Without this discovery, ``sox-protocol chat`` would spawn a
+    fresh MCP server with no env (defaults to ``memory://``), so the TUI
+    would silently see a *different* backing store than the project's Claude
+    Code agents — one of those "why aren't my messages showing up" gotchas.
+
+    Walks up from *start* (defaults to ``Path.cwd()``) looking for the first
+    ``.mcp.json`` whose ``mcpServers.sox.env`` block exists.  Returns the
+    env dict or ``{}`` if no such file is found.
+
+    Args:
+        start: Starting directory; defaults to the current working directory.
+
+    Returns:
+        Dict of env vars from the discovered ``.mcp.json``, or ``{}``.
+    """
+    here = (start or Path.cwd()).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / ".mcp.json"
+        if not candidate.is_file():
+            continue
+        try:
+            with candidate.open(encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            _log.debug("Skipping unreadable %s: %s", candidate, exc)
+            continue
+        env = (
+            cfg.get("mcpServers", {})
+            .get("sox", {})
+            .get("env", {})
+        )
+        if isinstance(env, dict) and env:
+            _log.debug("Discovered SOX env from %s: keys=%s", candidate, list(env))
+            return {str(k): str(v) for k, v in env.items()}
+    return {}
 
 
 def register_subparser(
@@ -100,8 +147,13 @@ def chat_command(args: argparse.Namespace) -> int:
         )
         return 0
 
-    # Build optional server_env from server_cmd override
-    server_env: dict[str, str] = {"SOX_AGENT_ID": agent_id}
+    # 1. Auto-discover env from nearest ancestor .mcp.json (the Claude Code
+    #    installer writes SOX_BACKING_STORE, SOX_AGENT_ID_SOURCE, etc. there).
+    # 2. Layer SOX_AGENT_ID from --agent-id on top — explicit CLI flag wins
+    #    over file values, so different TUI sessions can share one project's
+    #    DB while having distinct identities.
+    server_env: dict[str, str] = _discover_mcp_env()
+    server_env["SOX_AGENT_ID"] = agent_id
 
     if server_cmd_str:
         # Pass the override command via env so ServerProcess can pick it up.
