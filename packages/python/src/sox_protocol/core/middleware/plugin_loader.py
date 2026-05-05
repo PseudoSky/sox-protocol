@@ -39,15 +39,42 @@ from sox_protocol.core.middleware.errors import (
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Schema loading (resolved relative to this file at import time)
+# Schema loading. Two resolution paths (mirrors the same pattern in
+# core/mcp_server/server.py — see the long comment there for the rationale):
+#   1. Installed wheel: spec/ is bundled inside the sox_protocol package.
+#   2. Source checkout: spec/ lives at the repo root.
+# The previous parents[6] scheme only worked in source checkouts; in an
+# installed wheel parents[6] lands at the Python prefix, producing a path
+# the file is never at.
 # ---------------------------------------------------------------------------
 
-_SCHEMA_PATH: Path = (
-    Path(__file__).parents[6]  # packages/python/src/sox_protocol/core/middleware/ -> repo root
-    / "spec"
-    / "schemas"
-    / "sox-plugin.schema.json"
-)
+
+def _resolve_schema_path() -> Path:
+    """Return the absolute path to ``sox-plugin.schema.json`` for both install modes."""
+    # 1. Installed wheel: bundled at sox_protocol/spec/schemas/sox-plugin.schema.json
+    try:
+        import importlib.resources  # noqa: PLC0415 — local to keep import cheap when unused
+        pkg_ref = importlib.resources.files("sox_protocol")
+        candidate = Path(str(pkg_ref)) / "spec" / "schemas" / "sox-plugin.schema.json"
+        if candidate.is_file():
+            return candidate
+    except (FileNotFoundError, TypeError, ModuleNotFoundError):  # pragma: no cover
+        pass
+
+    # 2. Source checkout: walk up to find spec/schemas/sox-plugin.schema.json.
+    here = Path(__file__).resolve()
+    for ancestor in [here, *here.parents]:
+        candidate = ancestor / "spec" / "schemas" / "sox-plugin.schema.json"
+        if candidate.is_file():
+            return candidate
+
+    # 3. Final fallback — return the (broken) parents[6] path so the
+    #    downstream is_file() check in _load_schema() produces its
+    #    descriptive RuntimeError rather than something more cryptic.
+    return here.parents[6] / "spec" / "schemas" / "sox-plugin.schema.json"
+
+
+_SCHEMA_PATH: Path = _resolve_schema_path()
 
 
 def _load_schema() -> dict[str, Any]:

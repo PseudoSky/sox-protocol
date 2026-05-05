@@ -170,6 +170,28 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.3] — 2026-05-04 — fix second schema-path bug; auto-derive `__version__`
+
+### Fixed
+
+- **Plugin loader had the same path-resolution bug as the MCP server.** 0.1.2 fixed `core/mcp_server/server.py:_SPEC_SCHEMAS_DIR` but missed `core/middleware/plugin_loader.py:_SCHEMA_PATH`, which used the same broken `Path(__file__).parents[6]` pattern. Reproduced on a fresh `pip install sox-protocol==0.1.2` as:
+
+  ```
+  RuntimeError: sox-plugin.schema.json not found at <python-prefix>/spec/schemas/sox-plugin.schema.json. This is a packaging error in the sox-protocol distribution.
+  ```
+
+  Same fix as 0.1.2: new `_resolve_schema_path()` that tries `importlib.resources.files("sox_protocol")` first, walks up from `__file__` as the source-checkout fallback, and returns the legacy `parents[6]` path only as a final fallback so the downstream descriptive error still fires instead of an exception.
+
+  Audited the rest of the codebase for the same `parents[N] / "spec"` pattern; no other instances. Both bundled-resource lookups now go through the same idiomatic `importlib.resources` path.
+
+- **`sox_protocol.__version__` was hardcoded** to `"0.0.1"` and never bumped during the 0.1.0/0.1.1/0.1.2 releases — only the `pyproject.toml` `version =` field was updated. Replaced with `importlib.metadata.version("sox-protocol")` so the runtime version always tracks the installed-package metadata. No more drift.
+
+### Migration
+
+- No action required. `pip install --upgrade sox-protocol` picks up the fix.
+
+---
+
 ## [0.1.2] — 2026-05-04 — fix `sox-protocol chat` crash on installed wheels (schema-path resolution)
 
 ### Fixed
