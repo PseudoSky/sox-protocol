@@ -56,12 +56,36 @@ on:
     - cron: "0 6 * * 0"
 
 jobs:
+  # GitHub Actions does not allow `secrets.*` in job-level `if:` expressions
+  # (it raises "Unrecognized named-value: 'secrets'" at workflow-validation
+  # time). The documented pattern is a tiny "check" job that exposes the
+  # secret's presence as an output, which downstream jobs can gate on.
+  # The actual secret value never appears in logs — only a boolean flag.
+  check-secret:
+    name: Check ANTHROPIC_API_KEY presence
+    runs-on: ubuntu-latest
+    outputs:
+      has-key: ${{ steps.probe.outputs.has-key }}
+    steps:
+      - id: probe
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "has-key=true" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY secret is configured; live-e2e will run."
+          else
+            echo "has-key=false" >> "$GITHUB_OUTPUT"
+            echo "ANTHROPIC_API_KEY secret is NOT configured; live-e2e will be skipped."
+          fi
+
   live-e2e:
     name: Live Install E2E (claude CLI + real API)
     runs-on: ubuntu-latest
+    needs: check-secret
     # Silent skip when ANTHROPIC_API_KEY secret is not configured.
-    # This is safe for forks and contributor PRs.
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    # Safe for forks, contributor PRs, and repos that haven't opted in.
+    if: needs.check-secret.outputs.has-key == 'true'
     timeout-minutes: 20
 
     env:
