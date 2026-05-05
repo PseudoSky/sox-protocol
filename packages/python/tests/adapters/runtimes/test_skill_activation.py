@@ -61,6 +61,29 @@ def test_activation_includes_drain_and_heartbeat_steps() -> None:
     assert "channels__heartbeat" in out
 
 
+def test_activation_includes_heartbeat_loop_instruction() -> None:
+    """The activation block instructs the agent to keep heartbeating, not just once."""
+    out = _render_activation_section(True, None)
+    # Step 4 is the loop instruction
+    assert "Keep heartbeating" in out
+    # Two distinct heartbeat call sites: the one-shot (#3) and the loop (#4)
+    assert out.count("channels__heartbeat") >= 2
+    # Default cadence numbers baked in (15s interval, 30s ttl)
+    assert "30 seconds" in out
+    assert "15 seconds" in out
+    # Mentions the server-side override env var so operators know where the
+    # real knob lives (not in the skill, in .mcp.json env).
+    assert "SOX_HEARTBEAT_TTL_DEFAULT" in out
+
+
+def test_activation_mentions_configurable_agent_id_source() -> None:
+    """Step 1 should hint that the env var name is configurable."""
+    out = _render_activation_section(True, None)
+    # Mentions both the default (CLAUDE_AGENT_NAME) and the override mechanism
+    assert "CLAUDE_AGENT_NAME" in out
+    assert "SOX_AGENT_ID_SOURCE" in out
+
+
 # ---------------------------------------------------------------------------
 # render_skill_md — full template wiring
 # ---------------------------------------------------------------------------

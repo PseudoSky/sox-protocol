@@ -170,6 +170,45 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.1.9] — 2026-05-05 — configurable agent-id env var, server-side heartbeat TTL, heartbeat-loop activation step
+
+### Added
+
+- **Configurable `SOX_AGENT_ID_SOURCE` — `env:VARNAME` syntax.**  The MCP server's agent-id resolver now recognises `env:VARNAME` as a valid `SOX_AGENT_ID_SOURCE` value, telling it to read the verified agent_id from an arbitrary env var rather than the built-in `CLAUDE_AGENT_NAME` channel.  Useful when integrating with a host that already exports its own agent-id under a different name (e.g. `SOX_AGENT_NAME` in a project that has its own `sox` worker queue).  Reproduces the issue reported by users running SOX Protocol alongside a colliding `sox` MCP server: `SOX_AGENT_ID_SOURCE=env:SOX_AGENT_NAME` in the `.mcp.json` env block now Just Works.  Resolver extracted into the testable `_resolve_agent_id_from_env(env)` helper in `core/mcp_server/server.py`.
+
+- **`sox-protocol install --agent-id-source` and `sox-protocol upgrade --agent-id-source`.**  CLI flags expose the new `SOX_AGENT_ID_SOURCE` shapes directly:
+
+  ```bash
+  sox-protocol install --agent-id-source env:SOX_AGENT_NAME
+  ```
+
+  The flag is plumbed through to both `.mcp.json` and `.claude/settings.json` MCP server entries.  Default remains `claude_code_agent_name` (read `CLAUDE_AGENT_NAME`).  On `upgrade`, the flag is only forwarded when explicitly provided so a routine upgrade doesn't clobber an already-customized config.
+
+- **Server-side heartbeat TTL override via `SOX_HEARTBEAT_TTL_DEFAULT` env var.**  The `channels__heartbeat` tool now resolves the effective TTL in this order: per-call `ttl=` argument (always wins) → `SOX_HEARTBEAT_TTL_DEFAULT` env var (operator override) → backing-store default (30s).  Set the env var in the MCP server's `.mcp.json` env block to widen or narrow the default for an entire deployment without redeploying client code.  Garbage values (non-integer, ≤0) are warned and ignored.
+
+- **Heartbeat-loop instruction (Step 4) in the auto-subscribe activation block.**  When `--auto-subscribe` is enabled, the rendered `SKILL.md` Activation block now includes a "Step 4 — Keep heartbeating while you work" section that instructs the agent to:
+    - Re-emit `channels__heartbeat(status="online", ttl=30)` after every long tool call or model turn.
+    - Aim for at least one heartbeat every 15 seconds while actively working.
+    - Use `status="busy"` for mid-task quiet periods; let `offline` be implicit when winding down.
+    - Notes that the operator-side knob is the new `SOX_HEARTBEAT_TTL_DEFAULT` env var, so per-agent guesswork isn't required.
+
+  Previously the activation block only told the agent to heartbeat **once**; presence records expired ~30 s later and other agents saw the activated agent drop offline.  The TUI roster now stays populated for the duration of an activated session.
+
+- 9 unit tests in `tests/unit/test_heartbeat_ttl_resolver.py` covering the precedence rules (per-call wins over env, env-only fallback, garbage values warn-and-skip, edge cases at 0/negative values, whitespace handling).
+
+- 16 unit tests in `tests/unit/test_agent_id_resolver.py` covering all four `SOX_AGENT_ID_SOURCE` modes (`claude_code_agent_name`, `env:VARNAME`, empty, unset), fall-throughs, whitespace stripping, and arbitrary env-var names.
+
+- 4 integration tests in `tests/adapters/runtimes/test_claude_code_install.py` covering the `agent_id_source` plumbing into both `.mcp.json` and `settings.json` (default value, `env:VARNAME` value, arbitrary varname, idempotent re-install).
+
+- 2 tests in `tests/adapters/runtimes/test_skill_activation.py` covering the new heartbeat-loop content and the `SOX_AGENT_ID_SOURCE` mention in the activation block.
+
+### Notes
+
+- The activation block bakes in **bundled** default heartbeat numbers (15s interval, 30s TTL).  Operators who need different cadence values set `SOX_HEARTBEAT_TTL_DEFAULT` in the MCP server's env block; the rendered skill text remains the recommended cadence, not an enforced one.
+- All changes are additive and backward-compatible: existing `SOX_AGENT_ID_SOURCE` values (`claude_code_agent_name`, empty/unset) behave exactly as in 0.1.8.
+
+---
+
 ## [0.1.8] — 2026-05-05 — auto-inject SOX MCP permissions; skill-load doc fixes; activation pre-flight
 
 ### Added

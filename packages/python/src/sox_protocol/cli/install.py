@@ -20,6 +20,11 @@ from pathlib import Path
 
 from sox_protocol.adapters.runtimes.claude_code.install import install
 
+# Mirror the runtime adapter's default; kept as a literal here to avoid
+# importing a leading-underscore symbol across module boundaries.  Keep in
+# sync with ``_DEFAULT_AGENT_ID_SOURCE`` in ``adapters.runtimes.claude_code.install``.
+_DEFAULT_AGENT_ID_SOURCE = "claude_code_agent_name"
+
 
 def add_install_subcommand(
     subparsers: argparse._SubParsersAction,  # type: ignore[type-arg]
@@ -79,6 +84,22 @@ def add_install_subcommand(
             "the historical 'ask on every call' UX."
         ),
     )
+    parser.add_argument(
+        "--agent-id-source",
+        default=_DEFAULT_AGENT_ID_SOURCE,
+        metavar="SOURCE",
+        help=(
+            "Which env channel the MCP server should use to resolve the "
+            "verified agent_id at startup.  Default "
+            f"`{_DEFAULT_AGENT_ID_SOURCE}` reads `CLAUDE_AGENT_NAME` (the "
+            "Claude Code subagent runtime channel).  Pass `env:VARNAME` "
+            "(e.g. `env:SOX_AGENT_NAME`) to read an arbitrary env var "
+            "instead — useful when the host already exports its own "
+            "agent-id under a different name.  Pass an empty string to "
+            "fall back to the historical SOX_AGENT_ID-then-CLAUDE_AGENT_NAME "
+            "lookup."
+        ),
+    )
     parser.set_defaults(func=install_command)
 
 
@@ -87,7 +108,8 @@ def install_command(args: argparse.Namespace) -> int:
 
     Args:
         args: Parsed namespace with ``project_dir``, ``quiet``,
-            ``auto_subscribe``, ``default_channels``.
+            ``auto_subscribe``, ``default_channels``, ``no_permissions``,
+            ``agent_id_source``.
 
     Returns:
         Exit code (0 on success).
@@ -98,5 +120,6 @@ def install_command(args: argparse.Namespace) -> int:
         auto_subscribe=getattr(args, "auto_subscribe", False),
         default_channels=getattr(args, "default_channels", None),
         inject_permissions=not getattr(args, "no_permissions", False),
+        agent_id_source=getattr(args, "agent_id_source", _DEFAULT_AGENT_ID_SOURCE),
     )
     return 0

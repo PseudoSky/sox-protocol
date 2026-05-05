@@ -68,6 +68,17 @@ _MCP_SERVER_NAME = "sox"
 # Default backing-store path relative to the project root
 _DEFAULT_DB_RELPATH = ".sox/messages.db"
 
+# Default agent-id source for newly-written .mcp.json entries.
+# Claude Code runtime exports CLAUDE_AGENT_NAME per session; that's our default.
+_DEFAULT_AGENT_ID_SOURCE = "claude_code_agent_name"
+
+# Default heartbeat cadence baked into the auto-subscribe activation block.
+# These values can be overridden per-install via --heartbeat-interval /
+# --heartbeat-ttl.  TTL must exceed interval so a slightly-late beat doesn't
+# flap the agent's online status.
+_DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 15
+_DEFAULT_HEARTBEAT_TTL_SECONDS = 30
+
 # Hooks registered in settings.json
 _HOOK_EVENTS = ["PostToolUse", "Stop", "SubagentStop"]
 
@@ -183,9 +194,13 @@ def _render_activation_section(
     take action on load).
 
     When ``auto_subscribe`` is True, returns a Markdown block that
-    instructs the LLM to subscribe + drain on first use.  Includes any
-    extra channels in *default_channels* alongside the agent's personal
-    inbox (``agent/<your-id>``).
+    instructs the LLM to subscribe + drain + heartbeat-loop on first use.
+    Includes any extra channels in *default_channels* alongside the agent's
+    personal inbox (``agent/<your-agent-id>``).  Heartbeat numbers are the
+    bundled defaults (``_DEFAULT_HEARTBEAT_INTERVAL_SECONDS`` /
+    ``_DEFAULT_HEARTBEAT_TTL_SECONDS``); server-side overrides via
+    ``SOX_HEARTBEAT_TTL_DEFAULT`` apply at runtime when the agent calls
+    ``channels__heartbeat`` with ``ttl=None``.
 
     Args:
         auto_subscribe: Toggles the activation block on/off.
@@ -212,6 +227,9 @@ def _render_activation_section(
             + "])`"
         )
 
+    heartbeat_ttl_seconds = _DEFAULT_HEARTBEAT_TTL_SECONDS
+    heartbeat_interval_seconds = _DEFAULT_HEARTBEAT_INTERVAL_SECONDS
+
     return f"""
 
 ## Activation (auto-subscribe)
@@ -228,7 +246,7 @@ Check that the required MCP tools are present in your tool surface:
 - ``mcp__sox__channels__heartbeat``
 
 If **any** of these tools are missing, the SOX MCP server is not connected to
-this session.  STOP — do **not** attempt steps 1–3.  Instead, tell the user:
+this session.  STOP — do **not** attempt steps 1–4.  Instead, tell the user:
 
 > "I tried to auto-activate the inter-agent-channels skill, but the
 > ``mcp__sox__channels__*`` tools aren't in my tool surface.  Run
@@ -247,9 +265,10 @@ Once the tools are confirmed present, subscribe so other agents can reach you:
 
 {inbox_line}
 
-Replace ``<your-agent-id>`` with the value of your ``SOX_AGENT_ID`` env var
-(or your subagent name from the parent orchestrator).  The MCP server
-already knows your identity — pass it explicitly for clarity.
+Replace ``<your-agent-id>`` with the value of your agent-id env var (the
+installer wires this to ``CLAUDE_AGENT_NAME`` by default; some hosts wire
+``SOX_AGENT_NAME`` or another name via ``SOX_AGENT_ID_SOURCE=env:VARNAME``).
+The MCP server already knows your identity — pass it explicitly for clarity.
 
 ### 2. Drain any pending messages
 
@@ -264,7 +283,31 @@ the messages, ack/nack as appropriate, then proceed.
 
 So other agents see you as online:
 
-`mcp__sox__channels__heartbeat(status="online")`
+`mcp__sox__channels__heartbeat(status="online", ttl={heartbeat_ttl_seconds})`
+
+### 4. Keep heartbeating while you work
+
+Your presence record expires **{heartbeat_ttl_seconds} seconds** after the
+last beat — without ongoing heartbeats other agents will see you as
+offline and the TUI roster will drop you.  Maintain liveness as follows:
+
+- After **every** tool call or model turn that takes more than a few
+  seconds, call:
+
+  `mcp__sox__channels__heartbeat(status="online", ttl={heartbeat_ttl_seconds})`
+
+- Aim for **one heartbeat at least every {heartbeat_interval_seconds} seconds**
+  while you are actively working in this session.  The cadence hooks installed
+  alongside this skill will remind you on every ``PostToolUse`` event — when
+  you receive a reminder that mentions heartbeat, emit one.
+- Set ``status="busy"`` if you are mid-task and won't read your inbox for
+  a while; ``status="offline"`` is implicit when you stop heartbeating, do
+  not call it manually unless you're winding down the session intentionally.
+- TTL is per-call (default {heartbeat_ttl_seconds}s).  An operator can
+  override the *server-side* default by exporting
+  ``SOX_HEARTBEAT_TTL_DEFAULT=<seconds>`` in the MCP server's ``env`` block
+  (in ``.mcp.json``); from the agent's perspective, just keep beating at
+  the recommended cadence and the server will compute the right expiry.
 
 ### After activation
 
@@ -284,20 +327,31 @@ def render_skill_md(
 
     Args:
         auto_subscribe: When True, append an activation block telling the
-            LLM to subscribe + drain on first skill load.  Default False
-            keeps the skill purely descriptive (the historical behavior).
+            LLM to subscribe + drain + heartbeat-loop on first skill load.
+            Default False keeps the skill purely descriptive (historical).
         default_channels: Extra channels to include in the auto-subscribe
             instruction alongside the personal inbox.  Ignored when
             ``auto_subscribe`` is False.
 
     Returns:
         The rendered Markdown string with frontmatter and substituted body.
+
+    Note:
+        The activation block bakes in the *bundled* default heartbeat
+        TTL and interval (``_DEFAULT_HEARTBEAT_TTL_SECONDS`` /
+        ``_DEFAULT_HEARTBEAT_INTERVAL_SECONDS``).  Server-side overrides
+        via ``SOX_HEARTBEAT_TTL_DEFAULT`` apply at runtime when an agent
+        sends a heartbeat with ``ttl=None``; the rendered SKILL.md numbers
+        are the recommended cadence, not the enforced cadence.
     """
     template = _bundled_template()
     discipline_body = _bundled_discipline()
     substituted_body = _substitute_placeholders(discipline_body)
     skill_md = template.replace("{{discipline_body}}", substituted_body)
-    activation = _render_activation_section(auto_subscribe, default_channels)
+    activation = _render_activation_section(
+        auto_subscribe,
+        default_channels,
+    )
     skill_md = skill_md.replace("{{activation_section}}", activation)
     return skill_md
 
@@ -320,8 +374,8 @@ def _write_skill(
         project_dir: Project root.
         dry_run: When True, compute idempotency-equality without writing.
         auto_subscribe: When True, the rendered SKILL.md includes an
-            activation block that tells the LLM to subscribe + drain on
-            first load.  See ``_render_activation_section``.
+            activation block that tells the LLM to subscribe + drain +
+            heartbeat-loop on first load.  See ``_render_activation_section``.
         default_channels: Extra channels to include in the activation
             block alongside the agent's personal inbox.
     """
@@ -396,8 +450,23 @@ def _event_to_script_name(event: str) -> str:
     return mapping.get(event, f"{event.lower()}.sh")
 
 
-def _update_mcp_json(project_dir: Path, *, dry_run: bool = False) -> bool:
-    """Idempotently write/update .mcp.json with the SOX server entry."""
+def _update_mcp_json(
+    project_dir: Path,
+    *,
+    dry_run: bool = False,
+    agent_id_source: str = _DEFAULT_AGENT_ID_SOURCE,
+) -> bool:
+    """Idempotently write/update .mcp.json with the SOX server entry.
+
+    Args:
+        project_dir: Project root.
+        dry_run: When True, compute idempotency-equality without writing.
+        agent_id_source: Value written to ``SOX_AGENT_ID_SOURCE`` in the
+            MCP server's ``env`` block.  Recognized values: ``"claude_code_agent_name"``
+            (default — read CLAUDE_AGENT_NAME), ``"env:VARNAME"`` (read
+            arbitrary env var, e.g. ``env:SOX_AGENT_NAME``), or empty string
+            (historical: SOX_AGENT_ID then CLAUDE_AGENT_NAME).
+    """
     mcp_json_path = _mcp_json_path(project_dir)
     existing: dict[str, Any] = {}
     if mcp_json_path.exists():
@@ -418,9 +487,11 @@ def _update_mcp_json(project_dir: Path, *, dry_run: bool = False) -> bool:
                 # Per spec/ports/identity.md §6: credential lives on the
                 # connection seam, not in tool-call inputs.  This env var
                 # documents to the MCP server which runtime channel supplies
-                # the verified agent_id; for Claude Code, that is the
-                # session-scoped CLAUDE_AGENT_NAME the runtime injects.
-                "SOX_AGENT_ID_SOURCE": "claude_code_agent_name",
+                # the verified agent_id.  Default is "claude_code_agent_name"
+                # (CLAUDE_AGENT_NAME); pass --agent-id-source env:VARNAME
+                # to read a different env var (e.g. SOX_AGENT_NAME) when the
+                # host already exports its own agent-id under another name.
+                "SOX_AGENT_ID_SOURCE": agent_id_source,
             },
         }
 
@@ -440,6 +511,7 @@ def _update_settings(
     *,
     dry_run: bool = False,
     inject_permissions: bool = True,
+    agent_id_source: str = _DEFAULT_AGENT_ID_SOURCE,
 ) -> bool:
     """Idempotently update .claude/settings.json. Returns True if changed.
 
@@ -451,6 +523,9 @@ def _update_settings(
             per-call approval prompts.  Set False to keep the historical
             "ask on every call" UX.  Existing entries in ``permissions.allow``
             are preserved — we only append the SOX tools that aren't there.
+        agent_id_source: Value written to ``SOX_AGENT_ID_SOURCE`` in the
+            settings.json MCP server entry.  See ``_update_mcp_json`` for
+            the recognized values.
     """
     settings_path = _settings_path(project_dir)
     settings = _load_settings(settings_path)
@@ -486,12 +561,8 @@ def _update_settings(
             "args": ["-m", "sox_protocol.core.mcp_server"],
             "env": {
                 "SOX_BACKING_STORE": f"sqlite:///{db_path}",
-                # Per spec/ports/identity.md §6: credential lives on the
-                # connection seam, not in tool-call inputs.  This env var
-                # documents to the MCP server which runtime channel supplies
-                # the verified agent_id; for Claude Code, that is the
-                # session-scoped CLAUDE_AGENT_NAME the runtime injects.
-                "SOX_AGENT_ID_SOURCE": "claude_code_agent_name",
+                # See _update_mcp_json for the agent_id_source semantics.
+                "SOX_AGENT_ID_SOURCE": agent_id_source,
             },
         }
 
@@ -567,6 +638,7 @@ def install(
     auto_subscribe: bool = False,
     default_channels: list[str] | None = None,
     inject_permissions: bool = True,
+    agent_id_source: str = _DEFAULT_AGENT_ID_SOURCE,
 ) -> None:
     """Install the SOX Claude Code adapter into *project_dir*.
 
@@ -579,8 +651,9 @@ def install(
         verbose: When ``True``, print a summary of actions taken to stdout.
         auto_subscribe: When ``True``, append an "Activation" section to
             ``SKILL.md`` that tells the LLM to subscribe to its personal
-            inbox + drain pending messages on first skill load.  Default
-            ``False`` keeps the historical purely-descriptive skill.
+            inbox, drain pending messages, and emit periodic heartbeats on
+            first skill load.  Default ``False`` keeps the historical
+            purely-descriptive skill.
         default_channels: Extra channels to include in the auto-subscribe
             instruction (in addition to ``agent/<your-id>``).  Ignored when
             ``auto_subscribe`` is False.
@@ -588,6 +661,18 @@ def install(
             names to ``permissions.allow`` in ``.claude/settings.json`` so
             agents can call them without per-call approval prompts.  Set
             ``False`` to keep the historical "ask on every call" behavior.
+        agent_id_source: Value written to ``SOX_AGENT_ID_SOURCE`` in the
+            generated ``.mcp.json`` and ``settings.json`` MCP entries.
+            Default ``"claude_code_agent_name"`` reads ``CLAUDE_AGENT_NAME``;
+            pass ``"env:VARNAME"`` (e.g. ``"env:SOX_AGENT_NAME"``) to read
+            an arbitrary env var instead, for hosts that already export
+            their own agent-id under another name.
+
+    Heartbeat cadence (TTL + interval) is configured at server runtime via
+    ``SOX_HEARTBEAT_TTL_DEFAULT`` / ``SOX_HEARTBEAT_INTERVAL_HINT`` env vars
+    on the MCP server's process — set them in the ``.mcp.json`` ``env`` block
+    after install when you need to override the bundled defaults.  See
+    :func:`sox_protocol.core.mcp_server.server.main` for the recognized vars.
     """
     if project_dir is None:
         project_dir = Path.cwd()
@@ -612,13 +697,17 @@ def install(
         actions.append("  Hook scripts already up-to-date")
 
     # 3. .mcp.json  (project MCP server discovery — read by Claude Code at startup)
-    if _update_mcp_json(project_dir):
+    if _update_mcp_json(project_dir, agent_id_source=agent_id_source):
         actions.append(f"  Written {_mcp_json_path(project_dir)}")
     else:
         actions.append("  .mcp.json already up-to-date")
 
     # 4. settings.json  (hooks + allowedMcpServers)
-    if _update_settings(project_dir, inject_permissions=inject_permissions):
+    if _update_settings(
+        project_dir,
+        inject_permissions=inject_permissions,
+        agent_id_source=agent_id_source,
+    ):
         actions.append(f"  Updated {_settings_path(project_dir)}")
     else:
         actions.append("  settings.json already up-to-date")
@@ -687,6 +776,17 @@ def main(argv: list[str] | None = None) -> None:
             ".claude/settings.json's permissions.allow."
         ),
     )
+    install_parser.add_argument(
+        "--agent-id-source",
+        default=_DEFAULT_AGENT_ID_SOURCE,
+        metavar="SOURCE",
+        help=(
+            "Value written to SOX_AGENT_ID_SOURCE in the generated MCP "
+            "server entries.  Default 'claude_code_agent_name' reads "
+            "CLAUDE_AGENT_NAME; pass 'env:VARNAME' (e.g. "
+            "'env:SOX_AGENT_NAME') to read an arbitrary env var instead."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -697,6 +797,7 @@ def main(argv: list[str] | None = None) -> None:
             auto_subscribe=getattr(args, "auto_subscribe", False),
             default_channels=getattr(args, "default_channels", None),
             inject_permissions=not getattr(args, "no_permissions", False),
+            agent_id_source=getattr(args, "agent_id_source", _DEFAULT_AGENT_ID_SOURCE),
         )
     else:
         parser.print_help()

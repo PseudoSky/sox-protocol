@@ -244,6 +244,68 @@ def _build_store(uri: str) -> BackingStore:
 
 
 # ---------------------------------------------------------------------------
+# Agent-id resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_agent_id_from_env(env: dict[str, str] | None = None) -> str:
+    """Resolve the agent_id string from the process environment.
+
+    Per spec/ports/identity.md §6 the credential — including agent_id — lives
+    on the connection seam (here: MCP launch params), not in tool-call inputs.
+    The ``SOX_AGENT_ID_SOURCE`` env var declares which channel the runtime
+    adapter is using to inject the verified identity.
+
+    Recognized ``SOX_AGENT_ID_SOURCE`` values:
+        ``claude_code_agent_name``
+            Read ``CLAUDE_AGENT_NAME`` (Claude Code subagent runtime).  Falls
+            back to ``SOX_AGENT_ID`` then literal ``"default"``.
+        ``env:VARNAME``
+            Read an arbitrary env var (e.g. ``env:SOX_AGENT_NAME``).  Useful
+            when integrating with a host that already exports its own
+            agent-id env var under a different name.  Falls back to
+            ``SOX_AGENT_ID`` then ``CLAUDE_AGENT_NAME`` then ``"default"``.
+        ``""`` / unset
+            Historical default: ``SOX_AGENT_ID`` then ``CLAUDE_AGENT_NAME``
+            then ``"default"``.
+
+    Args:
+        env: Override mapping used in tests.  ``None`` (default) reads
+            ``os.environ`` directly.
+
+    Returns:
+        The resolved agent_id string.  Always non-empty (falls back to
+        ``"default"``).
+    """
+    if env is None:
+        env = dict(os.environ)
+
+    agent_id_source = (env.get("SOX_AGENT_ID_SOURCE") or "").strip()
+
+    if agent_id_source == "claude_code_agent_name":
+        return (
+            (env.get("CLAUDE_AGENT_NAME") or "").strip()
+            or (env.get("SOX_AGENT_ID") or "").strip()
+            or "default"
+        )
+
+    if agent_id_source.startswith("env:"):
+        custom_var = agent_id_source[len("env:"):].strip()
+        return (
+            ((env.get(custom_var) or "").strip() if custom_var else "")
+            or (env.get("SOX_AGENT_ID") or "").strip()
+            or (env.get("CLAUDE_AGENT_NAME") or "").strip()
+            or "default"
+        )
+
+    return (
+        (env.get("SOX_AGENT_ID") or "").strip()
+        or (env.get("CLAUDE_AGENT_NAME") or "").strip()
+        or "default"
+    )
+
+
+# ---------------------------------------------------------------------------
 # FastMCP server factory
 # ---------------------------------------------------------------------------
 
@@ -293,24 +355,10 @@ def create_server() -> FastMCP[dict[str, object]]:
         to produce per-call :class:`~sox_protocol.core.identity.envelope.SignedRequest`
         envelopes.  Not for direct use by tool handlers.
     """
-    # Resolve the agent_id from the configured source.
-    # Per spec/ports/identity.md §6, the credential — including agent_id —
-    # lives on the connection seam (here: MCP launch params), not in
-    # tool-call inputs.  ``SOX_AGENT_ID_SOURCE`` declares which env channel
-    # the runtime adapter is using to inject the verified identity.
-    agent_id_source = os.environ.get("SOX_AGENT_ID_SOURCE", "").strip()
-    if agent_id_source == "claude_code_agent_name":
-        agent_id = (
-            os.environ.get("CLAUDE_AGENT_NAME", "").strip()
-            or os.environ.get("SOX_AGENT_ID", "").strip()
-            or "default"
-        )
-    else:
-        agent_id = (
-            os.environ.get("SOX_AGENT_ID", "").strip()
-            or os.environ.get("CLAUDE_AGENT_NAME", "").strip()
-            or "default"
-        )
+    # Resolve the agent_id from the configured source.  See
+    # ``_resolve_agent_id_from_env`` for the precedence rules and the
+    # recognized ``SOX_AGENT_ID_SOURCE`` values.
+    agent_id = _resolve_agent_id_from_env()
 
     backing_store_uri = os.environ.get("SOX_BACKING_STORE", "memory://")
     _log.info(

@@ -41,6 +41,7 @@ import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _installed_version
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -330,6 +331,19 @@ def add_upgrade_subcommand(
             "is to ensure all 15 SOX tools are present in the allow list."
         ),
     )
+    parser.add_argument(
+        "--agent-id-source",
+        default=None,
+        metavar="SOURCE",
+        help=(
+            "Override the MCP server's SOX_AGENT_ID_SOURCE.  Same syntax as "
+            "`sox-protocol install --agent-id-source` — pass "
+            "`env:SOX_AGENT_NAME` (or any other env var name) to read the "
+            "agent_id from a custom env channel.  Default omits the flag, "
+            "in which case install() applies its built-in default "
+            "(`claude_code_agent_name`)."
+        ),
+    )
     parser.set_defaults(func=upgrade_command)
 
 
@@ -403,13 +417,19 @@ def upgrade_command(args: argparse.Namespace) -> int:
     # ── Step 2/3: file refresh via the existing installer (idempotent) ─────
     if not quiet:
         print("Step 2/3: refreshing installed files…")
-    install(
-        project_dir=project_dir,
-        verbose=not quiet,
-        auto_subscribe=getattr(args, "auto_subscribe", False),
-        default_channels=getattr(args, "default_channels", None),
-        inject_permissions=not getattr(args, "no_permissions", False),
-    )
+    install_kwargs: dict[str, Any] = {
+        "project_dir": project_dir,
+        "verbose": not quiet,
+        "auto_subscribe": getattr(args, "auto_subscribe", False),
+        "default_channels": getattr(args, "default_channels", None),
+        "inject_permissions": not getattr(args, "no_permissions", False),
+    }
+    # Only forward --agent-id-source when explicitly provided so we don't
+    # overwrite an already-customized .mcp.json on a routine upgrade.
+    agent_id_source = getattr(args, "agent_id_source", None)
+    if agent_id_source is not None:
+        install_kwargs["agent_id_source"] = agent_id_source
+    install(**install_kwargs)
     if not quiet:
         print()
 

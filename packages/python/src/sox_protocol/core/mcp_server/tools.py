@@ -45,9 +45,57 @@ enforced).
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import time
 from typing import Any
+
+_log = logging.getLogger(__name__)
+
+# Server-side override for the default heartbeat TTL applied when an agent
+# calls channels__heartbeat with ``ttl=None``.  Read on every call so an
+# operator can adjust without restarting the server.  When unset (or
+# unparseable) the request falls through with ``ttl=None`` and each backing
+# store applies its own built-in default (30s in the in-tree adapters).
+#
+# Per-call ttl always wins over this env var — the override only widens or
+# narrows the *default* used when the client did not specify one.
+_HEARTBEAT_TTL_ENV = "SOX_HEARTBEAT_TTL_DEFAULT"
+
+
+def _resolve_heartbeat_ttl(per_call_ttl: int | None) -> int | None:
+    """Resolve the effective heartbeat TTL.
+
+    Order of precedence:
+      1. ``per_call_ttl`` (the agent's explicit ``ttl=`` argument).
+      2. ``SOX_HEARTBEAT_TTL_DEFAULT`` env var (operator override).
+      3. ``None`` — the backing store applies its built-in default.
+    """
+    if per_call_ttl is not None:
+        return per_call_ttl
+    raw = os.environ.get(_HEARTBEAT_TTL_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = int(raw)
+    except ValueError:
+        _log.warning(
+            "Ignoring %s=%r — must be an integer (seconds).  Falling back "
+            "to the backing-store default.",
+            _HEARTBEAT_TTL_ENV,
+            raw,
+        )
+        return None
+    if parsed <= 0:
+        _log.warning(
+            "Ignoring %s=%d — must be positive.  Falling back to the "
+            "backing-store default.",
+            _HEARTBEAT_TTL_ENV,
+            parsed,
+        )
+        return None
+    return parsed
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastmcp import Context, FastMCP
@@ -341,7 +389,10 @@ def register_tools(mcp: FastMCP[Any]) -> None:
 
         Args:
             status: One of online/busy/offline.
-            ttl: Optional TTL in seconds (default 30).
+            ttl: Optional TTL in seconds.  When omitted (``None``), the
+                server consults the ``SOX_HEARTBEAT_TTL_DEFAULT`` env var;
+                if also unset, each backing-store implementation applies
+                its own default (30s in the in-tree adapters).
             ctx: FastMCP context (injected automatically).
 
         Returns:
@@ -350,9 +401,10 @@ def register_tools(mcp: FastMCP[Any]) -> None:
         lc = ctx.fastmcp._lifespan_result or {}
         pipeline, agent_id, credential = _get_pipeline_and_credential(lc, "channels_heartbeat")
         connection_id = str(ctx.client_id) if hasattr(ctx, "client_id") else "stdio"
+        effective_ttl = _resolve_heartbeat_ttl(ttl)
         return await pipeline.dispatch(
             "channels_heartbeat",
-            {"agent_id": agent_id, "status": status, "ttl": ttl},
+            {"agent_id": agent_id, "status": status, "ttl": effective_ttl},
             connection_id=connection_id,
             metadata={"_connection_credential": credential},
         )

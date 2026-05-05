@@ -373,3 +373,67 @@ def test_render_skill_md_has_frontmatter() -> None:
     assert rendered.startswith("---"), "SKILL.md must start with YAML frontmatter"
     assert "name: inter-agent-channels" in rendered
     assert "description:" in rendered
+
+
+# ---------------------------------------------------------------------------
+# agent_id_source plumbing — install() honors the override and writes it
+# into both .mcp.json and .claude/settings.json.
+# ---------------------------------------------------------------------------
+
+
+def test_install_default_agent_id_source_is_claude_code(project: Path) -> None:
+    """Without override, both files use the historical claude_code_agent_name."""
+    install(project_dir=project, verbose=False)
+
+    mcp = json.loads((project / ".mcp.json").read_text())
+    settings = json.loads((project / ".claude" / "settings.json").read_text())
+
+    assert mcp["mcpServers"][_MCP_SERVER_NAME]["env"]["SOX_AGENT_ID_SOURCE"] == "claude_code_agent_name"
+    assert (
+        settings["mcpServers"][_MCP_SERVER_NAME]["env"]["SOX_AGENT_ID_SOURCE"]
+        == "claude_code_agent_name"
+    )
+
+
+def test_install_with_env_var_agent_id_source(project: Path) -> None:
+    """``--agent-id-source env:SOX_AGENT_NAME`` writes through to both files."""
+    install(
+        project_dir=project,
+        verbose=False,
+        agent_id_source="env:SOX_AGENT_NAME",
+    )
+
+    mcp = json.loads((project / ".mcp.json").read_text())
+    settings = json.loads((project / ".claude" / "settings.json").read_text())
+
+    assert mcp["mcpServers"][_MCP_SERVER_NAME]["env"]["SOX_AGENT_ID_SOURCE"] == "env:SOX_AGENT_NAME"
+    assert (
+        settings["mcpServers"][_MCP_SERVER_NAME]["env"]["SOX_AGENT_ID_SOURCE"]
+        == "env:SOX_AGENT_NAME"
+    )
+
+
+def test_install_with_arbitrary_env_var_agent_id_source(project: Path) -> None:
+    """Any env:VARNAME string is forwarded verbatim — no whitelist."""
+    install(
+        project_dir=project,
+        verbose=False,
+        agent_id_source="env:MY_HOST_AGENT_ID",
+    )
+
+    mcp = json.loads((project / ".mcp.json").read_text())
+    assert (
+        mcp["mcpServers"][_MCP_SERVER_NAME]["env"]["SOX_AGENT_ID_SOURCE"]
+        == "env:MY_HOST_AGENT_ID"
+    )
+
+
+def test_install_with_agent_id_source_idempotent(project: Path) -> None:
+    """Running install twice with the same agent_id_source produces no diff."""
+    install(project_dir=project, verbose=False, agent_id_source="env:SOX_AGENT_NAME")
+    mcp_first = (project / ".mcp.json").read_text()
+
+    install(project_dir=project, verbose=False, agent_id_source="env:SOX_AGENT_NAME")
+    mcp_second = (project / ".mcp.json").read_text()
+
+    assert mcp_first == mcp_second
