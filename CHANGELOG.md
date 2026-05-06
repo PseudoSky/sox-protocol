@@ -170,6 +170,24 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.2.2] — 2026-05-05 — TUI keymap fix: typing in the compose bar now works
+
+### Bug fixes
+
+- **`q` keystroke quit the TUI instead of typing into the compose bar.**  The app-level `BINDINGS` declared `Binding("q", "quit", "Quit")`, which intercepted every literal `q` keystroke before the focused Input widget could see it.  Typing "quick brown fox" quit on the first letter.  Quit is now Ctrl-Q (Ctrl-C still works).
+
+- **Initial focus landed on a non-typing pane.**  When the TUI mounted, focus went to the first focusable widget Textual found (typically the channel-list pane), so even non-`q` keystrokes silently went nowhere until the user tabbed across.  `on_mount` now calls `self.set_focus(self.query_one("#compose-input"))` after the first render so the cursor is in the message field immediately.
+
+- **`tab` was bound to pane-cycling.**  That swallowed the literal Tab character users expect inside an Input field.  Pane cycling is now Ctrl-Right (forward) and Ctrl-Left (back), with a new `action_cycle_focus_back` action.  Tab is left to Textual's default Input handling.
+
+- **Pane cycle order updated.**  The cycle now starts at the compose Input and walks `compose-input → channel-list-pane → message-feed-pane → agent-roster-pane`, with `_focus_pane` resolving the compose-bar wrapper to its child Input so Ctrl-Right wraps back into a typeable field.
+
+### Notes
+
+- No test changes needed — no existing test exercised the bindings directly.  Lint clean.
+
+---
+
 ## [0.2.1] — 2026-05-05 — TUI roster live-refresh + signature-based MCP server discovery
 
 ### Bug fixes

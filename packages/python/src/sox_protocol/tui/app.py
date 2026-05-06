@@ -71,10 +71,17 @@ class SoxChatApp(App[None]):  # pragma: no cover
     TITLE = "SOX Chat"
     SUB_TITLE = "SOX Protocol inter-agent messaging"
 
+    # Bindings used to include a bare ``q`` shortcut that quit the app —
+    # which broke typing in the compose bar (every literal "q" the user
+    # hit was intercepted by the binding before the Input widget could
+    # receive it).  Quit is now Ctrl-Q (and Ctrl-C still works).  Tab is
+    # available when the user is focused on a non-Input pane; the Input
+    # widget consumes Tab as a literal character (Textual default).
     BINDINGS = [
-        Binding("tab", "cycle_focus", "Next pane"),
         Binding("ctrl+c", "quit", "Quit"),
-        Binding("q", "quit", "Quit"),
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+right", "cycle_focus", "Next pane"),
+        Binding("ctrl+left", "cycle_focus_back", "Previous pane"),
     ]
 
     CSS = """
@@ -190,6 +197,24 @@ class SoxChatApp(App[None]):  # pragma: no cover
             self._roster_refresh_loop(), name="sox-tui-roster-refresh"
         )
 
+        # Focus the compose Input so the user can start typing
+        # immediately.  Without this, focus lands on whichever pane
+        # Textual picks first (typically ChannelList), so the user has
+        # to tab around before keystrokes reach the message field.
+        # Use call_after_refresh so the Input has been mounted by the
+        # time we try to query for it.
+        self.call_after_refresh(self._focus_compose_input)
+
+    def _focus_compose_input(self) -> None:
+        """Set focus on the compose-bar Input widget."""
+        try:
+            self.set_focus(self.query_one("#compose-input"))
+        except Exception:
+            # If the Input isn't mounted yet for some reason, fall back
+            # to the wrapper pane — the user can tab from there.
+            with contextlib.suppress(Exception):
+                self.set_focus(self.query_one("#compose-bar-pane"))
+
     async def on_unmount(self) -> None:
         """Graceful shutdown: stop pump, stop client."""
         if self._heartbeat_task and not self._heartbeat_task.done():
@@ -299,28 +324,59 @@ class SoxChatApp(App[None]):  # pragma: no cover
         except Exception:  # noqa: BLE001
             pass
 
+    # Pane IDs in the order the cycle action should walk through them.
+    _PANE_CYCLE_IDS = (
+        "compose-input",          # the Input widget inside compose-bar-pane
+        "channel-list-pane",
+        "message-feed-pane",
+        "agent-roster-pane",
+    )
+
+    def _focus_pane(self, pane_id: str) -> None:
+        """Focus *pane_id*; if it's a wrapper, drill into the focusable child.
+
+        The compose bar's outer Widget is not focusable by Textual's
+        default rules — its child Input is.  So when the cycle action
+        lands on the compose pane we resolve to the Input widget.
+        """
+        try:
+            target = self.query_one(f"#{pane_id}")
+        except Exception:
+            return
+        # The compose Input lives directly in self.query_one (it has its
+        # own id ``compose-input``); the pane IDs above already include
+        # the Input id directly so this branch is mostly defensive.
+        self.set_focus(target)
+
     def action_cycle_focus(self) -> None:
-        """Tab through the four panes."""
-        pane_ids = [
-            "channel-list-pane",
-            "message-feed-pane",
-            "agent-roster-pane",
-            "compose-bar-pane",
-        ]
+        """Cycle focus forward through the panes (Ctrl-Right)."""
+        pane_ids = list(self._PANE_CYCLE_IDS)
         focused = self.focused
         if focused is None:
-            self.set_focus(self.query_one("#channel-list-pane"))
+            self._focus_pane(pane_ids[0])
             return
-        current_id = focused.id
-        if current_id is None:
+        current_id = focused.id or ""
+        try:
+            idx = pane_ids.index(current_id)
+        except ValueError:
             idx = -1
-        else:
-            try:
-                idx = pane_ids.index(current_id)
-            except ValueError:
-                idx = -1
         next_id = pane_ids[(idx + 1) % len(pane_ids)]
-        self.set_focus(self.query_one(f"#{next_id}"))
+        self._focus_pane(next_id)
+
+    def action_cycle_focus_back(self) -> None:
+        """Cycle focus backward through the panes (Ctrl-Left)."""
+        pane_ids = list(self._PANE_CYCLE_IDS)
+        focused = self.focused
+        if focused is None:
+            self._focus_pane(pane_ids[0])
+            return
+        current_id = focused.id or ""
+        try:
+            idx = pane_ids.index(current_id)
+        except ValueError:
+            idx = 0
+        prev_id = pane_ids[(idx - 1) % len(pane_ids)]
+        self._focus_pane(prev_id)
 
 
 def run(
