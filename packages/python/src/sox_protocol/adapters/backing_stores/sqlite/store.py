@@ -88,7 +88,7 @@ class SqliteStore(BackingStore):
         msg_id, sent_at, seq = await store.send("ticket:X", "agent-a", {"text": "hi"})
     """
 
-    schema_version: str = "1.2"
+    schema_version: str = "1.3"
 
     def __init__(
         self,
@@ -105,7 +105,10 @@ class SqliteStore(BackingStore):
         self._recv_lock: asyncio.Lock = asyncio.Lock()
         # TODO: persist to DB in future
         self._ack_records: dict[str, dict[str, object]] = {}
-        self._liveness: dict[str, dict[str, object]] = {}
+        # Liveness moved to the ``liveness`` SQLite table in schema v1.3 so
+        # heartbeat state survives across MCP server processes; an MCP server
+        # spawned by Claude Code and one spawned by ``sox-protocol chat``
+        # writing to the same SQLite file now see each other's heartbeats.
         self._groups: dict[str, list[dict[str, object]]] = {}
 
     # ------------------------------------------------------------------
@@ -553,18 +556,34 @@ class SqliteStore(BackingStore):
     async def heartbeat(self, agent_id: str, status: str, ttl: int | None = None) -> dict[str, object]:
         """Update liveness record for agent_id and emit on sox/presence.
 
+        Persisted to the ``liveness`` SQLite table (schema v1.3+) so the
+        heartbeat is visible to any other process opening the same DB file
+        — which is the cross-process case that motivated the v1.3 schema
+        bump (Claude Code agent's MCP server + ``sox-protocol chat`` TUI's
+        MCP server pointing at the same store).
+
         Spec: spec/operations/channels_heartbeat.output.schema.json
         Spec: spec/primitives/presence.md §5
         """
+        conn = self._require_conn()
         now = time.time()
         expires_at = now + (ttl or 30)
-        existing = self._liveness.get(agent_id, {})
-        self._liveness[agent_id] = {
-            "status": status,
-            "recorded_at": now,
-            "expires_at": expires_at,
-            "namespace": existing.get("namespace"),
-        }
+        # Preserve any previously-set namespace on UPSERT (heartbeat doesn't
+        # set namespace; namespace is intended for future explicit
+        # registration calls).
+        await conn.execute(
+            """
+            INSERT INTO liveness(agent_id, status, recorded_at, expires_at, namespace)
+            VALUES (?, ?, ?, ?, NULL)
+            ON CONFLICT(agent_id) DO UPDATE SET
+                status      = excluded.status,
+                recorded_at = excluded.recorded_at,
+                expires_at  = excluded.expires_at
+            """,
+            (agent_id, status, now, expires_at),
+        )
+        await conn.commit()
+
         # Emit presence-change event on sox/presence (spec/primitives/presence.md §5).
         await self.send(
             "sox/presence",
@@ -586,22 +605,40 @@ class SqliteStore(BackingStore):
     async def list_agents(self, status_filter: list[str] | None = None, namespace: str | None = None) -> list[dict[str, object]]:
         """Return liveness table for all known agents.
 
+        Reads from the persisted ``liveness`` SQLite table (schema v1.3+).
+        Cross-process visible: any agent that has called ``heartbeat()`` on
+        the same DB file appears here, regardless of which MCP server
+        process performed the heartbeat.
+
         Each entry conforms to ``spec/operations/list_agents.output.schema.json``:
         - ``agent_id``: str
         - ``presence_state``: one of "online", "busy", "stale", "offline"
         - ``last_heartbeat_at``: Unix nanoseconds (int); 0 if never heartbeated
         - ``namespace``: str | None
-
-        TODO: persist to DB in future
         """
+        conn = self._require_conn()
         now = time.time()
+
+        if namespace is None:
+            query = (
+                "SELECT agent_id, status, recorded_at, expires_at, namespace "
+                "FROM liveness"
+            )
+            params: tuple[object, ...] = ()
+        else:
+            query = (
+                "SELECT agent_id, status, recorded_at, expires_at, namespace "
+                "FROM liveness WHERE namespace = ?"
+            )
+            params = (namespace,)
+
+        async with conn.execute(query, params) as cur:
+            rows = await cur.fetchall()
+
         result: list[dict[str, object]] = []
-        for aid, rec in self._liveness.items():
-            ns = rec.get("namespace")
-            if namespace is not None and ns != namespace:
-                continue
-            expires_at = float(str(rec["expires_at"]))
-            reported = str(rec["status"])
+        for row in rows:
+            reported = str(row["status"])
+            expires_at = float(row["expires_at"])
             if reported == "offline":
                 presence = "offline"
             elif expires_at <= now:
@@ -610,12 +647,12 @@ class SqliteStore(BackingStore):
                 presence = reported  # "online" or "busy"
             if status_filter is not None and presence not in status_filter:
                 continue
-            recorded_at_ns = int(float(str(rec["recorded_at"])) * 1_000_000_000)
+            recorded_at_ns = int(float(row["recorded_at"]) * 1_000_000_000)
             result.append({
-                "agent_id": aid,
+                "agent_id": row["agent_id"],
                 "presence_state": presence,
                 "last_heartbeat_at": recorded_at_ns,
-                "namespace": ns,
+                "namespace": row["namespace"],
             })
         return result
 

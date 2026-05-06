@@ -14,7 +14,9 @@ import argparse
 import sys
 
 from sox_protocol import __version__
+from sox_protocol.cli.channels import add_channels_subcommand
 from sox_protocol.cli.chat import register_subparser as add_chat_subcommand
+from sox_protocol.cli.config import add_config_subcommand
 from sox_protocol.cli.install import add_install_subcommand
 from sox_protocol.cli.lint_discipline import add_lint_discipline_subcommand
 from sox_protocol.cli.serve import add_serve_subcommand
@@ -57,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     add_upgrade_subcommand(subparsers)
     add_verify_subcommand(subparsers)
     add_lint_discipline_subcommand(subparsers)
+    add_channels_subcommand(subparsers)
+    add_config_subcommand(subparsers)
 
     # `sox-protocol version` subcommand — same output as `--version`, but
     # discoverable via tab completion + listed in the subcommand help.

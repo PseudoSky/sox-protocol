@@ -317,21 +317,27 @@ class TestSqliteStoreNewMethods:
 
     @pytest.mark.asyncio
     async def test_list_agents_namespace_filter(self, sqlite_mem: SqliteStore) -> None:
-        """list_agents namespace filter matches the namespace field in the liveness record."""
+        """list_agents namespace filter matches the namespace column in the liveness table.
+
+        Schema v1.3 moved liveness from in-process dict to a SQLite table;
+        namespace is settable via direct INSERT until a public namespace-set
+        method lands.
+        """
         import time as _time
         now = _time.time()
-        sqlite_mem._liveness["agent-e"] = {
-            "status": "online",
-            "recorded_at": now,
-            "expires_at": now + 30,
-            "namespace": "ns1",
-        }
-        sqlite_mem._liveness["agent-f"] = {
-            "status": "online",
-            "recorded_at": now,
-            "expires_at": now + 30,
-            "namespace": "other",
-        }
+        conn = sqlite_mem._require_conn()
+        await conn.execute(
+            "INSERT INTO liveness(agent_id, status, recorded_at, expires_at, namespace) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("agent-e", "online", now, now + 30, "ns1"),
+        )
+        await conn.execute(
+            "INSERT INTO liveness(agent_id, status, recorded_at, expires_at, namespace) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("agent-f", "online", now, now + 30, "other"),
+        )
+        await conn.commit()
+
         result = await sqlite_mem.list_agents(namespace="ns1")
         agent_ids = [r["agent_id"] for r in result]
         assert "agent-e" in agent_ids

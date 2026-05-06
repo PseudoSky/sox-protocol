@@ -22,3 +22,15 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     channel_pattern TEXT NOT NULL,
     PRIMARY KEY (agent_id, channel_pattern)
 );
+
+-- liveness — added in schema v1.3.  Cross-process heartbeat state.
+-- Pre-v1.3 this lived in ``SqliteStore._liveness`` (per-process dict),
+-- which made the agent roster invisible across MCP server boundaries.
+CREATE TABLE IF NOT EXISTS liveness (
+    agent_id     TEXT    PRIMARY KEY,
+    status       TEXT    NOT NULL,        -- 'online' | 'busy' | 'offline'
+    recorded_at  REAL    NOT NULL,        -- Unix epoch seconds (float)
+    expires_at   REAL    NOT NULL,        -- Unix epoch seconds (float); > now ⇒ live
+    namespace    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_liveness_expires_at ON liveness(expires_at);

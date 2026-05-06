@@ -111,7 +111,7 @@ async def test_v1_0_db_gets_seq_column_after_initialize(tmp_path: Path) -> None:
         assert await _column_exists(store._conn, "messages", "seq")
         assert await _column_exists(store._conn, "messages", "reply_to")
         v = await get_persisted_version(store._conn)
-        assert v == "1.2"
+        assert v == "1.3"
     finally:
         await store.close()
 
@@ -156,7 +156,7 @@ async def test_initialize_is_idempotent_on_migrated_db(tmp_path: Path) -> None:
     try:
         assert s2._conn is not None
         v = await get_persisted_version(s2._conn)
-        assert v == "1.2"
+        assert v == "1.3"
         # Existing rows still present and consistent.
         async with s2._conn.execute("SELECT COUNT(*) FROM messages") as cur:
             row = await cur.fetchone()
@@ -176,7 +176,7 @@ async def test_fresh_db_records_target_version_directly(tmp_path: Path) -> None:
     try:
         assert store._conn is not None
         v = await get_persisted_version(store._conn)
-        assert v == "1.2"
+        assert v == "1.3"
     finally:
         await store.close()
 
@@ -243,8 +243,8 @@ async def test_no_op_when_already_at_target(tmp_path: Path) -> None:
     await store.initialize()
     try:
         assert store._conn is not None
-        starting, applied = await migrate(store._conn, "1.2")
-        assert starting == "1.2"
+        starting, applied = await migrate(store._conn, "1.3")
+        assert starting == "1.3"
         assert applied == []
     finally:
         await store.close()

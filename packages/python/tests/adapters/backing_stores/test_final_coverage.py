@@ -169,10 +169,17 @@ async def test_sqlite_list_agents_offline_status(sqlite_store: SqliteStore) -> N
 
 @pytest.mark.asyncio
 async def test_sqlite_list_agents_stale_status(sqlite_store: SqliteStore) -> None:
-    """Line 571: list_agents returns 'stale' when expires_at is in the past."""
+    """list_agents returns 'stale' when expires_at is in the past.
+
+    Schema v1.3+: liveness lives in a SQLite table; backdate via UPDATE.
+    """
     await sqlite_store.heartbeat("agent-stale", "online", ttl=60)
-    # Backdate expires_at directly so expires_at <= now
-    sqlite_store._liveness["agent-stale"]["expires_at"] = time.time() - 1.0
+    conn = sqlite_store._require_conn()
+    await conn.execute(
+        "UPDATE liveness SET expires_at = ? WHERE agent_id = ?",
+        (time.time() - 1.0, "agent-stale"),
+    )
+    await conn.commit()
 
     agents = await sqlite_store.list_agents()
     statuses = {a["agent_id"]: a["presence_state"] for a in agents}

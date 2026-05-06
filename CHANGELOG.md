@@ -170,6 +170,75 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.2.0] — 2026-05-05 — cross-process liveness (schema v1.3) + `sox-protocol channels` CLI + `sox-protocol config`
+
+### Bug fixes
+
+- **Cross-process heartbeat visibility (the real "agents pane is empty" fix).**  Pre-0.2.0, `SqliteStore.heartbeat()` wrote to a per-process Python dict (`self._liveness`) annotated `# TODO: persist to DB in future`.  Two MCP server processes pointing at the same SQLite file — the canonical case where Claude Code agents and `sox-protocol chat` need to see each other — couldn't share liveness, so the TUI's Agents pane was always empty.
+
+  Schema v1.3 adds a persistent `liveness` table:
+
+  ```sql
+  CREATE TABLE IF NOT EXISTS liveness (
+      agent_id     TEXT    PRIMARY KEY,
+      status       TEXT    NOT NULL,        -- 'online' | 'busy' | 'offline'
+      recorded_at  REAL    NOT NULL,        -- Unix epoch seconds
+      expires_at   REAL    NOT NULL,        -- Unix epoch seconds; > now ⇒ live
+      namespace    TEXT
+  );
+  ```
+
+  `heartbeat()` now UPSERTs into this table; `list_agents()` SELECTs from it.  Migration `v1_2_to_v1_3.sql` is additive (`CREATE TABLE IF NOT EXISTS`); pre-existing `messages`, `subscriptions`, `_sox_meta` rows survive intact.  Verified against a synthetic v1.2 database with messages → migration upgrade → liveness table operational, no data loss (`tests/adapters/backing_stores/test_liveness_persistence.py::test_migration_v1_2_to_v1_3_preserves_existing_data`).
+
+  Reproduces the "I run `sox-protocol chat` and the agent roster is empty" issue.
+
+### Added — CLI
+
+- **`sox-protocol channels` subcommand family.**  One-shot shell access to the same operations the MCP server exposes as `mcp__sox__channels__*` tools.  Each subcommand discovers the project's backing-store URI from `.mcp.json` (or `SOX_BACKING_STORE` env), resolves the agent_id from the same `SOX_AGENT_ID_SOURCE` chain the MCP server uses, then talks to the BackingStore port directly:
+
+  ```text
+  sox-protocol channels send <channel> [--text TEXT | --body JSON] [--correlation-id ID] [--reply-to ID] [--agent-id ID]
+  sox-protocol channels recv [--channel CH ...] [--max N] [--agent-id ID]
+  sox-protocol channels subscribe <pattern> [--agent-id ID]
+  sox-protocol channels unsubscribe <pattern> [--agent-id ID]
+  sox-protocol channels ack <message-id> [--status accept|reject|nack] [--reason TEXT] [--agent-id ID]
+  sox-protocol channels heartbeat [--status online|busy|offline] [--ttl SEC] [--agent-id ID]
+  sox-protocol channels list-agents [--status STATUS ...] [--namespace NS]
+  sox-protocol channels list-channels [--since EPOCH]
+  sox-protocol channels replay <channel> [--since SEQ] [--until SEQ] [--limit N]
+  sox-protocol channels listen [--channel CH ...] [--agent-id ID]   # long-running drain
+  ```
+
+  Output is JSON by default (indented); pass `--compact` for `jq`-friendly single-line output.  All subcommands accept `--agent-id ID` to override the default identity resolution.
+
+  This is the "give me the same operations the TUI has, in the shell" surface the user asked for.  Bypasses the MCP-over-stdio transport for speed; side-effects on the SQLite database are identical to what an MCP-mediated call would produce.  Long-running `listen` constructs the necessary watch loop locally.
+
+- **`sox-protocol config` subcommand.**  Read-only JSON dump of the resolved configuration for the current directory: agent_id, backing-store URI (with parsed sqlite path + existence check), `.mcp.json` discovery path, Claude Code MCP server registration state, hook events, `permissions.allow` entries that match `mcp__sox__*` tools, skill SKILL.md presence, and effective values for `SOX_AGENT_ID_SOURCE` / `SOX_HEARTBEAT_TTL_DEFAULT` / `SOX_FORCE_DRAIN_ON_STOP` / etc. (process env wins; falls back to `.mcp.json` env block).
+
+  Useful for `sox-protocol config | jq …` diagnostics, bug reports, and confirming the project is wired up correctly without launching the TUI.
+
+- **`sox_protocol.cli._session` shared helper module.**  Reusable session helpers (`discover_mcp_env`, `resolve_backing_store_uri`, `resolve_agent_id`, `open_store`) factored out so the chat TUI, the new `channels` family, and the `config` command share a single discovery path.
+
+### Schema
+
+- **SQLite schema v1.2 → v1.3.**  Added `liveness` table + index `idx_liveness_expires_at`.  `_MIGRATION_CHAIN` extended.  `_table_exists` helper added to migration runner for table-creation structural-skip (mirrors `_column_exists` for column-add migrations).  `SqliteStore.schema_version` bumped to "1.3".
+
+### Tests
+
+- 7 unit tests in `tests/adapters/backing_stores/test_liveness_persistence.py` covering: cross-process visibility (close-then-reopen), concurrent stores share liveness, heartbeat UPSERT, stale-status TTL, status filter, explicit offline persistence, migration preserves pre-existing data.
+
+- 11 integration tests in `tests/cli/test_channels_cli.py` covering: heartbeat → list-agents round-trip, send → subscribe → recv round-trip, `--text` vs `--body` mutual exclusion, `--body` JSON object parsing, list-channels reflects subscribe alone, unsubscribe drops the pattern, replay returns seq-ordered messages, `config` outputs valid JSON, `config` discovers `.mcp.json` and surfaces the env block, two-process liveness via separate CLI invocations.
+
+- Migration tests updated for the v1.3 schema-version target (`tests/adapters/backing_stores/test_sqlite_migrations.py`).  Two coverage tests that poked the now-removed `_liveness` dict (`test_sqlite_list_agents_stale_status`, `test_list_agents_namespace_filter` for sqlite) rewritten to drive the table directly.
+
+### Notes
+
+- **Schema upgrade behavior:** running `sox-protocol upgrade` (or any code path that calls `SqliteStore.initialize()`) on an existing v1.2 database auto-migrates to v1.3 on first connection.  No manual intervention; existing `messages` / `subscriptions` / `_sox_meta` rows are preserved.
+- **`memory://` and `file://` adapters:** kept their per-process in-memory liveness — those adapters are single-process by definition, so the v1.3 cross-process fix doesn't apply.  Behaviour unchanged.
+- **MINOR version bump (0.1.x → 0.2.0)** because of the on-disk schema change and the new CLI surface, even though both are additive and backward-compatible.
+
+---
+
 ## [0.1.9] — 2026-05-05 — configurable agent-id env var, server-side heartbeat TTL, heartbeat-loop activation step
 
 ### Added

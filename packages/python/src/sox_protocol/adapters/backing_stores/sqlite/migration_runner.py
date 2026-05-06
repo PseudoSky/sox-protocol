@@ -72,6 +72,7 @@ def _parse_version(v: str) -> tuple[int, ...]:
 _MIGRATION_CHAIN: list[tuple[str, str]] = [
     ("1.0", "1.1"),
     ("1.1", "1.2"),
+    ("1.2", "1.3"),
 ]
 
 
@@ -113,6 +114,20 @@ async def _column_exists(
     return any(str(r[1]) == column for r in rows)
 
 
+async def _table_exists(conn: aiosqlite.Connection, table: str) -> bool:
+    """Return True if a table named *table* exists in the database.
+
+    Used by structural-skip detection in :func:`_apply_migration` for
+    table-creation migrations like v1.2 → v1.3 (``liveness``).
+    """
+    async with conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table,),
+    ) as cur:
+        row = await cur.fetchone()
+    return row is not None
+
+
 async def _apply_migration(
     conn: aiosqlite.Connection, from_version: str, to_version: str
 ) -> None:
@@ -150,6 +165,15 @@ async def _apply_migration(
             )
     elif (from_version, to_version) == ("1.1", "1.2"):
         if await _column_exists(conn, "messages", "reply_to"):
+            needs_apply = False
+            _log.info(
+                "Migration %s → %s: structural change already present; "
+                "recording version bump only.",
+                from_version,
+                to_version,
+            )
+    elif (from_version, to_version) == ("1.2", "1.3"):
+        if await _table_exists(conn, "liveness"):
             needs_apply = False
             _log.info(
                 "Migration %s → %s: structural change already present; "

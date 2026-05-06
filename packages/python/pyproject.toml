@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sox-protocol"
-version = "0.1.9"
+version = "0.2.0"
 description = "SOX Protocol — reference Python implementation of the inter-agent channels protocol."
 readme = "README.md"
 license = { text = "Apache-2.0" }
