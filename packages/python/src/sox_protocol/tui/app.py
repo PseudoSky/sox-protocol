@@ -45,6 +45,12 @@ from sox_protocol.tui.widgets.channel_list import ChannelFocused, ChannelListWid
 from sox_protocol.tui.widgets.compose_bar import ComposeBarWidget, ComposeSubmitted
 from sox_protocol.tui.widgets.message_feed import MessageFeedWidget
 
+# How often the TUI re-polls list_agents / list_channels.  Tuned to be
+# faster than the default heartbeat TTL (30s) so an agent that beats
+# every 15s is reflected within ~5s of its first beat.  Net cost:
+# two MCP tool calls every 5s — cheap.
+_ROSTER_REFRESH_INTERVAL: float = 5.0
+
 
 class SoxChatApp(App[None]):  # pragma: no cover
     """Textual TUI for the SOX Protocol chat.
@@ -117,6 +123,13 @@ class SoxChatApp(App[None]):  # pragma: no cover
         self._store = ChatStore()
         self._pump: RecvPump | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        # Background task that re-polls channels__list_agents +
+        # channels__list_channels at a fixed cadence so agents that
+        # heartbeat AFTER the TUI started become visible without
+        # requiring a TUI restart.  Pre-0.2.1 the TUI called list_agents
+        # exactly once at on_mount(), so any later-joining agent was
+        # invisible — the user-visible "agents pane is empty" symptom.
+        self._roster_refresh_task: asyncio.Task[None] | None = None
 
         if client is not None:
             self._client = client
@@ -150,15 +163,18 @@ class SoxChatApp(App[None]):  # pragma: no cover
         """Start the MCP client, pump, and initial subscriptions."""
         await self._client.start()
 
-        # Initial subscriptions and focus
+        # Initial subscriptions and focus.  We also subscribe to
+        # ``sox/presence`` so that heartbeat-driven presence events from
+        # other agents land in our recv stream — this is the live signal
+        # the AgentRoster pane reacts to alongside the periodic poll
+        # below.  Spec: spec/primitives/presence.md §5.
         await self._client.subscribe(self._initial_channel)
+        with contextlib.suppress(Exception):
+            await self._client.subscribe("sox/presence")
         self._store.focus_channel(self._initial_channel)
 
-        # Pull channel and agent metadata
-        channels_resp = await self._client.list_channels()
-        self._store.update_channels(channels_resp.get("channels", []))
-        agents_resp = await self._client.list_agents()
-        self._store.update_agents(agents_resp.get("agents", []))
+        # Initial roster snapshot.
+        await self._refresh_roster_once()
 
         # Start background pump
         self._pump = RecvPump(client=self._client, store=self._store)
@@ -168,6 +184,11 @@ class SoxChatApp(App[None]):  # pragma: no cover
         self._heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(), name="sox-tui-heartbeat"
         )
+        # Start roster refresh — agents that heartbeat after we mount
+        # will appear within ``_ROSTER_REFRESH_INTERVAL`` seconds.
+        self._roster_refresh_task = asyncio.create_task(
+            self._roster_refresh_loop(), name="sox-tui-roster-refresh"
+        )
 
     async def on_unmount(self) -> None:
         """Graceful shutdown: stop pump, stop client."""
@@ -175,6 +196,11 @@ class SoxChatApp(App[None]):  # pragma: no cover
             self._heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
+
+        if self._roster_refresh_task and not self._roster_refresh_task.done():
+            self._roster_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._roster_refresh_task
 
         if self._pump:
             await self._pump.stop()
@@ -188,6 +214,34 @@ class SoxChatApp(App[None]):  # pragma: no cover
                 with contextlib.suppress(Exception):
                     await self._client.heartbeat("online")
                 await asyncio.sleep(15)
+
+    async def _refresh_roster_once(self) -> None:
+        """Pull ``list_agents`` + ``list_channels`` and update the store.
+
+        Called once at mount and then on a fixed cadence by
+        :meth:`_roster_refresh_loop`.  Suppresses transient MCP errors
+        (e.g. connection blips) so a single failure does not poison
+        the periodic refresh.
+        """
+        with contextlib.suppress(Exception):
+            channels_resp = await self._client.list_channels()
+            self._store.update_channels(channels_resp.get("channels", []))
+        with contextlib.suppress(Exception):
+            agents_resp = await self._client.list_agents()
+            self._store.update_agents(agents_resp.get("agents", []))
+
+    async def _roster_refresh_loop(self) -> None:
+        """Periodically poll list_agents / list_channels.
+
+        Cadence is :data:`_ROSTER_REFRESH_INTERVAL` seconds.  Without
+        this poll, agents that heartbeat after the TUI starts are
+        invisible until the TUI is restarted — the dominant cause of
+        the "agents pane is empty" report up through 0.2.0.
+        """
+        with contextlib.suppress(asyncio.CancelledError):
+            while True:
+                await asyncio.sleep(_ROSTER_REFRESH_INTERVAL)
+                await self._refresh_roster_once()
 
     # ------------------------------------------------------------------
     # Message handlers (from widgets)

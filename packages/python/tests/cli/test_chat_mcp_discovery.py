@@ -102,6 +102,85 @@ def test_first_ancestor_wins(tmp_path: Path) -> None:
     assert env == {"SOX_BACKING_STORE": "sqlite:///INNER.db"}
 
 
+def test_discovers_sox_under_alternate_key_via_command_signature(tmp_path: Path) -> None:
+    """A SOX server registered under a non-default key is still found.
+
+    Reproduces the claude-agents collision workaround: the project already
+    has a ``sox`` MCP server entry that's a different tool, so the SOX
+    install registers under ``sox-protocol``.  The TUI must still find it.
+    """
+    cfg = {
+        "mcpServers": {
+            "sox": {
+                "type": "stdio",
+                "command": "/some/other/tool",
+                "env": {"OTHER_TOOL_FLAG": "1"},
+            },
+            "sox-protocol": {
+                "type": "stdio",
+                "command": "sox-mcp-server",
+                "env": {"SOX_BACKING_STORE": "sqlite:///alt.db"},
+            },
+        }
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps(cfg))
+    env = _discover_mcp_env(tmp_path)
+    assert env == {"SOX_BACKING_STORE": "sqlite:///alt.db"}
+
+
+def test_discovers_sox_via_args_signature(tmp_path: Path) -> None:
+    """SOX server identified by ``args`` containing the module path."""
+    cfg = {
+        "mcpServers": {
+            "my-custom-name": {
+                "type": "stdio",
+                "command": "/usr/bin/python3",
+                "args": ["-m", "sox_protocol.core.mcp_server"],
+                "env": {"SOX_BACKING_STORE": "sqlite:///arg.db"},
+            }
+        }
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps(cfg))
+    env = _discover_mcp_env(tmp_path)
+    assert env == {"SOX_BACKING_STORE": "sqlite:///arg.db"}
+
+
+def test_discovers_sox_via_env_signature(tmp_path: Path) -> None:
+    """SOX server identified solely by env containing SOX_BACKING_STORE."""
+    cfg = {
+        "mcpServers": {
+            "anything": {
+                "type": "stdio",
+                "command": "/something/else",
+                "env": {"SOX_BACKING_STORE": "sqlite:///env-sig.db"},
+            }
+        }
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps(cfg))
+    env = _discover_mcp_env(tmp_path)
+    assert env == {"SOX_BACKING_STORE": "sqlite:///env-sig.db"}
+
+
+def test_default_sox_key_takes_precedence_when_both_present(tmp_path: Path) -> None:
+    """If both ``sox`` and an alternate-key SOX server are present, the
+    default key wins (matches the canonical install)."""
+    cfg = {
+        "mcpServers": {
+            "sox": {
+                "command": "sox-mcp-server",
+                "env": {"SOX_BACKING_STORE": "sqlite:///default.db"},
+            },
+            "sox-protocol": {
+                "command": "sox-mcp-server",
+                "env": {"SOX_BACKING_STORE": "sqlite:///alt.db"},
+            },
+        }
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps(cfg))
+    env = _discover_mcp_env(tmp_path)
+    assert env == {"SOX_BACKING_STORE": "sqlite:///default.db"}
+
+
 def test_user_agent_id_overrides_discovered(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """SOX_AGENT_ID from --agent-id always wins over the discovered file value.
 

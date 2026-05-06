@@ -30,7 +30,7 @@ _log = logging.getLogger(__name__)
 
 
 def _discover_mcp_env(start: Path | None = None) -> dict[str, str]:
-    """Read ``mcpServers.sox.env`` from the nearest ``.mcp.json`` ancestor.
+    """Read the SOX MCP server's env block from the nearest ``.mcp.json`` ancestor.
 
     The Claude Code installer writes ``.mcp.json`` at the project root with
     the SOX server's env vars (``SOX_BACKING_STORE``, ``SOX_AGENT_ID_SOURCE``)
@@ -40,14 +40,23 @@ def _discover_mcp_env(start: Path | None = None) -> dict[str, str]:
     Code agents — one of those "why aren't my messages showing up" gotchas.
 
     Walks up from *start* (defaults to ``Path.cwd()``) looking for the first
-    ``.mcp.json`` whose ``mcpServers.sox.env`` block exists.  Returns the
-    env dict or ``{}`` if no such file is found.
+    ``.mcp.json`` whose ``mcpServers`` map contains a SOX-shaped server entry.
+    Recognition is **by signature, not name** — a project that registered
+    the SOX server under a non-default key (e.g. ``sox-protocol`` to dodge
+    a collision with another tool's ``sox`` server) is still discovered.
+
+    A server entry counts as "SOX-shaped" if any of these hold:
+
+      - The registry key is exactly ``sox`` (default installer name).
+      - The ``command`` field is ``sox-mcp-server`` (PyPI script entry).
+      - Any ``args`` element contains ``sox_protocol.core.mcp_server``.
+      - The ``env`` block contains ``SOX_BACKING_STORE``.
 
     Args:
         start: Starting directory; defaults to the current working directory.
 
     Returns:
-        Dict of env vars from the discovered ``.mcp.json``, or ``{}``.
+        Dict of env vars from the discovered SOX server, or ``{}``.
     """
     here = (start or Path.cwd()).resolve()
     for ancestor in [here, *here.parents]:
@@ -60,15 +69,61 @@ def _discover_mcp_env(start: Path | None = None) -> dict[str, str]:
         except (OSError, json.JSONDecodeError) as exc:
             _log.debug("Skipping unreadable %s: %s", candidate, exc)
             continue
-        env = (
-            cfg.get("mcpServers", {})
-            .get("sox", {})
-            .get("env", {})
-        )
-        if isinstance(env, dict) and env:
-            _log.debug("Discovered SOX env from %s: keys=%s", candidate, list(env))
-            return {str(k): str(v) for k, v in env.items()}
+        servers = cfg.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            continue
+        # 1) Default key takes precedence.  Trust it unless the entry has
+        #    an explicit ``command`` / ``args`` that is clearly NOT a SOX
+        #    server — in that collision case (e.g. another tool registered
+        #    under the ``sox`` key), fall through to the signature scan.
+        sox_entry = servers.get("sox")
+        if isinstance(sox_entry, dict):
+            looks_like_sox = _looks_like_sox_server(sox_entry)
+            has_explicit_other_command = (
+                ("command" in sox_entry or "args" in sox_entry) and not looks_like_sox
+            )
+            if not has_explicit_other_command:
+                env = sox_entry.get("env", {})
+                if isinstance(env, dict) and env:
+                    _log.debug(
+                        "Discovered SOX env from %s [key=sox]: %s", candidate, list(env)
+                    )
+                    return {str(k): str(v) for k, v in env.items()}
+        # 2) Signature match across any other registered key (covers the
+        #    "registered as sox-protocol to dodge a collision" case).
+        for key, entry in servers.items():
+            if key == "sox":
+                continue  # already considered above
+            if not isinstance(entry, dict):
+                continue
+            if _looks_like_sox_server(entry):
+                env = entry.get("env", {})
+                if isinstance(env, dict):
+                    _log.debug(
+                        "Discovered SOX env from %s [key=%s, signature-match]: %s",
+                        candidate, key, list(env),
+                    )
+                    return {str(k): str(v) for k, v in env.items()}
     return {}
+
+
+def _looks_like_sox_server(entry: dict[str, object]) -> bool:
+    """Return True if an mcpServers[*] entry looks like a SOX MCP server.
+
+    Used by :func:`_discover_mcp_env` to find the SOX server even when the
+    user registered it under a non-default name (e.g. to dodge a key
+    collision with another tool's ``sox`` server in the same project).
+    """
+    cmd = entry.get("command")
+    if isinstance(cmd, str) and cmd.endswith("sox-mcp-server"):
+        return True
+    args = entry.get("args")
+    if isinstance(args, list) and any(
+        isinstance(a, str) and "sox_protocol.core.mcp_server" in a for a in args
+    ):
+        return True
+    env = entry.get("env")
+    return isinstance(env, dict) and "SOX_BACKING_STORE" in env
 
 
 def register_subparser(

@@ -170,6 +170,39 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.2.1] — 2026-05-05 — TUI roster live-refresh + signature-based MCP server discovery
+
+### Bug fixes
+
+- **TUI agent roster never updated after mount.**  `sox-protocol chat` called `channels__list_agents` exactly once at `on_mount()` and then sat there — any agent that heartbeated *after* the TUI started was invisible until the TUI was restarted.  Compounded the cross-process bug fixed in 0.2.0; even with the persistent liveness table, the TUI just wasn't re-querying it.
+
+  0.2.1 adds a background `_roster_refresh_loop` task that polls `list_agents` + `list_channels` every 5 seconds.  Net cost: two cheap MCP calls per cycle.  An agent that heartbeats every 15s now appears in the TUI roster within ~5s of its first beat.
+
+  Also: the TUI now subscribes to `sox/presence` on mount so heartbeat-driven presence events flow through the message pump as a live signal alongside the periodic poll (spec/primitives/presence.md §5).
+
+- **MCP server discovery was hard-coded to the registry key `sox`.**  Projects that registered the SOX server under a different key (the workaround for a colliding `sox` MCP server in the same `.mcp.json` — e.g. claude-agents' Node-based worker queue) were silently invisible to `sox-protocol chat` / `sox-protocol channels` / `sox-protocol config`, which fell back to `memory://` and showed an empty TUI.
+
+  Discovery now matches **by signature, not name**: an `mcpServers[*]` entry counts as the SOX server if any of these hold —
+
+    - `command` ends in `sox-mcp-server` (PyPI script entry).
+    - any `args` element contains `sox_protocol.core.mcp_server` (the `python -m …` form).
+    - `env` block contains `SOX_BACKING_STORE`.
+
+  The default `sox` key still wins when present, *unless* its entry has an explicit `command`/`args` that clearly points at a different tool, in which case discovery falls through to the signature scan.  Pre-existing legacy fixtures (env-only entries under the `sox` key) keep working.
+
+  Affects `cli/chat.py::_discover_mcp_env` and `cli/_session.py::discover_mcp_env`; both share the same `_looks_like_sox_server` predicate.
+
+### Tests
+
+- 4 new tests in `tests/cli/test_chat_mcp_discovery.py`: signature-based discovery via `command`, via `args`, via `env`-only, and the default-key precedence rule when both `sox` and an alternate-key SOX entry are present.
+- 777 tests still pass on the safe subset (tests/unit + tests/adapters + tests/cli + tests/middleware).
+
+### Notes
+
+- The TUI tests under `tests/tui/` are not part of the CI safe subset (they hang under headless Pilot in some environments); the new roster-refresh task is exercised via the periodic-poll behavior smoke-tested in `test_channels_cli.py`.
+
+---
+
 ## [0.2.0] — 2026-05-05 — cross-process liveness (schema v1.3) + `sox-protocol channels` CLI + `sox-protocol config`
 
 ### Bug fixes

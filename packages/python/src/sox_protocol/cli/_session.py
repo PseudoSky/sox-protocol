@@ -46,11 +46,38 @@ _MCP_SERVER_KEY = "sox"
 _FALLBACK_URI = "memory://"
 
 
-def discover_mcp_env(start: Path | None = None) -> dict[str, str]:
-    """Return ``mcpServers.sox.env`` from the nearest ancestor ``.mcp.json``.
+def _looks_like_sox_server(entry: dict[str, object]) -> bool:
+    """Return True if an ``mcpServers[*]`` entry looks like a SOX MCP server.
 
-    Walks up from *start* (defaults to ``Path.cwd()``).  Returns ``{}`` if
-    no ancestor contains a SOX MCP server entry.
+    Used by :func:`discover_mcp_env` to find the SOX server even when the
+    user registered it under a non-default name (the ``sox`` key already
+    being used by another tool, for example).  Recognises:
+
+      - ``command`` = ``sox-mcp-server`` (PyPI console script).
+      - any ``args`` element containing ``sox_protocol.core.mcp_server``
+        (the ``python -m sox_protocol.core.mcp_server`` form).
+      - ``env`` block containing ``SOX_BACKING_STORE``.
+    """
+    cmd = entry.get("command")
+    if isinstance(cmd, str) and cmd.endswith("sox-mcp-server"):
+        return True
+    args = entry.get("args")
+    if isinstance(args, list) and any(
+        isinstance(a, str) and "sox_protocol.core.mcp_server" in a for a in args
+    ):
+        return True
+    env = entry.get("env")
+    return isinstance(env, dict) and "SOX_BACKING_STORE" in env
+
+
+def discover_mcp_env(start: Path | None = None) -> dict[str, str]:
+    """Return the SOX MCP server's ``env`` block from the nearest ``.mcp.json``.
+
+    Walks up from *start* (defaults to ``Path.cwd()``).  Recognition is **by
+    signature, not name** (see :func:`_looks_like_sox_server`) so a project
+    that registered the SOX server under a non-default registry key still
+    yields the right env when ``sox-protocol chat`` / ``channels`` /
+    ``config`` runs in that project.
 
     Args:
         start: Starting directory; defaults to the current working directory.
@@ -69,9 +96,30 @@ def discover_mcp_env(start: Path | None = None) -> dict[str, str]:
         except (OSError, json.JSONDecodeError) as exc:
             _log.debug("Skipping unreadable %s: %s", candidate, exc)
             continue
-        env = cfg.get("mcpServers", {}).get(_MCP_SERVER_KEY, {}).get("env", {})
-        if isinstance(env, dict) and env:
-            return {str(k): str(v) for k, v in env.items()}
+        servers = cfg.get("mcpServers", {})
+        if not isinstance(servers, dict):
+            continue
+        # 1) Default key takes precedence.  Trust it unless the entry has
+        #    an explicit command/args that is clearly NOT a SOX server —
+        #    in that collision case, fall through to the signature scan.
+        sox_entry = servers.get(_MCP_SERVER_KEY)
+        if isinstance(sox_entry, dict):
+            looks_like_sox = _looks_like_sox_server(sox_entry)
+            has_explicit_other_command = (
+                ("command" in sox_entry or "args" in sox_entry) and not looks_like_sox
+            )
+            if not has_explicit_other_command:
+                env = sox_entry.get("env", {})
+                if isinstance(env, dict) and env:
+                    return {str(k): str(v) for k, v in env.items()}
+        # 2) Signature match across any other registered key.
+        for key, entry in servers.items():
+            if key == _MCP_SERVER_KEY:
+                continue  # already considered above
+            if isinstance(entry, dict) and _looks_like_sox_server(entry):
+                env = entry.get("env", {})
+                if isinstance(env, dict):
+                    return {str(k): str(v) for k, v in env.items()}
     return {}
 
 
