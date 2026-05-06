@@ -276,6 +276,14 @@ def _resolve_agent_id_from_env(env: dict[str, str] | None = None) -> str:
     Returns:
         The resolved agent_id string.  Always non-empty (falls back to
         ``"default"``).
+
+    Side effect:
+        When the configured source produces ``"default"`` despite an
+        explicit non-empty ``SOX_AGENT_ID_SOURCE``, emits a WARNING log
+        line naming the var that was expected to be set.  Without this,
+        every misconfigured agent silently identified as ``default`` and
+        the user could not figure out why ``list_agents`` only ever
+        showed one entry — see CHANGELOG 0.2.3.
     """
     if env is None:
         env = dict(os.environ)
@@ -283,26 +291,65 @@ def _resolve_agent_id_from_env(env: dict[str, str] | None = None) -> str:
     agent_id_source = (env.get("SOX_AGENT_ID_SOURCE") or "").strip()
 
     if agent_id_source == "claude_code_agent_name":
-        return (
+        resolved = (
             (env.get("CLAUDE_AGENT_NAME") or "").strip()
             or (env.get("SOX_AGENT_ID") or "").strip()
             or "default"
         )
+        if resolved == "default":
+            _log.warning(
+                "SOX agent_id resolved to 'default'.  "
+                "SOX_AGENT_ID_SOURCE=%r expects CLAUDE_AGENT_NAME (the Claude "
+                "Code subagent runtime channel), but it is unset and neither "
+                "SOX_AGENT_ID nor CLAUDE_AGENT_NAME has a value.  "
+                "Top-level Claude Code sessions do not set CLAUDE_AGENT_NAME "
+                "— set SOX_AGENT_ID explicitly in this project's .mcp.json "
+                "env block, or use SOX_AGENT_ID_SOURCE=env:<your-var-name> "
+                "if you have your own identity env var.",
+                agent_id_source,
+            )
+        return resolved
 
     if agent_id_source.startswith("env:"):
         custom_var = agent_id_source[len("env:"):].strip()
-        return (
+        resolved = (
             ((env.get(custom_var) or "").strip() if custom_var else "")
             or (env.get("SOX_AGENT_ID") or "").strip()
             or (env.get("CLAUDE_AGENT_NAME") or "").strip()
             or "default"
         )
+        if resolved == "default":
+            _log.warning(
+                "SOX agent_id resolved to 'default'.  "
+                "SOX_AGENT_ID_SOURCE=%r expects env var %r to carry the agent's "
+                "identity, but %r is unset (and neither SOX_AGENT_ID nor "
+                "CLAUDE_AGENT_NAME is set as a fallback).  "
+                "Either export %s=<id> in the parent process before launching "
+                "the MCP server, or change SOX_AGENT_ID_SOURCE to a working "
+                "channel (e.g. set SOX_AGENT_ID directly in .mcp.json env).",
+                agent_id_source,
+                custom_var,
+                custom_var,
+                custom_var,
+            )
+        return resolved
 
-    return (
+    resolved = (
         (env.get("SOX_AGENT_ID") or "").strip()
         or (env.get("CLAUDE_AGENT_NAME") or "").strip()
         or "default"
     )
+    if resolved == "default" and agent_id_source:
+        # agent_id_source is non-empty but matches none of the recognised
+        # forms — that's a typo, warn loudly.
+        _log.warning(
+            "SOX agent_id resolved to 'default'.  SOX_AGENT_ID_SOURCE=%r is "
+            "not one of the recognised values ('claude_code_agent_name', "
+            "'env:VARNAME', or empty).  Treating as empty — fell back to "
+            "SOX_AGENT_ID then CLAUDE_AGENT_NAME, both unset.",
+            agent_id_source,
+        )
+    return resolved
 
 
 # ---------------------------------------------------------------------------

@@ -170,6 +170,38 @@ This is the v0 release. No prior version exists. Future 0.x releases will be bac
 
 ---
 
+## [0.2.3] — 2026-05-05 — hook-driven auto-heartbeat + recv counter reset + sqlite-path parsing fix + agent-id warning + TUI send-error visibility + GUI selection subscribes + compose-bar overflow fix
+
+### Bug fixes
+
+- **PostToolUse hook now auto-maintains the agent's liveness row.**  Pre-0.2.3, heartbeats were the LLM's responsibility — the SKILL.md activation block told it to call `mcp__sox__channels__heartbeat` on a 15s loop, and most agents simply forgot.  Now the existing PostToolUse hook UPSERTs the liveness row on every tool call (`status="online"`, TTL=60s) via a new `_auto_heartbeat()` helper in `enforcer/cli.py`.  The agent stays "online" as long as it's making tool calls; the LLM-level heartbeat is now a safety net rather than the only signal.  Skips when `agent_id` resolves to `unknown-agent` so we don't seed bogus rows.
+
+- **The "checked the channels inbox" reminder fired immediately after a successful recv.**  The CLI built every PostToolUse event as `EventType.tool_used` regardless of which tool was called, so `StateStore.apply_event` only ever incremented the counter — even on a recv call that was supposed to reset it.  `_build_tool_used_event` now picks `EventType.channel_recv` when the tool name is `mcp__sox__channels__recv` (or the bare `channels__recv` form) and `EventType.channel_send` for the symmetric send case.  Counter now resets correctly on a successful drain.  End-to-end test pins the behavior.
+
+- **SQLite URL parsing in the enforcer hook stripped the leading slash.**  Both `_inbox_non_empty` and the new `_auto_heartbeat` did `url.split("://", 1)[1].lstrip("/")`, which silently turned `sqlite:///tmp/foo.db` into the *relative* path `tmp/foo.db` — so every hook-triggered heartbeat and inbox peek wrote to / read from a phantom DB under the agent's cwd instead of the project DB.  Replaced with a shared `_resolve_sqlite_path` helper that mirrors `core.mcp_server.server._build_store`'s parsing rules.
+
+- **Agent-id resolution falling through to `"default"` was silent.**  `SqliteStore.list_agents` showed every misconfigured agent as `default`, with no diagnostic.  `_resolve_agent_id_from_env` now emits a `WARNING` log line when the configured `SOX_AGENT_ID_SOURCE` produces `default`, naming the env var that was expected to carry the identity (e.g. `WORKER_ID` for `SOX_AGENT_ID_SOURCE=env:WORKER_ID`) and pointing at the fix.  Also covers the typo case where `SOX_AGENT_ID_SOURCE` is set but doesn't match any recognised form.
+
+- **TUI compose-bar dispatch swallowed every send error silently.**  `SoxChatApp._dispatch_command` had `except Exception: pass` — so a failed `client.send()` (auth, schema, DB error, missing subscription, anything) looked identical to a successful one.  The user typed a message, hit Enter, the input cleared, and nothing happened anywhere; no diagnostic.  Now exceptions are surfaced via the compose bar's placeholder text (`"send failed: <reason>"`).  The error path itself is best-effort — it cannot raise — but the user finally sees what went wrong.
+
+- **GUI selection paths in the TUI didn't subscribe.**  The `/dm <agent>` and `/join <channel>` slash commands subscribe + focus correctly via `_dispatch_command`, but the equivalent GUI selection paths (Enter on an agent in the roster, Enter on a channel in the channel list) only called `focus_channel`.  Result: clicking "bob" in the agent roster opened a `dm/<sorted-pair>` focus that *neither* party was subscribed to, so messages typed there landed in the DB invisibly to both ends.  Same shape for clicking a channel the user wasn't already subscribed to.  Both `on_channel_focused` and `on_agent_selected` now route through a new `_subscribe_then_focus(channel)` coroutine that calls `client.subscribe` first, then updates focus — keeping the GUI behavior in line with the slash-command path.  Subscribe failures still update focus (so the user isn't stuck on the old channel) and surface to the compose-bar placeholder via the same error path as send failures.
+
+- **Compose-bar Input overflowed the bottom of its containing box.**  The `ComposeBarWidget` wrapper claimed `height: 3` (1 content row inside a 2-row border), but Textual's `Input` widget defaults to `height: 3` (its own border), so the inner Input rendered 3 rows inside a 1-row content area — visibly spilling out the bottom.  Pinned `ComposeBarWidget > Input` to `height: 1; border: none; padding: 0` so the visible chrome is the wrapper's accent border alone.
+
+### Tests
+
+- 4 new tests in `tests/enforcer/test_cli.py`:
+  - `test_build_event_for_recv_emits_channel_recv` — recv tool name maps to the right event type.
+  - `test_build_event_for_recv_bare_tool_name` — bare `channels__recv` form is also recognised.
+  - `test_build_event_for_send_emits_channel_send` — symmetric send mapping.
+  - `test_recv_hook_resets_tool_calls_counter` — end-to-end through the StateStore: counter increments three times via Bash hooks, then a recv hook resets it to 0 and sets `last_drain_ts`.
+  - `test_post_tool_use_hook_auto_heartbeats` — end-to-end: a Bash PostToolUse fire writes a liveness row visible to a freshly-opened SqliteStore.
+  - `test_post_tool_use_hook_skips_auto_heartbeat_for_unknown_agent` — guards against bogus `unknown-agent` rows when the hook payload is missing identity.
+- 8 new tests in `tests/tui/test_dispatch_command.py` covering the compose-bar Enter path: SendCommand → `client.send` with the right channel/body, ReplyCommand carries `reply_to`, DmCommand and JoinCommand subscribe + focus, send-failure does not propagate (and is surfaced to the user), the no-focused-channel fallback to `#general`, plus the new `_subscribe_then_focus` path: it subscribes + focuses on the happy path, and still updates focus on subscribe failure (so the user isn't stuck on the old channel).
+- 847 tests pass on the safe subset.
+
+---
+
 ## [0.2.2] — 2026-05-05 — TUI keymap fix: typing in the compose bar now works
 
 ### Bug fixes

@@ -45,11 +45,23 @@ class ComposeBarWidget(Widget):  # pragma: no cover
     fully covered in ``tests/tui/test_commands.py``.
     """
 
+    # Layout notes:
+    #   - Wrapper claims 3 rows total: 1 row of content inside a 2-row border.
+    #   - Textual's Input widget defaults to height: 3 (its own border), which
+    #     would overflow the wrapper by 2 rows.  We pin the Input to height: 1
+    #     and disable its border so the visible chrome is the wrapper's
+    #     border alone.  Pre-0.2.4 the Input borrowed its default sizing and
+    #     spilled out the bottom of the compose pane.
     DEFAULT_CSS = """
     ComposeBarWidget {
         height: 3;
         border: solid $accent;
         padding: 0 1;
+    }
+    ComposeBarWidget > Input {
+        height: 1;
+        border: none;
+        padding: 0;
     }
     """
 

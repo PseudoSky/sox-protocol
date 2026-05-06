@@ -273,15 +273,53 @@ class SoxChatApp(App[None]):  # pragma: no cover
     # ------------------------------------------------------------------
 
     def on_channel_focused(self, event: ChannelFocused) -> None:
-        """Handle channel selection from the channel list."""
-        self._store.focus_channel(event.channel)
+        """Handle channel selection from the channel list.
+
+        Subscribes the local agent to the chosen channel before switching
+        focus.  Pre-0.2.4 this only called ``focus_channel``, so a user
+        who selected a channel they weren't already subscribed to could
+        type and send into it but never receive the incoming traffic
+        (and other agents subscribed to that channel WOULD see the
+        send — only the sender's view was broken).
+        """
+        asyncio.create_task(
+            self._subscribe_then_focus(event.channel),
+            name="sox-channel-subscribe",
+        )
 
     def on_agent_selected(self, event: AgentSelected) -> None:
-        """Handle agent selection — open DM compose mode."""
+        """Handle agent selection — open DM compose mode.
+
+        Subscribes the local agent to the resolved DM channel before
+        switching focus.  Pre-0.2.4 this only focused, so a user who
+        clicked "bob" in the roster, typed a message, and hit Enter
+        would write to ``dm/alice+bob`` — a channel neither alice nor
+        bob was subscribed to, making the message invisible on both
+        ends.  The ``/dm`` slash command already did the subscribe
+        correctly; this brings the GUI selection path in line.
+        """
         from sox_protocol.tui.commands import dm_channel
 
         channel = dm_channel(self._agent_id, event.agent_id)
-        self._store.focus_channel(channel)
+        asyncio.create_task(
+            self._subscribe_then_focus(channel),
+            name="sox-agent-subscribe",
+        )
+
+    async def _subscribe_then_focus(self, channel: str) -> None:
+        """Subscribe to *channel* and update the focused-channel state.
+
+        Subscribe is a no-op if the agent already has a matching pattern
+        in the ``subscriptions`` table (sqlite UPSERT shape), so this is
+        safe to call on every selection click.  Errors are surfaced via
+        the same compose-bar placeholder path as send failures.
+        """
+        try:
+            await self._client.subscribe(channel)
+        except Exception as exc:  # noqa: BLE001
+            self._surface_dispatch_error(exc)
+        finally:
+            self._store.focus_channel(channel)
 
     def on_compose_submitted(self, event: ComposeSubmitted) -> None:
         """Handle compose bar submission — dispatch command to server."""
@@ -297,6 +335,13 @@ class SoxChatApp(App[None]):  # pragma: no cover
 
         Args:
             command: A :class:`~sox_protocol.tui.commands.Command` instance.
+
+        Errors from the underlying MCP call are caught and surfaced to
+        the user via the compose bar's placeholder text.  Pre-0.2.4 this
+        method swallowed every exception with ``except: pass``, so a
+        failed send (auth, schema, DB error, missing subscription)
+        looked identical to a successful one — the message just vanished
+        and the user couldn't tell why.
         """
         try:
             if isinstance(command, SendCommand):
@@ -321,6 +366,24 @@ class SoxChatApp(App[None]):  # pragma: no cover
             elif isinstance(command, QuitCommand):
                 await self.action_quit()
 
+        except Exception as exc:  # noqa: BLE001
+            self._surface_dispatch_error(exc)
+
+    def _surface_dispatch_error(self, exc: BaseException) -> None:
+        """Show *exc* to the user in the compose bar's placeholder text.
+
+        Best-effort: any failure to update the placeholder is itself
+        swallowed (it is the *error path*, we MUST NOT raise from here).
+        """
+        try:
+            from textual.widgets import Input
+            input_widget = self.query_one("#compose-input", Input)
+            short = str(exc) or exc.__class__.__name__
+            # Cap to a reasonable width so the placeholder still fits
+            # the compose-bar height of 3 lines without breaking layout.
+            if len(short) > 120:
+                short = short[:117] + "…"
+            input_widget.placeholder = f"send failed: {short}"
         except Exception:  # noqa: BLE001
             pass
 

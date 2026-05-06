@@ -111,6 +111,173 @@ def test_build_tool_used_event_camel_tool_name() -> None:
     assert event.tool_name == "edit"
 
 
+def test_build_event_for_recv_emits_channel_recv() -> None:
+    """recv hook fires must map to channel_recv so apply_event resets counters.
+
+    Pre-0.2.3 the CLI always emitted ``EventType.tool_used`` regardless of
+    tool name, so ``StateStore.apply_event`` only saw ``tool_used`` and
+    *incremented* the counter — even on a successful recv.  Result: the
+    "checked the channels inbox" reminder fired immediately after every
+    recv call.
+    """
+    from sox_protocol.core.enforcer.events import EventType
+
+    hook_data = {"agent_name": "agent-r", "tool_name": "mcp__sox__channels__recv"}
+    event = enforcer_cli._build_tool_used_event(hook_data)
+    assert event.event_type == EventType.channel_recv
+    assert event.tool_name == "mcp__sox__channels__recv"
+
+
+def test_build_event_for_recv_bare_tool_name() -> None:
+    """The bare ``channels__recv`` tool name is also recognised."""
+    from sox_protocol.core.enforcer.events import EventType
+
+    hook_data = {"agent_name": "agent-r", "tool_name": "channels__recv"}
+    event = enforcer_cli._build_tool_used_event(hook_data)
+    assert event.event_type == EventType.channel_recv
+
+
+def test_build_event_for_send_emits_channel_send() -> None:
+    """send hook fires must map to channel_send for send-and-stall detection."""
+    from sox_protocol.core.enforcer.events import EventType
+
+    hook_data = {"agent_name": "agent-s", "tool_name": "mcp__sox__channels__send"}
+    event = enforcer_cli._build_tool_used_event(hook_data)
+    assert event.event_type == EventType.channel_send
+
+
+@pytest.mark.asyncio
+async def test_post_tool_use_hook_auto_heartbeats(tmp_path: Path) -> None:
+    """End-to-end: every PostToolUse fire UPSERTs a liveness row.
+
+    Pre-0.2.3, heartbeat was the LLM's responsibility — it had to call
+    ``mcp__sox__channels__heartbeat`` on a loop per the SKILL.md
+    activation block, and most agents just forgot.  Now the hook
+    maintains the row deterministically as long as the agent is making
+    tool calls.
+    """
+    from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
+
+    db_path = tmp_path / "messages.db"
+    state_db = tmp_path
+
+    with patch.dict(
+        os.environ,
+        {
+            "SOX_STATE_DIR": str(state_db),
+            "SOX_BACKING_STORE": f"sqlite:///{db_path}",
+        },
+    ):
+        await enforcer_cli._run(
+            "post_tool_use",
+            {"agent_name": "agent-keepalive", "tool_name": "Bash", "tool_response": {}},
+        )
+
+    # Verify a liveness row was written for the agent.
+    store = SqliteStore(db_path=db_path)
+    await store.initialize()
+    try:
+        agents = await store.list_agents()
+    finally:
+        await store.close()
+
+    ids = {a["agent_id"] for a in agents}
+    assert "agent-keepalive" in ids
+    rec = next(a for a in agents if a["agent_id"] == "agent-keepalive")
+    assert rec["presence_state"] == "online"
+
+
+@pytest.mark.asyncio
+async def test_post_tool_use_hook_skips_auto_heartbeat_for_unknown_agent(
+    tmp_path: Path,
+) -> None:
+    """Hook fires without an agent_name in the payload must NOT seed
+    a bogus 'unknown-agent' row in the liveness table."""
+    from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
+
+    db_path = tmp_path / "messages.db"
+    state_db = tmp_path
+
+    with patch.dict(
+        os.environ,
+        {
+            "SOX_STATE_DIR": str(state_db),
+            "SOX_BACKING_STORE": f"sqlite:///{db_path}",
+        },
+        clear=False,
+    ):
+        # Strip the env vars that would otherwise let _extract_agent_id
+        # find a fallback identity.
+        for key in ("CLAUDE_AGENT_NAME", "SOX_AGENT_ID"):
+            os.environ.pop(key, None)
+        await enforcer_cli._run(
+            "post_tool_use",
+            {"tool_name": "Bash", "tool_response": {}},
+        )
+
+    store = SqliteStore(db_path=db_path)
+    await store.initialize()
+    try:
+        agents = await store.list_agents()
+    finally:
+        await store.close()
+
+    ids = {a["agent_id"] for a in agents}
+    assert "unknown-agent" not in ids
+
+
+@pytest.mark.asyncio
+async def test_recv_hook_resets_tool_calls_counter(tmp_path: Path) -> None:
+    """End-to-end: a PostToolUse recv hook must zero tool_calls_since_drain.
+
+    Pre-0.2.3, the CLI emitted ``EventType.tool_used`` for every PostToolUse
+    fire, so ``StateStore.apply_event`` saw ``tool_used`` and incremented
+    the counter — meaning a recv call *increased* the "due for a reminder"
+    counter instead of resetting it.  This is the bug the user reported:
+    the "checked the channels inbox" reminder fired immediately after a
+    successful drain.
+    """
+    from sox_protocol.core.enforcer.events import EventType
+    from sox_protocol.core.enforcer.state import StateStore
+
+    state_db = tmp_path / "state.db"
+
+    # Bump tool_calls_since_drain a few times via non-recv tool fires so it
+    # has a non-zero value going into the recv.
+    with patch.dict(os.environ, {"SOX_STATE_DIR": str(tmp_path)}):
+        for _ in range(3):
+            await enforcer_cli._run(
+                "post_tool_use",
+                {"agent_name": "agent-x", "tool_name": "Bash", "tool_response": {}},
+            )
+
+        # Sanity: counter is now 3.
+        async with StateStore(db_path=state_db) as store:
+            state = await store.load("agent-x")
+        assert state.tool_calls_since_drain == 3
+
+        # Now a recv hook fires.  Counter MUST reset to 0.
+        await enforcer_cli._run(
+            "post_tool_use",
+            {
+                "agent_name": "agent-x",
+                "tool_name": "mcp__sox__channels__recv",
+                "tool_response": {"messages": []},
+            },
+        )
+
+        async with StateStore(db_path=state_db) as store:
+            state_after_recv = await store.load("agent-x")
+
+    # The bug regressed when this counter remained > 0 after a recv.
+    assert state_after_recv.tool_calls_since_drain == 0
+    # And last_drain_ts should now be set.
+    assert state_after_recv.last_drain_ts is not None
+    # The event type that was processed must be channel_recv (sanity for
+    # the unit-level mapping being exercised by _run).
+    assert EventType.channel_recv.value == "channel_recv"
+
+
 def test_build_stop_event() -> None:
     from sox_protocol.core.enforcer.events import EventType
 

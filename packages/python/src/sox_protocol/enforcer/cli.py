@@ -78,6 +78,32 @@ def _resolve_backing_store_url() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_sqlite_path(url: str) -> str | None:
+    """Extract a usable filesystem path from a ``sqlite://`` URL.
+
+    Mirrors the parsing in ``core.mcp_server.server._build_store`` so the
+    enforcer hook hits the *same* DB the MCP server is reading.  Returns
+    ``None`` for non-sqlite schemes, ``:memory:``, or empty paths.
+
+    Pre-0.2.3 the enforcer naively did ``url.split("://", 1)[1].lstrip("/")``
+    which silently turned ``sqlite:///tmp/foo.db`` into the *relative*
+    path ``tmp/foo.db`` — so every hook-triggered heartbeat and inbox
+    peek wrote to / read from a phantom DB under the agent's cwd
+    instead of the real project DB.
+    """
+    if not url.startswith("sqlite://"):
+        return None
+    raw_path = url[len("sqlite://"):]
+    if raw_path == ":memory:" or raw_path == "/:memory:":
+        return None
+    if not raw_path:
+        return None
+    # The triple-slash form ``sqlite:///<abs>`` keeps the leading slash;
+    # the double-slash form ``sqlite://<rel>`` doesn't.  Both work via
+    # SqliteStore (it creates parent dirs as needed).
+    return raw_path
+
+
 async def _inbox_non_empty(agent_id: str) -> bool:
     """Return True if the backing store has undelivered messages for *agent_id*.
 
@@ -88,15 +114,12 @@ async def _inbox_non_empty(agent_id: str) -> bool:
         from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
 
         store: Any
-        if url.startswith("sqlite://") or url.startswith("sqlite:///"):
-            db_path = url.split("://", 1)[1].lstrip("/")
-            if not db_path or db_path == ":memory:":
-                return False  # memory store — treat as empty
-            store = SqliteStore(Path(db_path))
-        elif url.startswith("memory://"):
+        if url.startswith("memory://"):
             return False  # ephemeral — always empty
-        else:
-            return False  # unsupported scheme; safe-fail
+        db_path = _resolve_sqlite_path(url)
+        if db_path is None:
+            return False  # unsupported scheme or :memory:; safe-fail
+        store = SqliteStore(Path(db_path))
 
         async with store:
             messages = await store.recv(agent_id=agent_id, max_messages=1)
@@ -115,6 +138,58 @@ async def _inbox_non_empty(agent_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Auto-heartbeat
+# ---------------------------------------------------------------------------
+
+
+# How long the auto-heartbeat keeps the agent "online" past its last tool
+# call.  60s gives enough headroom for an agent that's mid-tool-call or
+# briefly idle while still flipping to "stale" within a reasonable window
+# when the agent has actually stopped.  Operators can override per-server
+# via SOX_HEARTBEAT_TTL_DEFAULT (read by the heartbeat tool resolver) but
+# this is the constant used by the hook-driven auto-beat path.
+_AUTO_HEARTBEAT_TTL_SECONDS = 60
+
+
+async def _auto_heartbeat(agent_id: str) -> None:
+    """UPSERT a heartbeat row for *agent_id* via the resolved backing store.
+
+    Called from every PostToolUse hook fire so the agent's liveness row
+    stays fresh as long as it's making tool calls — without depending
+    on the LLM to remember to call ``mcp__sox__channels__heartbeat``
+    on its own.  This is the auto-keepalive path: the SKILL.md
+    activation block tells the LLM to heartbeat too, but the LLM
+    forgets, so the hook does it deterministically.
+
+    Safe-fail: any error is logged at DEBUG and swallowed.  The
+    PostToolUse hook MUST NOT crash the agent.
+    """
+    if not agent_id or agent_id == "unknown-agent":
+        # No usable identity — skip rather than spam the liveness table
+        # with an "unknown-agent" row.  The hook continues; only the
+        # heartbeat is skipped.
+        return
+    url = _resolve_backing_store_url()
+    try:
+        from sox_protocol.adapters.backing_stores.sqlite.store import SqliteStore
+
+        db_path = _resolve_sqlite_path(url)
+        if db_path is None:
+            # memory:// and unknown schemes: no cross-process visibility
+            # to maintain anyway.  Skip.
+            return
+        store = SqliteStore(Path(db_path))
+        async with store:
+            await store.heartbeat(
+                agent_id=agent_id,
+                status="online",
+                ttl=_AUTO_HEARTBEAT_TTL_SECONDS,
+            )
+    except Exception as exc:
+        log.debug("auto-heartbeat failed for %s: %s", agent_id, exc)
+
+
+# ---------------------------------------------------------------------------
 # Event construction
 # ---------------------------------------------------------------------------
 
@@ -130,13 +205,37 @@ def _extract_agent_id(hook_data: dict[str, Any]) -> str:
 
 
 def _build_tool_used_event(hook_data: dict[str, Any]) -> Event:
+    """Build the enforcer Event from a PostToolUse hook payload.
+
+    Picks ``EventType.channel_recv`` (vs. the generic ``tool_used``) when
+    the tool was a SOX recv tool, so that
+    :meth:`StateStore.apply_event` actually resets the
+    ``tool_calls_since_drain`` counter.  Pre-0.2.3 this always emitted
+    ``tool_used`` for every PostToolUse fire — meaning recv calls
+    incremented the counter instead of resetting it, and the
+    "checked the channels inbox" reminder fired immediately after a
+    successful drain.
+
+    Same treatment for send: emit ``channel_send`` so send-and-stall
+    detection records the send via the canonical event path.
+    """
     from sox_protocol.core.enforcer.events import Event, EventType
 
     agent_id = _extract_agent_id(hook_data)
     tool_name: str | None = hook_data.get("tool_name") or hook_data.get("toolName")
+
+    # Map the tool name to the right event type.  Both the bare and
+    # mcp__sox__-prefixed forms are recognised since either can appear
+    # in the hook JSON depending on the runtime version.
+    event_type = EventType.tool_used
+    if tool_name in {"channels__recv", "mcp__sox__channels__recv"}:
+        event_type = EventType.channel_recv
+    elif tool_name in {"channels__send", "mcp__sox__channels__send"}:
+        event_type = EventType.channel_send
+
     return Event(
         schema_version="1.0",
-        event_type=EventType.tool_used,
+        event_type=event_type,
         agent_id=agent_id,
         timestamp=time.time(),
         tool_name=tool_name,
@@ -172,6 +271,11 @@ async def _run(hook_type: str, hook_data: dict[str, Any]) -> dict[str, Any] | No
 
     if hook_type == "post_tool_use":
         event = _build_tool_used_event(hook_data)
+        # Auto-keepalive: bump the agent's liveness row on every tool
+        # use so the cross-process roster reflects activity even when
+        # the LLM forgets to call ``channels__heartbeat`` on the cadence
+        # the activation block recommends.  Safe-fail.
+        await _auto_heartbeat(event.agent_id)
     elif hook_type in ("stop", "subagent_stop"):
         agent_id = _extract_agent_id(hook_data)
         if policy.force_drain_on_stop:
